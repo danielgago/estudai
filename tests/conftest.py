@@ -17,10 +17,12 @@ def qapplication():
         app = QApplication([])
     return app
 
+
 @pytest.fixture
 def main_window(qapplication):
     """Provide a MainWindow instance for tests."""
     from estudai.ui.main_window import MainWindow
+
     window = MainWindow()
     yield window
     window.close()

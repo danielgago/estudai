@@ -1,5 +1,6 @@
 """Tests for the main application."""
 
+
 def test_app_initialization(qapplication):
     """Test that the application can be initialized."""
     assert qapplication is not None
