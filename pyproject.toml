@@ -1,0 +1,34 @@
+[project]
+name = "estudai"
+version = "0.1.0"
+description = "flashcard timer for studying while multitasking"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "pyside6>=6.10.2",
+]
+
+[project.scripts]
+estudai = "estudai.main:main"
+
+[tool.uv]
+package = true
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.4",
+    "black>=26.1.0",
+    "pytest>=9.0.2",
+    "pytest-cov>=6.0",
+]
+
+[tool.pytest.ini_options]
+minversion = "9.0"
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+addopts = "-v --strict-markers"
+markers = [
+    "unit: unit tests",
+    "integration: integration tests",
+]
+
