@@ -34,6 +34,7 @@ from estudai.services.folder_storage import (
     list_persisted_folders,
     rename_persisted_folder,
 )
+from estudai.services.settings import load_app_settings
 
 from .notebooklm_import_dialog import NotebookLMCsvImportDialog
 from .pages import ManagementPage, SettingsPage, TimerPage
@@ -66,7 +67,10 @@ class MainWindow(QMainWindow):
         self._build_sidebar(root_layout)
         self._build_content_area(root_layout)
 
-        self.timer_page = TimerPage()
+        app_settings = load_app_settings()
+        self.timer_page = TimerPage(
+            default_duration_seconds=app_settings.timer_duration_seconds
+        )
         self.management_page = ManagementPage()
         self.settings_page = SettingsPage()
         self.stacked_widget.addWidget(self.timer_page)
@@ -81,6 +85,9 @@ class MainWindow(QMainWindow):
         )
         self.management_page.save_button.clicked.connect(self.save_management_changes)
         self.management_page.cancel_button.clicked.connect(self.switch_to_timer)
+        self.settings_page.timer_duration_seconds_changed.connect(
+            self.timer_page.set_timer_duration_seconds
+        )
 
         self.stacked_widget.setCurrentWidget(self.timer_page)
         self.timer_page.set_flashcard_context(self.current_folder_name, 0)

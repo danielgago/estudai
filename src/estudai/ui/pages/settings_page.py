@@ -1,16 +1,49 @@
 """Settings page."""
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from __future__ import annotations
+
+from pathlib import Path
+
+from PySide6.QtCore import QUrl, Signal
+from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+from PySide6.QtWidgets import (
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+)
+
+from estudai.services.settings import (
+    AppSettings,
+    copy_notification_sound_file,
+    get_default_notification_sound_path,
+    load_app_settings,
+    save_app_settings,
+)
 
 
 class SettingsPage(QWidget):
-    """Barebone settings page placeholder."""
+    """Page that edits and persists app settings."""
+
+    timer_duration_seconds_changed = Signal(int)
 
     def __init__(self) -> None:
         """Initialize the settings page."""
         super().__init__()
+        self._notification_sound_path = ""
+        self._default_notification_sound_path = get_default_notification_sound_path()
+        self._audio_output = QAudioOutput(self)
+        self._sound_player = QMediaPlayer(self)
+        self._sound_player.setAudioOutput(self._audio_output)
         self._build_ui()
+        self._load_persisted_settings()
+        self._connect_signals()
 
     def _build_ui(self) -> None:
         """Build the settings UI layout."""
@@ -23,17 +56,169 @@ class SettingsPage(QWidget):
         layout.addWidget(title)
 
         description = QLabel(
-            "This is a barebone settings page. App preferences and timer options will be added here."
+            "Configure timer behavior and flashcard popup defaults. "
+            "Changes are saved automatically."
         )
         description.setWordWrap(True)
         description.setStyleSheet("color: #666;")
         layout.addWidget(description)
 
-        placeholder = QLabel("Nothing configurable yet.")
-        placeholder.setAlignment(Qt.AlignCenter)
-        placeholder.setStyleSheet(
-            "padding: 16px; border: 1px dashed #aaa; border-radius: 6px;"
-        )
-        layout.addWidget(placeholder)
+        timer_group = QGroupBox("Timer and Flashcard Settings")
+        timer_form = QFormLayout(timer_group)
 
+        self.timer_duration_spinbox = QSpinBox()
+        self.timer_duration_spinbox.setRange(1, 99 * 3600)
+        self.timer_duration_spinbox.setSuffix(" s")
+        timer_form.addRow("Timer duration:", self.timer_duration_spinbox)
+
+        self.flashcard_probability_spinbox = QSpinBox()
+        self.flashcard_probability_spinbox.setRange(0, 100)
+        self.flashcard_probability_spinbox.setSuffix(" %")
+        timer_form.addRow(
+            "Probability of showing flashcard:",
+            self.flashcard_probability_spinbox,
+        )
+
+        self.question_duration_spinbox = QSpinBox()
+        self.question_duration_spinbox.setRange(1, 3600)
+        self.question_duration_spinbox.setSuffix(" s")
+        timer_form.addRow(
+            "Question display duration:",
+            self.question_duration_spinbox,
+        )
+
+        self.answer_duration_spinbox = QSpinBox()
+        self.answer_duration_spinbox.setRange(1, 3600)
+        self.answer_duration_spinbox.setSuffix(" s")
+        timer_form.addRow(
+            "Answer display duration:",
+            self.answer_duration_spinbox,
+        )
+        layout.addWidget(timer_group)
+
+        sound_group = QGroupBox("Notification Sound")
+        sound_layout = QVBoxLayout(sound_group)
+        self.notification_sound_label = QLabel("Selected sound: None")
+        self.notification_sound_label.setWordWrap(True)
+        self.notification_sound_label.setStyleSheet("color: #666;")
+        sound_layout.addWidget(self.notification_sound_label)
+        sound_buttons_layout = QHBoxLayout()
+        self.upload_sound_button = QPushButton("Upload Sound (.mp3/.wav)")
+        self.test_sound_button = QPushButton("Test Sound")
+        sound_buttons_layout.addWidget(self.upload_sound_button)
+        sound_buttons_layout.addWidget(self.test_sound_button)
+        sound_buttons_layout.addStretch()
+        sound_layout.addLayout(sound_buttons_layout)
+        layout.addWidget(sound_group)
         layout.addStretch()
+
+    def _connect_signals(self) -> None:
+        """Connect widget signals."""
+        self.timer_duration_spinbox.valueChanged.connect(self._handle_value_changed)
+        self.flashcard_probability_spinbox.valueChanged.connect(
+            self._handle_value_changed
+        )
+        self.question_duration_spinbox.valueChanged.connect(self._handle_value_changed)
+        self.answer_duration_spinbox.valueChanged.connect(self._handle_value_changed)
+        self.upload_sound_button.clicked.connect(self._handle_upload_sound_clicked)
+        self.test_sound_button.clicked.connect(self._handle_test_sound_clicked)
+
+    def _load_persisted_settings(self) -> None:
+        """Load persisted settings into controls."""
+        settings = load_app_settings()
+        self.timer_duration_spinbox.setValue(settings.timer_duration_seconds)
+        self.flashcard_probability_spinbox.setValue(
+            settings.flashcard_probability_percent
+        )
+        self.question_duration_spinbox.setValue(
+            settings.question_display_duration_seconds
+        )
+        self.answer_duration_spinbox.setValue(settings.answer_display_duration_seconds)
+        self._notification_sound_path = settings.notification_sound_path
+        self._update_sound_summary()
+
+    def _collect_settings(self) -> AppSettings:
+        """Read current form values into a typed payload.
+
+        Returns:
+            AppSettings: Current settings represented by the form.
+        """
+        return AppSettings(
+            timer_duration_seconds=self.timer_duration_spinbox.value(),
+            flashcard_probability_percent=self.flashcard_probability_spinbox.value(),
+            question_display_duration_seconds=self.question_duration_spinbox.value(),
+            answer_display_duration_seconds=self.answer_duration_spinbox.value(),
+            notification_sound_path=self._notification_sound_path,
+        )
+
+    def _persist_settings(self) -> None:
+        """Save current form values into QSettings."""
+        settings = self._collect_settings()
+        save_app_settings(settings)
+        self.timer_duration_seconds_changed.emit(settings.timer_duration_seconds)
+
+    def _update_sound_summary(self) -> None:
+        """Refresh selected sound label and test button state."""
+        if not self._notification_sound_path:
+            if self._default_notification_sound_path:
+                default_name = Path(self._default_notification_sound_path).name
+                self.notification_sound_label.setText(
+                    "Selected sound: None. "
+                    f"Default sound ({default_name}) will be played."
+                )
+                self.test_sound_button.setEnabled(
+                    Path(self._default_notification_sound_path).exists()
+                )
+                return
+            self.notification_sound_label.setText("Selected sound: None")
+            self.test_sound_button.setEnabled(False)
+            return
+        sound_path = Path(self._notification_sound_path)
+        self.notification_sound_label.setText(f"Selected sound: {sound_path.name}")
+        self.test_sound_button.setEnabled(sound_path.exists())
+
+    def _handle_value_changed(self, _value: int) -> None:
+        """Persist numeric settings as values change.
+
+        Args:
+            _value: New value emitted by Qt.
+        """
+        self._persist_settings()
+
+    def _handle_upload_sound_clicked(self) -> None:
+        """Open a file picker to set notification sound."""
+        selected_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select notification sound",
+            "",
+            "Sound files (*.mp3 *.wav)",
+        )
+        if not selected_path:
+            return
+
+        try:
+            self._notification_sound_path = copy_notification_sound_file(
+                Path(selected_path)
+            )
+        except (FileNotFoundError, ValueError) as error:
+            QMessageBox.warning(self, "Upload sound", str(error))
+            return
+
+        self._update_sound_summary()
+        self._persist_settings()
+
+    def _handle_test_sound_clicked(self) -> None:
+        """Play the currently selected notification sound."""
+        sound_path_value = (
+            self._notification_sound_path or self._default_notification_sound_path
+        )
+        if not sound_path_value:
+            QMessageBox.warning(self, "Test sound", "No notification sound available.")
+            return
+        sound_path = Path(sound_path_value)
+        if not sound_path.exists():
+            QMessageBox.warning(self, "Test sound", "Saved sound file is missing.")
+            self._update_sound_summary()
+            return
+        self._sound_player.setSource(QUrl.fromLocalFile(str(sound_path)))
+        self._sound_player.play()
