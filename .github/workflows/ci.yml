@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [ '**' ]
+  pull_request:
+    branches: [ main, dev ]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync --locked --dev
+
+      - name: Install Qt runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            xvfb \
+            libdbus-1-3 \
+            libegl1 \
+            libgl1 \
+            libopengl0 \
+            libxkbcommon-x11-0 \
+            libxcb-cursor0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-randr0 \
+            libxcb-render-util0 \
+            libxcb-xfixes0 \
+            libxcb-xinerama0 \
+            libxcb-xinput0 \
+            x11-utils
+
+      - name: Ruff (lint)
+        run: uv run ruff check .
+
+      - name: Black (format check)
+        run: uv run black --check .
+
+      - name: Tests
+        run: xvfb-run -a uv run pytest
