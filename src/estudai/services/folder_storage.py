@@ -25,6 +25,25 @@ class PersistedFolder:
     stored_path: str
 
 
+def _validate_folder_name(name: str) -> str:
+    """Validate and normalize a folder display name.
+
+    Args:
+        name: Folder name provided by the user.
+
+    Returns:
+        str: Stripped folder name.
+
+    Raises:
+        ValueError: If the folder name is empty.
+    """
+    normalized_name = name.strip()
+    if not normalized_name:
+        msg = "Folder name cannot be empty."
+        raise ValueError(msg)
+    return normalized_name
+
+
 def get_app_data_dir() -> Path:
     """Return the app data directory using OS-specific defaults.
 
@@ -112,6 +131,99 @@ def save_persisted_folders(folders: list[PersistedFolder]) -> None:
         json.dumps(payload, ensure_ascii=True, indent=2),
         encoding="utf-8",
     )
+
+
+def create_managed_folder(name: str) -> PersistedFolder:
+    """Create a managed empty folder in app storage.
+
+    Args:
+        name: Display name for the new folder.
+
+    Returns:
+        PersistedFolder: Created folder metadata.
+    """
+    normalized_name = _validate_folder_name(name)
+    folder_id = uuid4().hex
+    stored_folder_path = get_library_dir() / folder_id
+    stored_folder_path.mkdir(parents=True, exist_ok=False)
+
+    persisted_folder = PersistedFolder(
+        id=folder_id,
+        name=normalized_name,
+        source_path="",
+        stored_path=str(stored_folder_path),
+    )
+    persisted_folders = list_persisted_folders()
+    persisted_folders.append(persisted_folder)
+    save_persisted_folders(persisted_folders)
+    return persisted_folder
+
+
+def rename_persisted_folder(folder_id: str, new_name: str) -> PersistedFolder:
+    """Rename one persisted folder entry.
+
+    Args:
+        folder_id: Persisted folder identifier.
+        new_name: New display name.
+
+    Returns:
+        PersistedFolder: Updated folder metadata.
+
+    Raises:
+        KeyError: If the folder id does not exist.
+    """
+    normalized_name = _validate_folder_name(new_name)
+    persisted_folders = list_persisted_folders()
+    updated_folders: list[PersistedFolder] = []
+    renamed_folder: PersistedFolder | None = None
+
+    for folder in persisted_folders:
+        if folder.id == folder_id:
+            renamed_folder = PersistedFolder(
+                id=folder.id,
+                name=normalized_name,
+                source_path=folder.source_path,
+                stored_path=folder.stored_path,
+            )
+            updated_folders.append(renamed_folder)
+            continue
+        updated_folders.append(folder)
+
+    if renamed_folder is None:
+        msg = f"Folder not found: {folder_id}"
+        raise KeyError(msg)
+
+    save_persisted_folders(updated_folders)
+    return renamed_folder
+
+
+def delete_persisted_folder(folder_id: str) -> bool:
+    """Delete one persisted folder and its managed directory.
+
+    Args:
+        folder_id: Persisted folder identifier.
+
+    Returns:
+        bool: True when a folder was removed.
+    """
+    persisted_folders = list_persisted_folders()
+    remaining_folders: list[PersistedFolder] = []
+    removed_folder: PersistedFolder | None = None
+
+    for folder in persisted_folders:
+        if folder.id == folder_id:
+            removed_folder = folder
+            continue
+        remaining_folders.append(folder)
+
+    if removed_folder is None:
+        return False
+
+    stored_path = Path(removed_folder.stored_path)
+    if stored_path.exists():
+        shutil.rmtree(stored_path)
+    save_persisted_folders(remaining_folders)
+    return True
 
 
 def import_folder(source_folder: Path) -> PersistedFolder:
