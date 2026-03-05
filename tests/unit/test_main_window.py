@@ -8,7 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QPushButton
 
 from estudai.services.folder_storage import list_persisted_folders
 from estudai.ui.main_window import MainWindow
@@ -47,6 +47,37 @@ def test_sidebar_toggle_changes_visibility(app: QApplication) -> None:
     assert not window.sidebar.isHidden()
     window.toggle_sidebar()
     assert window.sidebar.isHidden()
+
+
+def test_sidebar_clicking_outside_closes_when_open(app: QApplication) -> None:
+    """Verify clicks outside the sidebar close it."""
+    window = MainWindow()
+    window.toggle_sidebar()
+    assert not window.sidebar.isHidden()
+
+    click_position = window.stacked_widget.mapToGlobal(
+        window.stacked_widget.rect().center()
+    )
+    window._handle_global_click(click_position)
+
+    assert window.sidebar.isHidden()
+
+
+def test_sidebar_button_order_is_welcoming(app: QApplication) -> None:
+    """Verify sidebar action order follows create -> NotebookLM -> import folder."""
+    window = MainWindow()
+    sidebar_layout = window.sidebar.layout()
+    button_texts = [
+        sidebar_layout.itemAt(index).widget().text()
+        for index in range(sidebar_layout.count())
+        if isinstance(sidebar_layout.itemAt(index).widget(), QPushButton)
+    ]
+
+    assert button_texts == [
+        "Create Folder",
+        "Import NotebookLM CSV",
+        "Import Existing Folder",
+    ]
 
 
 def test_page_switching_methods_navigate_correctly(app: QApplication) -> None:
@@ -274,3 +305,42 @@ def test_management_save_validates_non_empty_fields(
 
     assert warnings
     assert window.stacked_widget.currentWidget() is window.management_page
+
+
+def test_import_notebooklm_csv_appends_rows_to_selected_folder(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify NotebookLM import appends parsed rows into selected folder."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text(
+        "What is DNA?,Genetic material.\n",
+        encoding="utf-8",
+    )
+    assert window.add_folder(biology_folder) is True
+    folder_id = window.sidebar_folder_list.item(0).data(Qt.UserRole)
+
+    class _FakeImportDialog:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def exec(self) -> int:
+            return QDialog.Accepted
+
+        def selected_folder_id(self) -> str | None:
+            return folder_id
+
+        def import_rows(self) -> list[tuple[str, str]]:
+            return [("Imported question?", "Imported answer.")]
+
+    monkeypatch.setattr(
+        "estudai.ui.main_window.NotebookLMCsvImportDialog",
+        _FakeImportDialog,
+    )
+
+    window.prompt_and_import_notebooklm_csv()
+
+    assert len(window.flashcards_by_folder[folder_id]) == 2
+    assert window.flashcards_by_folder[folder_id][1].question == "Imported question?"
+    assert window.loaded_flashcards[-1].answer == "Imported answer."

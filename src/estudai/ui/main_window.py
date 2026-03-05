@@ -2,8 +2,10 @@
 
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QTimer, Qt
+from PySide6.QtCore import QEvent, QPoint, QTimer, Qt
 from PySide6.QtWidgets import (
+    QApplication,
+    QDialog,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -33,6 +35,7 @@ from estudai.services.folder_storage import (
     rename_persisted_folder,
 )
 
+from .notebooklm_import_dialog import NotebookLMCsvImportDialog
 from .pages import ManagementPage, SettingsPage, TimerPage
 
 
@@ -83,6 +86,9 @@ class MainWindow(QMainWindow):
         self.timer_page.set_flashcard_context(self.current_folder_name, 0)
         self.handle_management_data_changed()
         self._update_sidebar_width()
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
 
     def _build_sidebar(self, root_layout: QHBoxLayout) -> None:
         """Build the sidebar area."""
@@ -115,13 +121,19 @@ class MainWindow(QMainWindow):
         )
         sidebar_layout.addWidget(self.sidebar_folder_list)
 
-        import_folder_button = QPushButton("Import Folder")
-        import_folder_button.clicked.connect(self.prompt_and_add_folder)
-        sidebar_layout.addWidget(import_folder_button)
-
         create_folder_button = QPushButton("Create Folder")
         create_folder_button.clicked.connect(self.prompt_and_create_folder)
         sidebar_layout.addWidget(create_folder_button)
+
+        import_notebooklm_csv_button = QPushButton("Import NotebookLM CSV")
+        import_notebooklm_csv_button.clicked.connect(
+            self.prompt_and_import_notebooklm_csv
+        )
+        sidebar_layout.addWidget(import_notebooklm_csv_button)
+
+        import_folder_button = QPushButton("Import Existing Folder")
+        import_folder_button.clicked.connect(self.prompt_and_add_folder)
+        sidebar_layout.addWidget(import_folder_button)
         sidebar_layout.addStretch()
 
         root_layout.addWidget(self.sidebar)
@@ -188,6 +200,58 @@ class MainWindow(QMainWindow):
     def toggle_sidebar(self):
         """Show or hide the left sidebar."""
         self.sidebar.setHidden(not self.sidebar.isHidden())
+
+    def _widget_contains_global_position(
+        self, widget: QWidget, global_position: QPoint
+    ) -> bool:
+        """Return whether a global click position is inside a widget.
+
+        Args:
+            widget: Widget to evaluate.
+            global_position: Click position in global coordinates.
+
+        Returns:
+            bool: True when the click is inside the widget.
+        """
+        if widget.isHidden():
+            return False
+        return widget.rect().contains(widget.mapFromGlobal(global_position))
+
+    def _handle_global_click(self, global_position: QPoint) -> None:
+        """Hide sidebar when user clicks outside the sidebar and toggle button.
+
+        Args:
+            global_position: Click position in global coordinates.
+        """
+        if self.sidebar.isHidden():
+            return
+        if self._widget_contains_global_position(self.sidebar, global_position):
+            return
+        if self._widget_contains_global_position(
+            self.sidebar_toggle_button, global_position
+        ):
+            return
+        self.sidebar.setVisible(False)
+
+    def eventFilter(self, watched: object, event: QEvent) -> bool:  # noqa: N802
+        """Close sidebar when clicks happen outside it.
+
+        Args:
+            watched: Object receiving the event.
+            event: Qt event to inspect.
+
+        Returns:
+            bool: False to continue normal event processing.
+        """
+        if (
+            event.type() == QEvent.MouseButtonPress
+            and isinstance(watched, QWidget)
+            and watched.window() is self
+        ):
+            global_position_getter = getattr(event, "globalPosition", None)
+            if callable(global_position_getter):
+                self._handle_global_click(event.globalPosition().toPoint())
+        return super().eventFilter(watched, event)
 
     def _is_folder_item(self, item: QListWidgetItem | None) -> bool:
         """Return whether a sidebar item maps to a persisted folder.
@@ -446,6 +510,53 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Create folder", str(error))
             return
         checked_ids.add(persisted_folder.id)
+        self.handle_management_data_changed(preferred_checked_ids=checked_ids)
+
+    def prompt_and_import_notebooklm_csv(self) -> None:
+        """Open NotebookLM CSV import dialog and import valid rows."""
+        dialog = NotebookLMCsvImportDialog(self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        target_folder_id = dialog.selected_folder_id()
+        valid_rows = dialog.import_rows()
+        if target_folder_id is None or not valid_rows:
+            return
+
+        persisted_folder = next(
+            (
+                folder
+                for folder in list_persisted_folders()
+                if folder.id == target_folder_id
+            ),
+            None,
+        )
+        if persisted_folder is None:
+            QMessageBox.warning(
+                self,
+                "Import NotebookLM CSV",
+                "Selected folder is unavailable. Refresh and try again.",
+            )
+            return
+
+        target_folder_path = Path(persisted_folder.stored_path)
+        existing_flashcards = load_flashcards_from_folder(target_folder_path)
+        existing_rows = [
+            (flashcard.question, flashcard.answer) for flashcard in existing_flashcards
+        ]
+        replace_flashcards_in_folder(target_folder_path, [*existing_rows, *valid_rows])
+
+        selected_indexes = self.selected_flashcard_indexes_by_folder.get(
+            target_folder_id,
+            set(range(len(existing_flashcards))),
+        )
+        imported_indexes = set(
+            range(len(existing_flashcards), len(existing_flashcards) + len(valid_rows))
+        )
+        self.selected_flashcard_indexes_by_folder[target_folder_id] = (
+            selected_indexes | imported_indexes
+        )
+        checked_ids = self._get_checked_folder_ids()
+        checked_ids.add(target_folder_id)
         self.handle_management_data_changed(preferred_checked_ids=checked_ids)
 
     def open_management_from_selection(self) -> None:
