@@ -40,6 +40,7 @@ def test_settings_defaults_and_persistence() -> None:
     expected = AppSettings(
         timer_duration_seconds=120,
         flashcard_probability_percent=55,
+        flashcard_random_order_enabled=True,
         question_display_duration_seconds=4,
         answer_display_duration_seconds=7,
         notification_sound_path="/tmp/sound.wav",
@@ -81,6 +82,7 @@ def test_settings_page_only_persists_changes_after_save(app: QApplication) -> No
 
     page.timer_duration_spinbox.setValue(90)
     page.flashcard_probability_spinbox.setValue(80)
+    page.flashcard_random_order_checkbox.setChecked(True)
     page.question_duration_spinbox.setValue(5)
     page.answer_duration_spinbox.setValue(11)
 
@@ -91,6 +93,7 @@ def test_settings_page_only_persists_changes_after_save(app: QApplication) -> No
     persisted = load_app_settings()
     assert persisted.timer_duration_seconds == 90
     assert persisted.flashcard_probability_percent == 80
+    assert persisted.flashcard_random_order_enabled is True
     assert persisted.question_display_duration_seconds == 5
     assert persisted.answer_display_duration_seconds == 11
 
@@ -140,6 +143,7 @@ def test_settings_page_cancel_restores_persisted_values(app: QApplication) -> No
         AppSettings(
             timer_duration_seconds=120,
             flashcard_probability_percent=55,
+            flashcard_random_order_enabled=True,
             question_display_duration_seconds=4,
             answer_display_duration_seconds=7,
         )
@@ -147,11 +151,13 @@ def test_settings_page_cancel_restores_persisted_values(app: QApplication) -> No
     page = SettingsPage()
     page.timer_duration_spinbox.setValue(999)
     page.flashcard_probability_spinbox.setValue(1)
+    page.flashcard_random_order_checkbox.setChecked(False)
 
     page._handle_cancel_clicked()
 
     assert page.timer_duration_spinbox.value() == 120
     assert page.flashcard_probability_spinbox.value() == 55
+    assert page.flashcard_random_order_checkbox.isChecked() is True
 
 
 def test_settings_page_warns_and_tests_default_sound(

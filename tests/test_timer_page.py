@@ -6,7 +6,6 @@ from PySide6.QtCore import QTime
 from PySide6.QtWidgets import QApplication
 
 from estudai.ui.pages.timer_page import TimerPage
-from estudai.ui.timer_page import TimerPage as LegacyTimerPage
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -69,11 +68,6 @@ def test_timer_update_stops_when_reaches_zero() -> None:
     assert completions == [True]
 
 
-def test_legacy_timer_page_import_points_to_pages_timer() -> None:
-    """Verify legacy timer module re-exports the page timer class."""
-    assert LegacyTimerPage is TimerPage
-
-
 def test_flashcard_display_hides_timer_and_reveals_answer() -> None:
     """Verify flashcard question/answer rendering inside timer page."""
     _get_app()
@@ -93,3 +87,66 @@ def test_flashcard_display_hides_timer_and_reveals_answer() -> None:
     assert not page.timer_display.isHidden()
     assert page.flashcard_question_label.isHidden()
     assert page.flashcard_answer_label.isHidden()
+
+
+def test_flashcard_progress_bar_updates_per_phase() -> None:
+    """Verify flashcard progress bar appears for question/answer phases."""
+    _get_app()
+    page = TimerPage()
+
+    page.show_flashcard_question("What is ATP?", display_duration_seconds=2)
+    assert not page.flashcard_progress_bar.isHidden()
+
+    page.show_flashcard_answer("Cellular energy molecule.", display_duration_seconds=3)
+    assert not page.flashcard_progress_bar.isHidden()
+
+    page.clear_flashcard_display()
+    assert page.flashcard_progress_bar.isHidden()
+
+
+def test_timer_page_has_no_title_and_no_reset_button() -> None:
+    """Verify timer page keeps only Start/Pause/Stop controls."""
+    _get_app()
+    page = TimerPage()
+
+    assert not hasattr(page, "reset_button")
+    assert page.start_button.text() == "Start"
+    assert page.pause_button.text() == "Pause"
+    assert page.stop_button.text() == "Stop"
+
+
+def test_flashcard_phase_keeps_pause_and_stop_enabled() -> None:
+    """Verify flashcard phase keeps Pause/Stop active and toggles pause state."""
+    _get_app()
+    page = TimerPage()
+    pause_events: list[bool] = []
+    page.flashcard_pause_toggled.connect(lambda paused: pause_events.append(paused))
+
+    page.show_flashcard_question("Long question?", display_duration_seconds=10)
+    assert not page.start_button.isEnabled()
+    assert page.pause_button.isEnabled()
+    assert page.stop_button.isEnabled()
+
+    page.pause_timer()
+    assert page.pause_button.text() == "Resume"
+    assert pause_events == [True]
+
+    page.pause_timer()
+    assert page.pause_button.text() == "Pause"
+    assert pause_events == [True, False]
+
+
+def test_flashcard_text_formats_inline_latex() -> None:
+    """Verify inline LaTeX-like snippets are rendered as readable text."""
+    _get_app()
+    page = TimerPage()
+
+    page.show_flashcard_question("Pró-opiomelanocortina ($POMC$) e $ER\\alpha$.")
+    assert "$" not in page.flashcard_question_label.text()
+    assert "POMC" in page.flashcard_question_label.text()
+    assert "ERα" in page.flashcard_question_label.text()
+
+    page.show_flashcard_answer("Recetores $MT_1$, $Ca^{2+}$ e $GABA_A$.")
+    assert "MT<sub>1</sub>" in page.flashcard_answer_label.text()
+    assert "Ca<sup>2+</sup>" in page.flashcard_answer_label.text()
+    assert "GABA<sub>A</sub>" in page.flashcard_answer_label.text()

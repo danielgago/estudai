@@ -6,6 +6,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QUrl, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -87,6 +88,11 @@ class SettingsPage(QWidget):
             self.flashcard_probability_spinbox,
         )
 
+        self.flashcard_random_order_checkbox = QCheckBox(
+            "Show flashcards in random order"
+        )
+        timer_form.addRow("", self.flashcard_random_order_checkbox)
+
         self.question_duration_spinbox = QSpinBox()
         self.question_duration_spinbox.setRange(1, 3600)
         self.question_duration_spinbox.setSuffix(" s")
@@ -141,6 +147,9 @@ class SettingsPage(QWidget):
         self.flashcard_probability_spinbox.setValue(
             settings.flashcard_probability_percent
         )
+        self.flashcard_random_order_checkbox.setChecked(
+            settings.flashcard_random_order_enabled
+        )
         self.question_duration_spinbox.setValue(
             settings.question_display_duration_seconds
         )
@@ -157,6 +166,7 @@ class SettingsPage(QWidget):
         return AppSettings(
             timer_duration_seconds=self.timer_duration_spinbox.value(),
             flashcard_probability_percent=self.flashcard_probability_spinbox.value(),
+            flashcard_random_order_enabled=self.flashcard_random_order_checkbox.isChecked(),
             question_display_duration_seconds=self.question_duration_spinbox.value(),
             answer_display_duration_seconds=self.answer_duration_spinbox.value(),
             notification_sound_path=self._notification_sound_path,

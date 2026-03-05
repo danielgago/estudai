@@ -7,7 +7,7 @@ import pytest
 from PySide6.QtWidgets import QApplication
 
 from estudai.services.folder_storage import create_managed_folder
-from estudai.ui.notebooklm_import_dialog import NotebookLMCsvImportDialog
+from estudai.ui.dialog.notebooklm_import_dialog import NotebookLMCsvImportDialog
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -49,7 +49,7 @@ def test_choose_csv_file_populates_preview_and_enables_import(
     )
     dialog = NotebookLMCsvImportDialog()
     monkeypatch.setattr(
-        "estudai.ui.notebooklm_import_dialog.QFileDialog.getOpenFileName",
+        "estudai.ui.dialog.notebooklm_import_dialog.QFileDialog.getOpenFileName",
         lambda *_args, **_kwargs: (str(csv_path), "CSV files (*.csv)"),
     )
 
@@ -73,22 +73,22 @@ def test_choose_csv_file_error_and_cancel_paths(
     warnings: list[str] = []
 
     monkeypatch.setattr(
-        "estudai.ui.notebooklm_import_dialog.QFileDialog.getOpenFileName",
+        "estudai.ui.dialog.notebooklm_import_dialog.QFileDialog.getOpenFileName",
         lambda *_args, **_kwargs: ("", ""),
     )
     dialog._choose_csv_file()
     assert dialog.file_path_label.text() == "No CSV file selected."
 
     monkeypatch.setattr(
-        "estudai.ui.notebooklm_import_dialog.QFileDialog.getOpenFileName",
+        "estudai.ui.dialog.notebooklm_import_dialog.QFileDialog.getOpenFileName",
         lambda *_args, **_kwargs: (str(csv_path), "CSV files (*.csv)"),
     )
     monkeypatch.setattr(
-        "estudai.ui.notebooklm_import_dialog.parse_notebooklm_csv",
+        "estudai.ui.dialog.notebooklm_import_dialog.parse_notebooklm_csv",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("boom")),
     )
     monkeypatch.setattr(
-        "estudai.ui.notebooklm_import_dialog.QMessageBox.warning",
+        "estudai.ui.dialog.notebooklm_import_dialog.QMessageBox.warning",
         lambda *_args, **_kwargs: warnings.append("warning"),
     )
     dialog._choose_csv_file()
@@ -105,26 +105,26 @@ def test_create_target_folder_paths(
     dialog = NotebookLMCsvImportDialog()
     warnings: list[str] = []
     monkeypatch.setattr(
-        "estudai.ui.notebooklm_import_dialog.QMessageBox.warning",
+        "estudai.ui.dialog.notebooklm_import_dialog.QMessageBox.warning",
         lambda *_args, **_kwargs: warnings.append("warning"),
     )
 
     monkeypatch.setattr(
-        "estudai.ui.notebooklm_import_dialog.QInputDialog.getText",
+        "estudai.ui.dialog.notebooklm_import_dialog.QInputDialog.getText",
         lambda *_args, **_kwargs: ("Ignored", False),
     )
     dialog._create_target_folder()
     assert dialog.target_folder_combo.count() == 1
 
     monkeypatch.setattr(
-        "estudai.ui.notebooklm_import_dialog.QInputDialog.getText",
+        "estudai.ui.dialog.notebooklm_import_dialog.QInputDialog.getText",
         lambda *_args, **_kwargs: ("   ", True),
     )
     dialog._create_target_folder()
     assert warnings
 
     monkeypatch.setattr(
-        "estudai.ui.notebooklm_import_dialog.QInputDialog.getText",
+        "estudai.ui.dialog.notebooklm_import_dialog.QInputDialog.getText",
         lambda *_args, **_kwargs: ("Physics", True),
     )
     dialog._create_target_folder()

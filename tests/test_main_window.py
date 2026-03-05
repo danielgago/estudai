@@ -309,7 +309,7 @@ def test_timer_completion_with_trigger_and_no_flashcards_warns_and_restarts(
 def test_timer_completion_with_trigger_emits_flashcard_event(
     app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Verify triggered completion emits show-flashcard event with random card."""
+    """Verify triggered completion emits show-flashcard event."""
     shown_flashcards: list[str] = []
     monkeypatch.setattr(
         "estudai.ui.main_window.MainWindow.show_flashcard_popup",
@@ -341,6 +341,90 @@ def test_timer_completion_with_trigger_emits_flashcard_event(
     assert shown_flashcards == ["DNA?"]
 
 
+def test_timer_completion_uses_sequential_order_and_skips_consumption_on_miss(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify sequential order advances only when probability check triggers."""
+    shown_flashcards: list[str] = []
+    monkeypatch.setattr(
+        "estudai.ui.main_window.MainWindow.show_flashcard_popup",
+        lambda self, flashcard: shown_flashcards.append(flashcard.question),
+    )
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text(
+        "Q1?,A1.\nQ2?,A2.\n",
+        encoding="utf-8",
+    )
+    assert window.add_folder(biology_folder) is True
+    rolls = iter([100, 1, 1])
+    monkeypatch.setattr(
+        "estudai.ui.main_window.random.randint", lambda *_args: next(rolls)
+    )
+
+    window.handle_timer_cycle_completed()
+    assert shown_flashcards == []
+    assert window._next_flashcard_index == 0
+
+    window.handle_timer_cycle_completed()
+    window.handle_timer_cycle_completed()
+
+    assert shown_flashcards == ["Q1?", "Q2?"]
+    assert window._next_flashcard_index == 0
+
+
+def test_stop_button_resets_sequential_flashcard_order(
+    app: QApplication,
+) -> None:
+    """Verify user stop action resets sequential flashcard pointer."""
+    window = MainWindow()
+    window._next_flashcard_index = 2
+    window.timer_page.set_flashcard_controls_active(True)
+
+    window.timer_page.stop_button.click()
+
+    assert window._next_flashcard_index == 0
+
+
+def test_timer_completion_uses_random_choice_when_setting_enabled(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify random-order setting uses random selection path."""
+    shown_flashcards: list[str] = []
+    monkeypatch.setattr(
+        "estudai.ui.main_window.MainWindow.show_flashcard_popup",
+        lambda self, flashcard: shown_flashcards.append(flashcard.question),
+    )
+    monkeypatch.setattr(
+        "estudai.ui.main_window.load_app_settings",
+        lambda: AppSettings(
+            timer_duration_seconds=1500,
+            flashcard_probability_percent=100,
+            flashcard_random_order_enabled=True,
+            question_display_duration_seconds=2,
+            answer_display_duration_seconds=3,
+        ),
+    )
+    monkeypatch.setattr("estudai.ui.main_window.random.randint", lambda *_args: 1)
+    monkeypatch.setattr(
+        "estudai.ui.main_window.random.choice", lambda flashcards: flashcards[-1]
+    )
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text(
+        "Q1?,A1.\nQ2?,A2.\n",
+        encoding="utf-8",
+    )
+    assert window.add_folder(biology_folder) is True
+
+    window.handle_timer_cycle_completed()
+
+    assert shown_flashcards == ["Q2?"]
+    assert window._next_flashcard_index == 0
+
+
 def test_flashcard_sequence_plays_sound_for_question_and_answer(
     app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -369,7 +453,8 @@ def test_flashcard_sequence_plays_sound_for_question_and_answer(
     monkeypatch.setattr(window, "_flashcard_sound_player", _FakePlayer())
 
     monkeypatch.setattr(
-        "estudai.ui.main_window.QTimer.singleShot",
+        window,
+        "_start_flashcard_phase_timer",
         lambda _delay, callback: callbacks.append(callback),
     )
     monkeypatch.setattr(
@@ -390,16 +475,59 @@ def test_flashcard_sequence_plays_sound_for_question_and_answer(
 
     window.show_flashcard_popup(flashcard)
     assert window.timer_page.flashcard_question_label.text() == "Q?"
+    assert window.sidebar_toggle_button.isHidden()
+    assert window.settings_button.isHidden()
     assert plays == ["play"]
     assert len(callbacks) == 1
 
     callbacks.pop(0)()
     assert window.timer_page.flashcard_answer_label.text() == "A."
+    assert window.sidebar_toggle_button.isHidden()
+    assert window.settings_button.isHidden()
     assert plays == ["play", "play"]
     assert len(callbacks) == 1
 
     callbacks.pop(0)()
     assert restart_calls == ["restart"]
+
+
+def test_flashcard_pause_handler_stops_and_resumes_phase_timer(
+    app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify flashcard pause toggles stop and resume on phase timer."""
+    window = MainWindow()
+    window.timer_page.show_flashcard_question("Q?", display_duration_seconds=5)
+    window._pending_flashcard_phase_callback = lambda: None
+
+    class _FakePhaseTimer:
+        def __init__(self) -> None:
+            self.active = True
+            self.stopped = False
+            self.started_with: int | None = None
+
+        def isActive(self) -> bool:  # noqa: N802
+            return self.active
+
+        def remainingTime(self) -> int:  # noqa: N802
+            return 1500
+
+        def stop(self) -> None:
+            self.stopped = True
+            self.active = False
+
+        def start(self, milliseconds: int) -> None:
+            self.started_with = milliseconds
+            self.active = True
+
+    fake_timer = _FakePhaseTimer()
+    monkeypatch.setattr(window, "_flashcard_phase_timer", fake_timer)
+
+    window.handle_flashcard_pause_toggled(True)
+    assert fake_timer.stopped is True
+    assert window._flashcard_phase_remaining_ms == 1500
+
+    window.handle_flashcard_pause_toggled(False)
+    assert fake_timer.started_with == 1500
 
 
 def test_create_folder_from_prompt(

@@ -1,6 +1,7 @@
 """Main application window."""
 
 import random
+from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QPoint, QTimer, Qt, QUrl, Signal
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -46,7 +48,7 @@ from estudai.services.settings import (
     load_app_settings,
 )
 
-from .notebooklm_import_dialog import NotebookLMCsvImportDialog
+from .dialog.notebooklm_import_dialog import NotebookLMCsvImportDialog
 from .pages import ManagementPage, SettingsPage, TimerPage
 
 
@@ -68,8 +70,17 @@ class MainWindow(QMainWindow):
         self._renaming_folder_id: str | None = None
         self._renaming_original_name: str | None = None
         self._active_flashcard_sequence_id = 0
+        self._next_flashcard_index = 0
+        self._pending_flashcard_phase_callback: Callable[[], None] | None = None
+        self._flashcard_phase_remaining_ms = 0
+        self._flashcard_sequence_paused = False
         self._flashcard_sound_output: object | None = None
         self._flashcard_sound_player: object | None = None
+        self._flashcard_phase_timer = QTimer(self)
+        self._flashcard_phase_timer.setSingleShot(True)
+        self._flashcard_phase_timer.timeout.connect(
+            self._handle_flashcard_phase_timeout
+        )
         if QAudioOutput is not None and QMediaPlayer is not None:
             self._flashcard_sound_output = QAudioOutput(self)
             self._flashcard_sound_player = QMediaPlayer(self)
@@ -97,6 +108,10 @@ class MainWindow(QMainWindow):
         self.stacked_widget.addWidget(self.settings_page)
         self.timer_page.timer_running_changed.connect(self.handle_timer_running_changed)
         self.timer_page.timer_cycle_completed.connect(self.handle_timer_cycle_completed)
+        self.timer_page.flashcard_pause_toggled.connect(
+            self.handle_flashcard_pause_toggled
+        )
+        self.timer_page.stop_requested.connect(self.handle_timer_stop_requested)
         self.show_flashcard_requested.connect(self.show_flashcard_popup)
         self.management_page.add_flashcard_button.clicked.connect(
             self.management_page.add_empty_flashcard_row
@@ -174,7 +189,13 @@ class MainWindow(QMainWindow):
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(8)
 
-        header_layout = QHBoxLayout()
+        self.header_container = QWidget()
+        self.header_container.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        self.header_container.setFixedHeight(40)
+        header_layout = QHBoxLayout(self.header_container)
+        header_layout.setContentsMargins(0, 0, 0, 0)
         self.sidebar_toggle_button = QPushButton("☰")
         self.sidebar_toggle_button.setFixedWidth(36)
         self.sidebar_toggle_button.setToolTip("Show or hide folders sidebar.")
@@ -187,7 +208,7 @@ class MainWindow(QMainWindow):
         self.settings_button.setToolTip("Open settings.")
         self.settings_button.clicked.connect(self.switch_to_settings)
         header_layout.addWidget(self.settings_button, alignment=Qt.AlignRight)
-        content_layout.addLayout(header_layout)
+        content_layout.addWidget(self.header_container)
 
         self.stacked_widget = QStackedWidget()
         content_layout.addWidget(self.stacked_widget)
@@ -225,11 +246,85 @@ class MainWindow(QMainWindow):
             is_running: Whether timer is currently running.
         """
         self.set_navigation_visible(not is_running)
+        if (
+            not is_running
+            and self.timer_page.flashcard_question_label.isHidden()
+            and self.timer_page.flashcard_answer_label.isHidden()
+        ):
+            self._cancel_flashcard_phase_timer()
+            self._flashcard_sequence_paused = False
+
+    def handle_flashcard_pause_toggled(self, paused: bool) -> None:
+        """Pause or resume flashcard phase timing.
+
+        Args:
+            paused: Whether flashcard progression should be paused.
+        """
+        if (
+            self.timer_page.flashcard_question_label.isHidden()
+            and self.timer_page.flashcard_answer_label.isHidden()
+        ):
+            return
+        self._flashcard_sequence_paused = paused
+        if paused:
+            if self._flashcard_phase_timer.isActive():
+                self._flashcard_phase_remaining_ms = max(
+                    0, self._flashcard_phase_timer.remainingTime()
+                )
+                self._flashcard_phase_timer.stop()
+            self.timer_page.pause_flashcard_progress()
+            return
+        if self._pending_flashcard_phase_callback is None:
+            return
+        if self._flashcard_phase_remaining_ms <= 0:
+            self._handle_flashcard_phase_timeout()
+            return
+        self.timer_page.resume_flashcard_progress(self._flashcard_phase_remaining_ms)
+        self._flashcard_phase_timer.start(self._flashcard_phase_remaining_ms)
+
+    def handle_timer_stop_requested(self) -> None:
+        """Reset flashcard ordering when user clicks the Stop button."""
+        self._reset_flashcard_sequence_order()
+
+    def _start_flashcard_phase_timer(
+        self, duration_milliseconds: int, callback: Callable[[], None]
+    ) -> None:
+        """Start single-shot phase timer used by flashcard question/answer flow.
+
+        Args:
+            duration_milliseconds: Delay before callback runs.
+            callback: Action to run when delay completes.
+        """
+        self._flashcard_phase_timer.stop()
+        self._pending_flashcard_phase_callback = callback
+        self._flashcard_phase_remaining_ms = max(0, int(duration_milliseconds))
+        if self._flashcard_phase_remaining_ms <= 0:
+            self._handle_flashcard_phase_timeout()
+            return
+        self._flashcard_phase_timer.start(self._flashcard_phase_remaining_ms)
+
+    def _handle_flashcard_phase_timeout(self) -> None:
+        """Run pending flashcard phase callback when phase timer finishes."""
+        callback = self._pending_flashcard_phase_callback
+        self._pending_flashcard_phase_callback = None
+        self._flashcard_phase_remaining_ms = 0
+        if callback is not None:
+            callback()
+
+    def _cancel_flashcard_phase_timer(self) -> None:
+        """Stop and clear pending flashcard phase callbacks."""
+        self._flashcard_phase_timer.stop()
+        self._pending_flashcard_phase_callback = None
+        self._flashcard_phase_remaining_ms = 0
+
+    def _reset_flashcard_sequence_order(self) -> None:
+        """Reset sequential flashcard pointer to the first card."""
+        self._next_flashcard_index = 0
 
     def handle_timer_cycle_completed(self) -> None:
         """Handle timer completion with probability-based flashcard triggering."""
-        probability_percent = load_app_settings().flashcard_probability_percent
-        if random.randint(1, 100) > probability_percent:
+        app_settings = load_app_settings()
+        if random.randint(1, 100) > app_settings.flashcard_probability_percent:
             self.timer_page.restart_timer_cycle()
             return
         if not self.selected_folder_ids:
@@ -248,7 +343,34 @@ class MainWindow(QMainWindow):
             )
             self.timer_page.restart_timer_cycle()
             return
-        self.show_flashcard_requested.emit(random.choice(self.loaded_flashcards))
+        flashcard = self._next_flashcard_for_display(
+            random_order=app_settings.flashcard_random_order_enabled
+        )
+        if flashcard is None:
+            self.timer_page.restart_timer_cycle()
+            return
+        self.show_flashcard_requested.emit(flashcard)
+
+    def _next_flashcard_for_display(self, *, random_order: bool) -> Flashcard | None:
+        """Return next flashcard for current cycle and advance when sequential.
+
+        Args:
+            random_order: Whether to pick a random flashcard.
+
+        Returns:
+            Flashcard | None: Selected flashcard if available.
+        """
+        if not self.loaded_flashcards:
+            return None
+        if random_order:
+            return random.choice(self.loaded_flashcards)
+        flashcard = self.loaded_flashcards[
+            self._next_flashcard_index % len(self.loaded_flashcards)
+        ]
+        self._next_flashcard_index = (self._next_flashcard_index + 1) % len(
+            self.loaded_flashcards
+        )
+        return flashcard
 
     def _play_flashcard_notification_sound(self) -> None:
         """Play notification sound configured in settings when available."""
@@ -279,9 +401,9 @@ class MainWindow(QMainWindow):
             or self.timer_page.flashcard_question_label.isHidden()
         ):
             return
-        self.timer_page.show_flashcard_answer(answer)
+        self.timer_page.show_flashcard_answer(answer, answer_display_duration_seconds)
         self._play_flashcard_notification_sound()
-        QTimer.singleShot(
+        self._start_flashcard_phase_timer(
             answer_display_duration_seconds * 1000,
             lambda: self._finish_flashcard_sequence(sequence_id),
         )
@@ -297,6 +419,8 @@ class MainWindow(QMainWindow):
             )
         ):
             return
+        self._cancel_flashcard_phase_timer()
+        self._flashcard_sequence_paused = False
         self.timer_page.clear_flashcard_display()
         self.timer_page.restart_timer_cycle()
 
@@ -309,12 +433,18 @@ class MainWindow(QMainWindow):
         if not isinstance(flashcard, Flashcard):
             return
         app_settings = load_app_settings()
+        self._cancel_flashcard_phase_timer()
+        self._flashcard_sequence_paused = False
         self._active_flashcard_sequence_id += 1
         sequence_id = self._active_flashcard_sequence_id
         self.switch_to_timer()
-        self.timer_page.show_flashcard_question(flashcard.question)
+        self.set_navigation_visible(False)
+        self.timer_page.show_flashcard_question(
+            flashcard.question,
+            app_settings.question_display_duration_seconds,
+        )
         self._play_flashcard_notification_sound()
-        QTimer.singleShot(
+        self._start_flashcard_phase_timer(
             app_settings.question_display_duration_seconds * 1000,
             lambda: self._show_flashcard_answer(
                 sequence_id,
@@ -459,6 +589,7 @@ class MainWindow(QMainWindow):
             self.current_folder_id = None
             self.current_folder_name = f"{len(checked_folder_ids)} folders selected"
             self.loaded_flashcards = selected_flashcards
+        self._reset_flashcard_sequence_order()
         self.timer_page.set_flashcard_context(
             self.current_folder_name,
             len(self.loaded_flashcards),

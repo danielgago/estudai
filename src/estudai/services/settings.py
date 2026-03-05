@@ -14,6 +14,7 @@ SETTINGS_FILENAME = "settings.ini"
 SOUNDS_FOLDER_NAME = "sounds"
 SETTINGS_KEY_TIMER_DURATION_SECONDS = "timer/duration_seconds"
 SETTINGS_KEY_FLASHCARD_PROBABILITY_PERCENT = "flashcard/probability_percent"
+SETTINGS_KEY_FLASHCARD_RANDOM_ORDER_ENABLED = "flashcard/random_order_enabled"
 SETTINGS_KEY_QUESTION_DURATION_SECONDS = "flashcard/question_duration_seconds"
 SETTINGS_KEY_ANSWER_DURATION_SECONDS = "flashcard/answer_duration_seconds"
 SETTINGS_KEY_NOTIFICATION_SOUND_PATH = "flashcard/notification_sound_path"
@@ -26,6 +27,7 @@ class AppSettings:
 
     timer_duration_seconds: int = 25 * 60
     flashcard_probability_percent: int = 30
+    flashcard_random_order_enabled: bool = False
     question_display_duration_seconds: int = 8
     answer_display_duration_seconds: int = 8
     notification_sound_path: str = ""
@@ -86,6 +88,30 @@ def _normalize_int(
     return max(minimum, min(maximum, value))
 
 
+def _normalize_bool(raw_value: object, *, default: bool) -> bool:
+    """Normalize truthy/falsey settings values into a boolean.
+
+    Args:
+        raw_value: Raw value loaded from QSettings.
+        default: Fallback boolean when conversion is ambiguous.
+
+    Returns:
+        bool: Normalized boolean value.
+    """
+    if isinstance(raw_value, bool):
+        return raw_value
+    if isinstance(raw_value, str):
+        normalized = raw_value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+        return default
+    if isinstance(raw_value, (int, float)):
+        return bool(raw_value)
+    return default
+
+
 def load_app_settings() -> AppSettings:
     """Load current app settings from QSettings.
 
@@ -117,6 +143,13 @@ def load_app_settings() -> AppSettings:
             default=AppSettings.flashcard_probability_percent,
             minimum=0,
             maximum=100,
+        ),
+        flashcard_random_order_enabled=_normalize_bool(
+            qsettings.value(
+                SETTINGS_KEY_FLASHCARD_RANDOM_ORDER_ENABLED,
+                AppSettings.flashcard_random_order_enabled,
+            ),
+            default=AppSettings.flashcard_random_order_enabled,
         ),
         question_display_duration_seconds=_normalize_int(
             qsettings.value(
@@ -164,6 +197,10 @@ def save_app_settings(settings: AppSettings) -> None:
             minimum=0,
             maximum=100,
         ),
+    )
+    qsettings.setValue(
+        SETTINGS_KEY_FLASHCARD_RANDOM_ORDER_ENABLED,
+        bool(settings.flashcard_random_order_enabled),
     )
     qsettings.setValue(
         SETTINGS_KEY_QUESTION_DURATION_SECONDS,
