@@ -175,11 +175,8 @@ def test_sidebar_folder_context_actions_rename_and_delete(
     assert window.add_folder(biology_folder) is True
     folder_item = window.sidebar_folder_list.item(0)
 
-    monkeypatch.setattr(
-        "estudai.ui.main_window.QInputDialog.getText",
-        lambda *args, **kwargs: ("Biology Updated", True),
-    )
     window.rename_sidebar_folder(folder_item)
+    folder_item.setText("Biology Updated")
     renamed_item = window.sidebar_folder_list.item(0)
     assert renamed_item.text() == "Biology Updated"
 

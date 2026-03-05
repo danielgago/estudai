@@ -2,12 +2,11 @@
 
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, QTimer, Qt
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -41,6 +40,8 @@ class MainWindow(QMainWindow):
         self.selected_folder_ids: set[str] = set()
         self.current_folder_id: str | None = None
         self.current_folder_name = "No folders selected"
+        self._renaming_folder_id: str | None = None
+        self._renaming_original_name: str | None = None
         self.setWindowTitle("Estudai!")
         self.setGeometry(100, 100, 900, 650)
 
@@ -64,10 +65,12 @@ class MainWindow(QMainWindow):
         self.sidebar_folder_list = QListWidget()
         self.sidebar_folder_list.setSpacing(4)
         self.sidebar_folder_list.setSelectionMode(QListWidget.ExtendedSelection)
-        self.sidebar_folder_list.itemChanged.connect(
-            self.handle_folder_check_state_changed
-        )
+        self.sidebar_folder_list.setEditTriggers(QListWidget.NoEditTriggers)
+        self.sidebar_folder_list.itemChanged.connect(self.handle_sidebar_item_changed)
         self.sidebar_folder_list.itemClicked.connect(self.handle_sidebar_folder_click)
+        self.sidebar_folder_list.itemDelegate().closeEditor.connect(
+            self.handle_sidebar_editor_closed
+        )
         self.sidebar_folder_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.sidebar_folder_list.customContextMenuRequested.connect(
             self.open_sidebar_folder_menu
@@ -203,15 +206,46 @@ class MainWindow(QMainWindow):
             len(self.loaded_flashcards),
         )
 
-    def handle_folder_check_state_changed(self, item: QListWidgetItem) -> None:
-        """Handle checkbox updates from sidebar folder items.
+    def handle_sidebar_item_changed(self, item: QListWidgetItem) -> None:
+        """Handle sidebar item updates (checkbox and inline rename).
 
         Args:
             item: Updated sidebar item.
         """
         if not self._is_folder_item(item):
             return
+        self._handle_inline_rename(item)
         self._refresh_loaded_flashcards()
+
+    def _handle_inline_rename(self, item: QListWidgetItem) -> None:
+        """Persist folder rename when inline editing changes item text.
+
+        Args:
+            item: Updated folder list item.
+        """
+        folder_id = item.data(Qt.UserRole)
+        if folder_id is None or folder_id != self._renaming_folder_id:
+            return
+
+        new_name = item.text()
+        if self._renaming_original_name == new_name:
+            return
+
+        checked_ids = self._get_checked_folder_ids()
+        self._renaming_folder_id = None
+        self._renaming_original_name = None
+        try:
+            rename_persisted_folder(folder_id, new_name)
+        except (KeyError, ValueError) as error:
+            QMessageBox.warning(self, "Rename folder", str(error))
+            self.handle_management_data_changed(preferred_checked_ids=checked_ids)
+            return
+        self.handle_management_data_changed(preferred_checked_ids=checked_ids)
+
+    def handle_sidebar_editor_closed(self, *_: object) -> None:
+        """Clear inline rename tracking when editor closes."""
+        self._renaming_folder_id = None
+        self._renaming_original_name = None
 
     def handle_sidebar_folder_click(self, clicked_item: QListWidgetItem):
         """Handle folder clicks and switch back to timer.
@@ -245,8 +279,10 @@ class MainWindow(QMainWindow):
             return
 
         menu = QMenu(self)
-        rename_action = menu.addAction("Rename folder")
-        delete_action = menu.addAction("Delete folder(s)")
+        rename_action = menu.addAction("Rename")
+        rename_action.setToolTip("Rename")
+        delete_action = menu.addAction("Delete")
+        delete_action.setToolTip("Delete")
         rename_action.setEnabled(len(selected_folder_items) == 1)
         chosen_action = menu.exec(
             self.sidebar_folder_list.viewport().mapToGlobal(position)
@@ -257,7 +293,7 @@ class MainWindow(QMainWindow):
             self.delete_sidebar_folders(selected_folder_items)
 
     def rename_sidebar_folder(self, folder_item: QListWidgetItem) -> None:
-        """Rename one folder from sidebar action.
+        """Start inline rename for one folder from sidebar action.
 
         Args:
             folder_item: Folder item selected from sidebar.
@@ -265,21 +301,10 @@ class MainWindow(QMainWindow):
         folder_id = folder_item.data(Qt.UserRole)
         if folder_id is None:
             return
-        new_name, accepted = QInputDialog.getText(
-            self,
-            "Rename folder",
-            "Folder name:",
-            text=folder_item.text(),
-        )
-        if not accepted:
-            return
-        checked_ids = self._get_checked_folder_ids()
-        try:
-            rename_persisted_folder(folder_id, new_name)
-        except (KeyError, ValueError) as error:
-            QMessageBox.warning(self, "Rename folder", str(error))
-            return
-        self.handle_management_data_changed(preferred_checked_ids=checked_ids)
+        self._renaming_folder_id = folder_id
+        self._renaming_original_name = folder_item.text()
+        self.sidebar_folder_list.setCurrentItem(folder_item)
+        QTimer.singleShot(0, lambda: self.sidebar_folder_list.editItem(folder_item))
 
     def delete_sidebar_folders(self, folder_items: list[QListWidgetItem]) -> None:
         """Delete one or many folders from sidebar action.
@@ -363,6 +388,7 @@ class MainWindow(QMainWindow):
                 | Qt.ItemIsUserCheckable
                 | Qt.ItemIsEnabled
                 | Qt.ItemIsSelectable
+                | Qt.ItemIsEditable
             )
             if preferred_checked_ids is None:
                 folder_item.setCheckState(Qt.Checked)
