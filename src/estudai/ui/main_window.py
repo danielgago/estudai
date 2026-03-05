@@ -297,10 +297,10 @@ class MainWindow(QMainWindow):
             return
 
         menu = QMenu(self)
-        rename_action = menu.addAction("rename")
-        rename_action.setToolTip("rename")
-        delete_action = menu.addAction("delete")
-        delete_action.setToolTip("delete")
+        rename_action = menu.addAction("Rename")
+        rename_action.setToolTip("Rename")
+        delete_action = menu.addAction("Delete")
+        delete_action.setToolTip("Delete")
         rename_action.setEnabled(len(selected_folder_items) == 1)
         chosen_action = menu.exec(
             self.sidebar_folder_list.viewport().mapToGlobal(position)
