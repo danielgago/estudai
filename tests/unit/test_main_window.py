@@ -9,6 +9,7 @@ import pytest
 QApplication = pytest.importorskip(
     "PySide6.QtWidgets",
     reason="PySide6 runtime libraries unavailable in this environment.",
+    exc_type=ImportError,
 ).QApplication
 
 
