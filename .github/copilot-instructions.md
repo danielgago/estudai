@@ -14,7 +14,7 @@ Run all tests:
 
 ```bash
 uv run pytest
-```
+``
 
 ## Documentation Style
 
