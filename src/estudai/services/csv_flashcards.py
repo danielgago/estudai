@@ -123,6 +123,11 @@ def _write_flashcards_to_csv(
         writer.writerows(flashcard_rows)
 
 
+def _flashcards_to_rows(flashcards: list[Flashcard]) -> list[tuple[str, str]]:
+    """Convert flashcards into CSV-compatible rows."""
+    return [(flashcard.question, flashcard.answer) for flashcard in flashcards]
+
+
 def _load_or_bootstrap_managed_flashcards(folder_path: Path) -> list[Flashcard]:
     """Load editable flashcards and create managed storage when needed.
 
@@ -139,7 +144,7 @@ def _load_or_bootstrap_managed_flashcards(folder_path: Path) -> list[Flashcard]:
     flashcards = load_flashcards_from_folder(folder_path)
     _write_flashcards_to_csv(
         managed_csv,
-        [(flashcard.question, flashcard.answer) for flashcard in flashcards],
+        _flashcards_to_rows(flashcards),
     )
     return load_flashcards_from_csv(managed_csv)
 
@@ -160,7 +165,7 @@ def add_flashcard_to_folder(
     normalized_question = _validate_flashcard_field(question, "Question")
     normalized_answer = _validate_flashcard_field(answer, "Answer")
     flashcards = _load_or_bootstrap_managed_flashcards(folder_path)
-    flashcard_rows = [(card.question, card.answer) for card in flashcards]
+    flashcard_rows = _flashcards_to_rows(flashcards)
     flashcard_rows.append((normalized_question, normalized_answer))
     managed_csv = get_managed_csv_path(folder_path)
     _write_flashcards_to_csv(managed_csv, flashcard_rows)
@@ -193,7 +198,7 @@ def update_flashcard_in_folder(
     if flashcard_index < 0 or flashcard_index >= len(flashcards):
         msg = f"Flashcard index out of range: {flashcard_index}"
         raise IndexError(msg)
-    flashcard_rows = [(card.question, card.answer) for card in flashcards]
+    flashcard_rows = _flashcards_to_rows(flashcards)
     flashcard_rows[flashcard_index] = (normalized_question, normalized_answer)
     managed_csv = get_managed_csv_path(folder_path)
     _write_flashcards_to_csv(managed_csv, flashcard_rows)

@@ -31,11 +31,12 @@ def test_timer_start_stop_reset_and_context() -> None:
 
     page.pause_timer()
     assert page.is_running is False
-    assert page.start_button.isEnabled()
-    assert not page.pause_button.isEnabled()
+    assert not page.start_button.isEnabled()
+    assert page.pause_button.isEnabled()
+    assert page.pause_button.text() == "Resume"
     assert page.stop_button.isEnabled()
 
-    page.start_timer()
+    page.pause_timer()
     assert page.is_running is True
 
     page.stop_timer()
