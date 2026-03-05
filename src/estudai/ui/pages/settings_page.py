@@ -57,7 +57,7 @@ class SettingsPage(QWidget):
 
         description = QLabel(
             "Configure timer behavior and flashcard popup defaults. "
-            "Changes are saved automatically."
+            "Use Save to apply changes or Cancel to discard edits."
         )
         description.setWordWrap(True)
         description.setStyleSheet("color: #666;")
@@ -110,18 +110,21 @@ class SettingsPage(QWidget):
         sound_buttons_layout.addStretch()
         sound_layout.addLayout(sound_buttons_layout)
         layout.addWidget(sound_group)
+        footer_layout = QHBoxLayout()
+        footer_layout.addStretch()
+        self.cancel_button = QPushButton("Cancel")
+        self.save_button = QPushButton("Save")
+        footer_layout.addWidget(self.cancel_button)
+        footer_layout.addWidget(self.save_button)
+        layout.addLayout(footer_layout)
         layout.addStretch()
 
     def _connect_signals(self) -> None:
         """Connect widget signals."""
-        self.timer_duration_spinbox.valueChanged.connect(self._handle_value_changed)
-        self.flashcard_probability_spinbox.valueChanged.connect(
-            self._handle_value_changed
-        )
-        self.question_duration_spinbox.valueChanged.connect(self._handle_value_changed)
-        self.answer_duration_spinbox.valueChanged.connect(self._handle_value_changed)
         self.upload_sound_button.clicked.connect(self._handle_upload_sound_clicked)
         self.test_sound_button.clicked.connect(self._handle_test_sound_clicked)
+        self.cancel_button.clicked.connect(self._handle_cancel_clicked)
+        self.save_button.clicked.connect(self._handle_save_clicked)
 
     def _load_persisted_settings(self) -> None:
         """Load persisted settings into controls."""
@@ -177,14 +180,6 @@ class SettingsPage(QWidget):
         self.notification_sound_label.setText(f"Selected sound: {sound_path.name}")
         self.test_sound_button.setEnabled(sound_path.exists())
 
-    def _handle_value_changed(self, _value: int) -> None:
-        """Persist numeric settings as values change.
-
-        Args:
-            _value: New value emitted by Qt.
-        """
-        self._persist_settings()
-
     def _handle_upload_sound_clicked(self) -> None:
         """Open a file picker to set notification sound."""
         selected_path, _ = QFileDialog.getOpenFileName(
@@ -205,6 +200,13 @@ class SettingsPage(QWidget):
             return
 
         self._update_sound_summary()
+
+    def _handle_cancel_clicked(self) -> None:
+        """Discard unsaved form edits and restore persisted settings."""
+        self._load_persisted_settings()
+
+    def _handle_save_clicked(self) -> None:
+        """Persist current form edits."""
         self._persist_settings()
 
     def _handle_test_sound_clicked(self) -> None:

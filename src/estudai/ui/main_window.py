@@ -1,8 +1,10 @@
 """Main application window."""
 
+import random
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QPoint, QTimer, Qt
+from PySide6.QtCore import QEvent, QPoint, QTimer, Qt, QUrl, Signal
+from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -34,7 +36,10 @@ from estudai.services.folder_storage import (
     list_persisted_folders,
     rename_persisted_folder,
 )
-from estudai.services.settings import load_app_settings
+from estudai.services.settings import (
+    get_default_notification_sound_path,
+    load_app_settings,
+)
 
 from .notebooklm_import_dialog import NotebookLMCsvImportDialog
 from .pages import ManagementPage, SettingsPage, TimerPage
@@ -42,6 +47,8 @@ from .pages import ManagementPage, SettingsPage, TimerPage
 
 class MainWindow(QMainWindow):
     """Main application window with page navigation."""
+
+    show_flashcard_requested = Signal(object)
 
     def __init__(self):
         super().__init__()
@@ -55,6 +62,10 @@ class MainWindow(QMainWindow):
         self._editing_folder_id: str | None = None
         self._renaming_folder_id: str | None = None
         self._renaming_original_name: str | None = None
+        self._active_flashcard_sequence_id = 0
+        self._flashcard_sound_output = QAudioOutput(self)
+        self._flashcard_sound_player = QMediaPlayer(self)
+        self._flashcard_sound_player.setAudioOutput(self._flashcard_sound_output)
         self.setWindowTitle("Estudai!")
         self.setGeometry(100, 100, 900, 650)
 
@@ -77,6 +88,8 @@ class MainWindow(QMainWindow):
         self.stacked_widget.addWidget(self.management_page)
         self.stacked_widget.addWidget(self.settings_page)
         self.timer_page.timer_running_changed.connect(self.handle_timer_running_changed)
+        self.timer_page.timer_cycle_completed.connect(self.handle_timer_cycle_completed)
+        self.show_flashcard_requested.connect(self.show_flashcard_popup)
         self.management_page.add_flashcard_button.clicked.connect(
             self.management_page.add_empty_flashcard_row
         )
@@ -88,6 +101,7 @@ class MainWindow(QMainWindow):
         self.settings_page.timer_duration_seconds_changed.connect(
             self.timer_page.set_timer_duration_seconds
         )
+        self.settings_page.save_button.clicked.connect(self.switch_to_timer)
 
         self.stacked_widget.setCurrentWidget(self.timer_page)
         self.timer_page.set_flashcard_context(self.current_folder_name, 0)
@@ -203,6 +217,101 @@ class MainWindow(QMainWindow):
             is_running: Whether timer is currently running.
         """
         self.set_navigation_visible(not is_running)
+
+    def handle_timer_cycle_completed(self) -> None:
+        """Handle timer completion with probability-based flashcard triggering."""
+        probability_percent = load_app_settings().flashcard_probability_percent
+        if random.randint(1, 100) > probability_percent:
+            self.timer_page.restart_timer_cycle()
+            return
+        if not self.selected_folder_ids:
+            QMessageBox.warning(
+                self,
+                "Timer",
+                "No folders selected. Select at least one folder to show flashcards.",
+            )
+            self.timer_page.restart_timer_cycle()
+            return
+        if not self.loaded_flashcards:
+            QMessageBox.warning(
+                self,
+                "Timer",
+                "No flashcards are available in selected folders. Timer restarted.",
+            )
+            self.timer_page.restart_timer_cycle()
+            return
+        self.show_flashcard_requested.emit(random.choice(self.loaded_flashcards))
+
+    def _play_flashcard_notification_sound(self) -> None:
+        """Play notification sound configured in settings when available."""
+        settings = load_app_settings()
+        sound_path_value = (
+            settings.notification_sound_path or get_default_notification_sound_path()
+        )
+        if not sound_path_value:
+            return
+        sound_path = Path(sound_path_value)
+        if not sound_path.exists():
+            return
+        self._flashcard_sound_player.setSource(QUrl.fromLocalFile(str(sound_path)))
+        self._flashcard_sound_player.play()
+
+    def _show_flashcard_answer(
+        self,
+        sequence_id: int,
+        answer: str,
+        answer_display_duration_seconds: int,
+    ) -> None:
+        """Show answer phase for active flashcard sequence."""
+        if (
+            sequence_id != self._active_flashcard_sequence_id
+            or self.timer_page.is_running
+            or self.timer_page.flashcard_question_label.isHidden()
+        ):
+            return
+        self.timer_page.show_flashcard_answer(answer)
+        self._play_flashcard_notification_sound()
+        QTimer.singleShot(
+            answer_display_duration_seconds * 1000,
+            lambda: self._finish_flashcard_sequence(sequence_id),
+        )
+
+    def _finish_flashcard_sequence(self, sequence_id: int) -> None:
+        """Clear flashcard content and restart timer after answer phase."""
+        if (
+            sequence_id != self._active_flashcard_sequence_id
+            or self.timer_page.is_running
+            or (
+                self.timer_page.flashcard_question_label.isHidden()
+                and self.timer_page.flashcard_answer_label.isHidden()
+            )
+        ):
+            return
+        self.timer_page.clear_flashcard_display()
+        self.timer_page.restart_timer_cycle()
+
+    def show_flashcard_popup(self, flashcard: object) -> None:
+        """Show flashcard question/answer inside timer page.
+
+        Args:
+            flashcard: Flashcard payload emitted from timer completion.
+        """
+        if not isinstance(flashcard, Flashcard):
+            return
+        app_settings = load_app_settings()
+        self._active_flashcard_sequence_id += 1
+        sequence_id = self._active_flashcard_sequence_id
+        self.switch_to_timer()
+        self.timer_page.show_flashcard_question(flashcard.question)
+        self._play_flashcard_notification_sound()
+        QTimer.singleShot(
+            app_settings.question_display_duration_seconds * 1000,
+            lambda: self._show_flashcard_answer(
+                sequence_id,
+                flashcard.answer,
+                app_settings.answer_display_duration_seconds,
+            ),
+        )
 
     def toggle_sidebar(self):
         """Show or hide the left sidebar."""
