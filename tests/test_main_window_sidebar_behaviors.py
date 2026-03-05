@@ -78,7 +78,7 @@ def test_inline_rename_invalid_name_shows_warning(
     folder_item.setText("   ")
 
     assert warnings
-    assert window.sidebar_folder_list.item(0).text() == "biology"
+    assert window.sidebar_folder_list.item(0).text() == "biology (1 card)"
 
 
 def test_sidebar_editor_closed_clears_tracking(app: QApplication) -> None:

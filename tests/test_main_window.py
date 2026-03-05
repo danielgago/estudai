@@ -7,7 +7,8 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, QPoint, Qt
+from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QPushButton
 
 from estudai.services.csv_flashcards import Flashcard
@@ -49,6 +50,48 @@ def test_sidebar_toggle_changes_visibility(app: QApplication) -> None:
     assert not window.sidebar.isHidden()
     window.toggle_sidebar()
     assert window.sidebar.isHidden()
+
+
+def test_sidebar_toggle_button_stays_in_place(app: QApplication) -> None:
+    """Verify sidebar toggle/content positions stay stable when sidebar opens."""
+    window = MainWindow()
+    toggle_position_before = window.sidebar_toggle_button.mapTo(window, QPoint(0, 0))
+    content_x_before = window.stacked_widget.mapTo(window, QPoint(0, 0)).x()
+    window.toggle_sidebar()
+    toggle_position_open = window.sidebar_toggle_button.mapTo(window, QPoint(0, 0))
+    content_x_open = window.stacked_widget.mapTo(window, QPoint(0, 0)).x()
+
+    assert window.sidebar_toggle_button.parent() is window.header_container
+    assert content_x_before == content_x_open == 0
+    assert toggle_position_before == toggle_position_open
+
+
+def test_top_navigation_buttons_are_larger(app: QApplication) -> None:
+    """Verify top sidebar/config buttons use larger fixed sizes."""
+    window = MainWindow()
+
+    assert window.sidebar_toggle_button.width() == 44
+    assert window.settings_button.width() == 44
+
+
+def test_primary_button_tooltips_are_short(app: QApplication) -> None:
+    """Verify key control tooltips use concise labels."""
+    window = MainWindow()
+
+    assert window.sidebar_toggle_button.toolTip() == ""
+    assert window.settings_button.toolTip() == ""
+    assert window.timer_page.start_button.toolTip() == "Start"
+    assert window.timer_page.pause_button.toolTip() == "Pause"
+    assert window.timer_page.stop_button.toolTip() == "Stop"
+
+
+def test_sidebar_width_is_capped_for_large_windows(app: QApplication) -> None:
+    """Verify sidebar width stays capped on wide displays."""
+    window = MainWindow()
+    window.resize(3000, 1200)
+    window._update_sidebar_width()
+
+    assert window.sidebar.width() == 300
 
 
 def test_sidebar_clicking_outside_closes_when_open(app: QApplication) -> None:
@@ -136,6 +179,7 @@ def test_add_folder_loads_csv_flashcards(app: QApplication, tmp_path: Path) -> N
 
     assert added is True
     assert window.sidebar_folder_list.count() == 1
+    assert window.sidebar_folder_list.item(0).text() == "biology (2 cards)"
     assert window.current_folder_name == "biology"
     assert len(window.loaded_flashcards) == 2
     assert len(persisted) == 1
@@ -211,7 +255,7 @@ def test_sidebar_folder_context_actions_rename_and_delete(
     window.rename_sidebar_folder(folder_item)
     folder_item.setText("Biology Updated")
     renamed_item = window.sidebar_folder_list.item(0)
-    assert renamed_item.text() == "Biology Updated"
+    assert renamed_item.text() == "Biology Updated (1 card)"
 
     monkeypatch.setattr(
         "estudai.ui.main_window.QMessageBox.question",
@@ -543,7 +587,7 @@ def test_create_folder_from_prompt(
     window.prompt_and_create_folder()
 
     assert window.sidebar_folder_list.count() == 1
-    assert window.sidebar_folder_list.item(0).text() == "Biology"
+    assert window.sidebar_folder_list.item(0).text() == "Biology (0 cards)"
 
 
 def test_double_click_folder_opens_management_and_save_updates_selection(
@@ -563,11 +607,17 @@ def test_double_click_folder_opens_management_and_save_updates_selection(
     window.handle_sidebar_folder_double_click(folder_item)
     assert window.stacked_widget.currentWidget() is window.management_page
     assert window.management_page.title_label.text() == "biology"
+    assert window.sidebar.isHidden()
+    assert not window.sidebar_toggle_button.isHidden()
 
     table = window.management_page.flashcards_table
     assert table.rowCount() == 2
     table.item(0, 0).setCheckState(Qt.Unchecked)
     table.item(1, 2).setText("Updated messenger molecule.")
+    window.toggle_sidebar()
+    assert not window.sidebar.isHidden()
+    window.toggle_sidebar()
+    assert window.sidebar.isHidden()
 
     window.save_management_changes()
 
@@ -575,6 +625,183 @@ def test_double_click_folder_opens_management_and_save_updates_selection(
     assert len(window.loaded_flashcards) == 1
     assert window.loaded_flashcards[0].question == "What is RNA?"
     assert window.loaded_flashcards[0].answer == "Updated messenger molecule."
+
+
+def test_management_select_and_unselect_all_controls(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify first-column header toggles all flashcard checkboxes."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text(
+        "Q1?,A1.\nQ2?,A2.\n",
+        encoding="utf-8",
+    )
+    assert window.add_folder(biology_folder) is True
+    window.handle_sidebar_folder_double_click(window.sidebar_folder_list.item(0))
+    table = window.management_page.flashcards_table
+    table.item(0, 0).setCheckState(Qt.Unchecked)
+    table.item(1, 0).setCheckState(Qt.Checked)
+
+    assert table.horizontalHeaderItem(0).text() == "☐"
+    window.management_page.handle_table_header_click(0)
+    assert table.item(0, 0).checkState() == Qt.Checked
+    assert table.item(1, 0).checkState() == Qt.Checked
+    assert table.horizontalHeaderItem(0).text() == "☑"
+
+    window.management_page.handle_table_header_click(0)
+    assert table.item(0, 0).checkState() == Qt.Unchecked
+    assert table.item(1, 0).checkState() == Qt.Unchecked
+    assert table.horizontalHeaderItem(0).text() == "☐"
+
+
+def test_management_add_button_is_plus_at_top(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify add control is a plus button and inserts rows."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+    window.handle_sidebar_folder_double_click(window.sidebar_folder_list.item(0))
+    table = window.management_page.flashcards_table
+    management_layout = window.management_page.layout()
+
+    assert window.management_page.add_flashcard_button.text() == "+"
+    assert management_layout.itemAt(2).layout().itemAt(1).widget() is (
+        window.management_page.add_flashcard_button
+    )
+    assert management_layout.itemAt(3).widget() is table
+    window.management_page.add_flashcard_button.click()
+    assert table.rowCount() == 2
+
+
+def test_management_right_click_delete_selected_rows(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify right-click delete action removes selected flashcards."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\nQ2?,A2.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+    window.handle_sidebar_folder_double_click(window.sidebar_folder_list.item(0))
+    table = window.management_page.flashcards_table
+    table.selectRow(0)
+
+    class _FakeMenu:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.actions = []
+
+        def addAction(self, text: str):  # noqa: N802
+            action = object()
+            self.actions.append(action)
+            return action
+
+        def exec(self, *_args, **_kwargs):  # noqa: A003
+            return self.actions[0]
+
+    monkeypatch.setattr("estudai.ui.pages.management_page.QMenu", _FakeMenu)
+    monkeypatch.setattr(
+        "estudai.ui.main_window.QMessageBox.question",
+        lambda *_args, **_kwargs: QMessageBox.Yes,
+    )
+    monkeypatch.setattr(table, "itemAt", lambda _pos: table.item(0, 1))
+
+    window.management_page.open_flashcards_table_menu(QPoint(0, 0))
+
+    assert table.rowCount() == 1
+    assert table.item(0, 1).text() == "Q2?"
+
+
+def test_management_save_auto_checks_folder_when_flashcard_selected(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify saving selected flashcards re-checks the edited folder."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text(
+        "Q1?,A1.\nQ2?,A2.\n",
+        encoding="utf-8",
+    )
+    assert window.add_folder(biology_folder) is True
+    folder_item = window.sidebar_folder_list.item(0)
+    folder_item.setCheckState(Qt.Unchecked)
+    window.handle_sidebar_folder_double_click(folder_item)
+    table = window.management_page.flashcards_table
+    table.item(0, 0).setCheckState(Qt.Checked)
+    table.item(1, 0).setCheckState(Qt.Unchecked)
+
+    window.save_management_changes()
+
+    updated_item = window.sidebar_folder_list.item(0)
+    assert updated_item.checkState() == Qt.Checked
+    assert window.current_folder_name == "biology"
+    assert len(window.loaded_flashcards) == 1
+
+
+def test_management_save_unchecks_folder_when_no_flashcards_selected(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify saving with all rows unchecked unchecks the edited folder."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text(
+        "Q1?,A1.\nQ2?,A2.\n",
+        encoding="utf-8",
+    )
+    assert window.add_folder(biology_folder) is True
+    folder_item = window.sidebar_folder_list.item(0)
+    window.handle_sidebar_folder_double_click(folder_item)
+    table = window.management_page.flashcards_table
+    table.item(0, 0).setCheckState(Qt.Unchecked)
+    table.item(1, 0).setCheckState(Qt.Unchecked)
+
+    window.save_management_changes()
+
+    updated_item = window.sidebar_folder_list.item(0)
+    assert updated_item.checkState() == Qt.Unchecked
+    assert window.current_folder_name == "No folders selected"
+    assert len(window.loaded_flashcards) == 0
+
+
+def test_sidebar_click_does_not_leave_management_page(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify clicking sidebar folder does not force timer navigation."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+    folder_item = window.sidebar_folder_list.item(0)
+    window.handle_sidebar_folder_double_click(folder_item)
+
+    window.handle_sidebar_folder_click(folder_item)
+
+    assert window.stacked_widget.currentWidget() is window.management_page
+
+
+def test_spacebar_shortcut_starts_and_pauses_timer(app: QApplication) -> None:
+    """Verify spacebar starts timer when stopped and pauses when running."""
+    window = MainWindow()
+    start_event = QKeyEvent(QEvent.KeyPress, Qt.Key_Space, Qt.NoModifier)
+    pause_event = QKeyEvent(QEvent.KeyPress, Qt.Key_Space, Qt.NoModifier)
+    resume_event = QKeyEvent(QEvent.KeyPress, Qt.Key_Space, Qt.NoModifier)
+
+    window.keyPressEvent(start_event)
+    assert window.timer_page.is_running is True
+
+    window.keyPressEvent(pause_event)
+    assert window.timer_page.is_running is False
+
+    window.keyPressEvent(resume_event)
+    assert window.timer_page.is_running is True
+    window.timer_page.stop_timer()
 
 
 def test_management_save_validates_non_empty_fields(

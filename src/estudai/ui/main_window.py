@@ -56,6 +56,7 @@ class MainWindow(QMainWindow):
     """Main application window with page navigation."""
 
     show_flashcard_requested = Signal(object)
+    FOLDER_NAME_ROLE = Qt.UserRole + 1
 
     def __init__(self):
         super().__init__()
@@ -116,7 +117,7 @@ class MainWindow(QMainWindow):
         self.management_page.add_flashcard_button.clicked.connect(
             self.management_page.add_empty_flashcard_row
         )
-        self.management_page.delete_flashcard_button.clicked.connect(
+        self.management_page.delete_requested.connect(
             self.delete_selected_flashcards_from_management
         )
         self.management_page.save_button.clicked.connect(self.save_management_changes)
@@ -136,8 +137,9 @@ class MainWindow(QMainWindow):
 
     def _build_sidebar(self, root_layout: QHBoxLayout) -> None:
         """Build the sidebar area."""
-        self.sidebar = QFrame()
+        self.sidebar = QFrame(self.centralWidget())
         self.sidebar.setFrameShape(QFrame.StyledPanel)
+        self.sidebar.setStyleSheet("QFrame { background-color: palette(window); }")
         self.sidebar.setVisible(False)
         sidebar_layout = QVBoxLayout(self.sidebar)
         sidebar_layout.setContentsMargins(8, 8, 8, 8)
@@ -179,8 +181,7 @@ class MainWindow(QMainWindow):
         import_folder_button.clicked.connect(self.prompt_and_add_folder)
         sidebar_layout.addWidget(import_folder_button)
         sidebar_layout.addStretch()
-
-        root_layout.addWidget(self.sidebar)
+        self.sidebar.raise_()
 
     def _build_content_area(self, root_layout: QHBoxLayout) -> None:
         """Build the content area with top actions and pages stack."""
@@ -193,19 +194,21 @@ class MainWindow(QMainWindow):
         self.header_container.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
-        self.header_container.setFixedHeight(40)
+        self.header_container.setFixedHeight(52)
         header_layout = QHBoxLayout(self.header_container)
         header_layout.setContentsMargins(0, 0, 0, 0)
         self.sidebar_toggle_button = QPushButton("☰")
-        self.sidebar_toggle_button.setFixedWidth(36)
-        self.sidebar_toggle_button.setToolTip("Show or hide folders sidebar.")
+        self.sidebar_toggle_button.setFixedSize(44, 44)
+        self.sidebar_toggle_button.setToolTip("")
+        self.sidebar_toggle_button.setStyleSheet("font-size: 20px; font-weight: 700;")
         self.sidebar_toggle_button.clicked.connect(self.toggle_sidebar)
         header_layout.addWidget(self.sidebar_toggle_button, alignment=Qt.AlignLeft)
         header_layout.addStretch()
 
         self.settings_button = QPushButton("⚙")
-        self.settings_button.setFixedWidth(36)
-        self.settings_button.setToolTip("Open settings.")
+        self.settings_button.setFixedSize(44, 44)
+        self.settings_button.setStyleSheet("font-size: 20px; font-weight: 700;")
+        self.settings_button.setToolTip("")
         self.settings_button.clicked.connect(self.switch_to_settings)
         header_layout.addWidget(self.settings_button, alignment=Qt.AlignRight)
         content_layout.addWidget(self.header_container)
@@ -221,16 +224,35 @@ class MainWindow(QMainWindow):
 
     def _update_sidebar_width(self) -> None:
         """Keep sidebar wide enough to read folder names."""
-        responsive_width = max(280, min(500, int(self.width() * 0.30)))
+        responsive_width = max(220, min(300, int(self.width() * 0.18)))
         self.sidebar.setFixedWidth(responsive_width)
+        self._position_sidebar()
+
+    def _position_sidebar(self) -> None:
+        """Place sidebar as an overlay anchored below the sidebar toggle button."""
+        central_widget = self.centralWidget()
+        if central_widget is None:
+            return
+        anchor_point = self.sidebar_toggle_button.mapTo(
+            central_widget,
+            QPoint(0, self.sidebar_toggle_button.height() + 8),
+        )
+        bottom_margin = 12
+        available_height = max(120, central_widget.height() - anchor_point.y() - bottom_margin)
+        self.sidebar.setFixedHeight(available_height)
+        self.sidebar.move(anchor_point.x(), anchor_point.y())
+        self.sidebar.raise_()
 
     def switch_to_timer(self):
         """Switch to timer page."""
         self.stacked_widget.setCurrentWidget(self.timer_page)
+        if not self.timer_page.is_running:
+            self.sidebar_toggle_button.setVisible(True)
 
     def switch_to_management(self) -> None:
         """Switch to flashcard management page."""
         self.stacked_widget.setCurrentWidget(self.management_page)
+        self.sidebar.setVisible(False)
 
     def switch_to_settings(self):
         """Switch to settings page or back to timer when already there."""
@@ -455,7 +477,29 @@ class MainWindow(QMainWindow):
 
     def toggle_sidebar(self):
         """Show or hide the left sidebar."""
-        self.sidebar.setHidden(not self.sidebar.isHidden())
+        if self.sidebar.isHidden():
+            self._position_sidebar()
+            self.sidebar.setVisible(True)
+            return
+        self.sidebar.setVisible(False)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        """Handle keyboard shortcuts scoped to the main window.
+
+        Args:
+            event: Key event to process.
+        """
+        if (
+            event.key() == Qt.Key_Space
+            and self.stacked_widget.currentWidget() is self.timer_page
+        ):
+            if self.timer_page.start_button.isEnabled():
+                self.timer_page.start_timer()
+            elif self.timer_page.pause_button.isEnabled():
+                self.timer_page.pause_timer()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def _widget_contains_global_position(
         self, widget: QWidget, global_position: QPoint
@@ -564,7 +608,7 @@ class MainWindow(QMainWindow):
             if folder_id is None or item.checkState() != Qt.Checked:
                 continue
             checked_folder_ids.append(folder_id)
-            checked_folder_names.append(item.text())
+            checked_folder_names.append(self._folder_item_name(item))
             folder_flashcards = self.flashcards_by_folder.get(folder_id, [])
             selected_indexes = self.selected_flashcard_indexes_by_folder.get(
                 folder_id,
@@ -643,17 +687,20 @@ class MainWindow(QMainWindow):
 
     def handle_sidebar_editor_closed(self, *_: object) -> None:
         """Clear inline rename tracking when editor closes."""
+        if self._renaming_folder_id is not None:
+            self.handle_management_data_changed(
+                preferred_checked_ids=self._get_checked_folder_ids()
+            )
         self._clear_rename_tracking()
 
     def handle_sidebar_folder_click(self, clicked_item: QListWidgetItem):
-        """Handle folder clicks and switch back to timer.
+        """Handle folder clicks without forcing page navigation.
 
         Args:
             clicked_item: The clicked folder list item.
         """
         if not self._is_folder_item(clicked_item):
             return
-        self.switch_to_timer()
 
     def handle_sidebar_folder_double_click(self, clicked_item: QListWidgetItem) -> None:
         """Open folder management when a folder is double-clicked.
@@ -666,7 +713,7 @@ class MainWindow(QMainWindow):
         folder_id = clicked_item.data(Qt.UserRole)
         if folder_id is None:
             return
-        self.open_management_for_folder(folder_id, clicked_item.text())
+        self.open_management_for_folder(folder_id, self._folder_item_name(clicked_item))
 
     def open_sidebar_folder_menu(self, position: QPoint) -> None:
         """Open the right-click folder menu.
@@ -709,7 +756,8 @@ class MainWindow(QMainWindow):
         if folder_id is None:
             return
         self._renaming_folder_id = folder_id
-        self._renaming_original_name = folder_item.text()
+        self._renaming_original_name = self._folder_item_name(folder_item)
+        folder_item.setText(self._renaming_original_name)
         self.sidebar_folder_list.setCurrentItem(folder_item)
         QTimer.singleShot(0, lambda: self.sidebar_folder_list.editItem(folder_item))
 
@@ -823,7 +871,9 @@ class MainWindow(QMainWindow):
             folder_item = selected_items[0]
             folder_id = folder_item.data(Qt.UserRole)
             if folder_id is not None:
-                self.open_management_for_folder(folder_id, folder_item.text())
+                self.open_management_for_folder(
+                    folder_id, self._folder_item_name(folder_item)
+                )
                 return
         checked_items = [
             self.sidebar_folder_list.item(index)
@@ -835,7 +885,9 @@ class MainWindow(QMainWindow):
             folder_item = checked_items[0]
             folder_id = folder_item.data(Qt.UserRole)
             if folder_id is not None:
-                self.open_management_for_folder(folder_id, folder_item.text())
+                self.open_management_for_folder(
+                    folder_id, self._folder_item_name(folder_item)
+                )
                 return
         QMessageBox.information(
             self,
@@ -922,6 +974,10 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Save flashcards", str(error))
             return
         checked_ids = self._get_checked_folder_ids()
+        if selected_indexes:
+            checked_ids.add(self._editing_folder_id)
+        else:
+            checked_ids.discard(self._editing_folder_id)
         self.selected_flashcard_indexes_by_folder[self._editing_folder_id] = (
             selected_indexes
         )
@@ -947,20 +1003,24 @@ class MainWindow(QMainWindow):
         return True
 
     def _create_sidebar_folder_item(
-        self, folder_id: str, folder_name: str, checked: bool
+        self, folder_id: str, folder_name: str, flashcard_count: int, checked: bool
     ) -> QListWidgetItem:
         """Create one folder item for the sidebar list.
 
         Args:
             folder_id: Folder identifier.
             folder_name: Display name.
+            flashcard_count: Number of flashcards in folder.
             checked: Whether the item starts checked.
 
         Returns:
             QListWidgetItem: Configured list item.
         """
-        folder_item = QListWidgetItem(folder_name)
+        folder_item = QListWidgetItem(
+            self._format_sidebar_folder_label(folder_name, flashcard_count)
+        )
         folder_item.setData(Qt.UserRole, folder_id)
+        folder_item.setData(self.FOLDER_NAME_ROLE, folder_name)
         folder_item.setFlags(
             folder_item.flags()
             | Qt.ItemIsUserCheckable
@@ -970,6 +1030,16 @@ class MainWindow(QMainWindow):
         )
         folder_item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
         return folder_item
+
+    def _folder_item_name(self, item: QListWidgetItem) -> str:
+        """Return folder name without flashcard count suffix."""
+        folder_name = item.data(self.FOLDER_NAME_ROLE)
+        return folder_name if isinstance(folder_name, str) else item.text()
+
+    def _format_sidebar_folder_label(self, folder_name: str, flashcard_count: int) -> str:
+        """Build sidebar folder label with card count."""
+        card_word = "card" if flashcard_count == 1 else "cards"
+        return f"{folder_name} ({flashcard_count} {card_word})"
 
     def handle_management_data_changed(
         self, preferred_checked_ids: set[str] | None = None
@@ -1016,6 +1086,7 @@ class MainWindow(QMainWindow):
             folder_item = self._create_sidebar_folder_item(
                 persisted_folder.id,
                 persisted_folder.name,
+                flashcard_count=len(folder_flashcards),
                 checked=is_checked,
             )
             self.sidebar_folder_list.addItem(folder_item)

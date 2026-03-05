@@ -93,20 +93,20 @@ class TimerPage(QWidget):
         controls_layout.addStretch(1)
 
         self.start_button = QPushButton("Start")
-        self.start_button.setToolTip("Start countdown")
+        self.start_button.setToolTip("Start")
         self.start_button.clicked.connect(self.start_timer)
         self.start_button.setMinimumWidth(110)
         controls_layout.addWidget(self.start_button)
 
         self.pause_button = QPushButton("Pause")
-        self.pause_button.setToolTip("Pause countdown")
+        self.pause_button.setToolTip("Pause")
         self.pause_button.clicked.connect(self.pause_timer)
         self.pause_button.setEnabled(False)
         self.pause_button.setMinimumWidth(110)
         controls_layout.addWidget(self.pause_button)
 
         self.stop_button = QPushButton("Stop")
-        self.stop_button.setToolTip("Stop and reset countdown")
+        self.stop_button.setToolTip("Stop")
         self.stop_button.clicked.connect(self._handle_stop_button_clicked)
         self.stop_button.setEnabled(False)
         self.stop_button.setMinimumWidth(110)
@@ -157,16 +157,18 @@ class TimerPage(QWidget):
         if self.is_running:
             self.is_running = False
             self.timer.stop()
-            self.start_button.setEnabled(True)
-            self.pause_button.setText("Pause")
-            self.pause_button.setEnabled(False)
+            self.start_button.setEnabled(False)
+            self.pause_button.setText("Resume")
+            self.pause_button.setEnabled(True)
             self.stop_button.setEnabled(True)
             return
-        if not self._flashcard_controls_active:
+        if self._flashcard_controls_active:
+            self._flashcard_paused = not self._flashcard_paused
+            self.pause_button.setText("Resume" if self._flashcard_paused else "Pause")
+            self.flashcard_pause_toggled.emit(self._flashcard_paused)
             return
-        self._flashcard_paused = not self._flashcard_paused
-        self.pause_button.setText("Resume" if self._flashcard_paused else "Pause")
-        self.flashcard_pause_toggled.emit(self._flashcard_paused)
+        if self.pause_button.text() == "Resume" and self.stop_button.isEnabled():
+            self.start_timer()
 
     def stop_timer(self):
         """Stop and reset the timer to default duration."""

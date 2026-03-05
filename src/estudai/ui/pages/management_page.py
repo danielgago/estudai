@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QMenu,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -20,6 +21,8 @@ from estudai.services.csv_flashcards import Flashcard
 
 class ManagementPage(QWidget):
     """Page to edit flashcards inside one selected folder."""
+
+    delete_requested = Signal()
 
     def __init__(self) -> None:
         """Initialize the management page."""
@@ -37,22 +40,31 @@ class ManagementPage(QWidget):
         self.title_label.setStyleSheet("font-size: 24px; font-weight: bold;")
         layout.addWidget(self.title_label)
 
-        self.folder_context_label = QLabel("Folder: No folder selected")
+        self.folder_context_label = QLabel("0 cards")
         self.folder_context_label.setStyleSheet("color: #666;")
         layout.addWidget(self.folder_context_label)
 
-        self.instructions_label = QLabel(
-            "Double-click a folder in the sidebar to edit cards. "
-            "Use the checkbox column to select cards used by the timer."
-        )
-        self.instructions_label.setWordWrap(True)
-        self.instructions_label.setStyleSheet("color: #666;")
-        layout.addWidget(self.instructions_label)
+        table_actions_layout = QHBoxLayout()
+        table_actions_layout.addStretch()
+        self.add_flashcard_button = QPushButton("+")
+        self.add_flashcard_button.setFixedSize(34, 34)
+        self.add_flashcard_button.setToolTip("Add")
+        self.add_flashcard_button.setStyleSheet("font-size: 22px; font-weight: 700;")
+        table_actions_layout.addWidget(self.add_flashcard_button)
+        layout.addLayout(table_actions_layout)
 
         self.flashcards_table = QTableWidget(0, 3)
-        self.flashcards_table.setHorizontalHeaderLabels(["Use", "Question", "Answer"])
+        self.flashcards_table.setHorizontalHeaderLabels(["☑", "Question", "Answer"])
         self.flashcards_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.flashcards_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.flashcards_table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.flashcards_table.customContextMenuRequested.connect(
+            self.open_flashcards_table_menu
+        )
+        self.flashcards_table.horizontalHeader().sectionClicked.connect(
+            self.handle_table_header_click
+        )
+        self.flashcards_table.itemChanged.connect(self.handle_table_item_changed)
         self.flashcards_table.horizontalHeader().setSectionResizeMode(
             0,
             QHeaderView.ResizeToContents,
@@ -66,14 +78,6 @@ class ManagementPage(QWidget):
             QHeaderView.Stretch,
         )
         layout.addWidget(self.flashcards_table)
-
-        actions_layout = QHBoxLayout()
-        self.add_flashcard_button = QPushButton("Add Flashcard")
-        self.delete_flashcard_button = QPushButton("Delete Selected Flashcards")
-        actions_layout.addWidget(self.add_flashcard_button)
-        actions_layout.addWidget(self.delete_flashcard_button)
-        actions_layout.addStretch()
-        layout.addLayout(actions_layout)
 
         footer_layout = QHBoxLayout()
         footer_layout.addStretch()
@@ -100,7 +104,9 @@ class ManagementPage(QWidget):
         """
         self.folder_id = folder_id
         self.title_label.setText(folder_name)
-        self.folder_context_label.setText(f"Folder: {folder_name}")
+        card_word = "card" if len(flashcards) == 1 else "cards"
+        self.folder_context_label.setText(f"{len(flashcards)} {card_word}")
+        self.flashcards_table.blockSignals(True)
         self.flashcards_table.setRowCount(0)
 
         for index, flashcard in enumerate(flashcards):
@@ -110,6 +116,8 @@ class ManagementPage(QWidget):
                 answer=flashcard.answer,
                 checked=index in selected_indexes,
             )
+        self.flashcards_table.blockSignals(False)
+        self._sync_select_all_header()
 
     def _insert_row(
         self,
@@ -142,6 +150,86 @@ class ManagementPage(QWidget):
         self._insert_row(row_index, "", "", True)
         self.flashcards_table.setCurrentCell(row_index, 1)
         self.flashcards_table.editItem(self.flashcards_table.item(row_index, 1))
+        self._sync_select_all_header()
+
+    def open_flashcards_table_menu(self, position: QPoint) -> None:
+        """Open right-click table menu for selected flashcard rows.
+
+        Args:
+            position: Requested context-menu position.
+        """
+        clicked_item = self.flashcards_table.itemAt(position)
+        if clicked_item is not None and not clicked_item.isSelected():
+            self.flashcards_table.clearSelection()
+            clicked_item.setSelected(True)
+        if not self.selected_table_rows():
+            return
+
+        menu = QMenu(self)
+        delete_action = menu.addAction("Delete")
+        chosen_action = menu.exec(self.flashcards_table.viewport().mapToGlobal(position))
+        if chosen_action is delete_action:
+            self.delete_requested.emit()
+
+    def handle_table_header_click(self, section: int) -> None:
+        """Toggle all row checkboxes when first header section is clicked.
+
+        Args:
+            section: Header section index.
+        """
+        if section != 0:
+            return
+        self._set_all_flashcards_checked(not self._are_all_flashcards_checked())
+
+    def handle_table_item_changed(self, item: QTableWidgetItem) -> None:
+        """Refresh first-column header indicator when row checkbox changes.
+
+        Args:
+            item: Updated table item.
+        """
+        if item.column() == 0:
+            self._sync_select_all_header()
+
+    def _are_all_flashcards_checked(self) -> bool:
+        """Return whether all flashcard rows are currently checked."""
+        row_count = self.flashcards_table.rowCount()
+        if row_count == 0:
+            return False
+        for row_index in range(row_count):
+            checkbox_item = self.flashcards_table.item(row_index, 0)
+            if checkbox_item is None or checkbox_item.checkState() != Qt.Checked:
+                return False
+        return True
+
+    def _sync_select_all_header(self) -> None:
+        """Update first-column header indicator to match row checkbox state."""
+        header_item = self.flashcards_table.horizontalHeaderItem(0)
+        if header_item is None:
+            return
+        header_item.setText("☑" if self._are_all_flashcards_checked() else "☐")
+
+    def _set_all_flashcards_checked(self, checked: bool) -> None:
+        """Set checkbox state for all flashcard rows.
+
+        Args:
+            checked: Target state for all rows.
+        """
+        self.flashcards_table.blockSignals(True)
+        target_state = Qt.Checked if checked else Qt.Unchecked
+        for row_index in range(self.flashcards_table.rowCount()):
+            checkbox_item = self.flashcards_table.item(row_index, 0)
+            if checkbox_item is not None:
+                checkbox_item.setCheckState(target_state)
+        self.flashcards_table.blockSignals(False)
+        self._sync_select_all_header()
+
+    def select_all_flashcards(self) -> None:
+        """Mark all flashcards as selected for timer usage."""
+        self._set_all_flashcards_checked(True)
+
+    def unselect_all_flashcards(self) -> None:
+        """Mark all flashcards as not selected for timer usage."""
+        self._set_all_flashcards_checked(False)
 
     def selected_table_rows(self) -> list[int]:
         """Return currently selected table row indexes.
@@ -160,6 +248,7 @@ class ManagementPage(QWidget):
         """
         for row_index in sorted(set(row_indexes), reverse=True):
             self.flashcards_table.removeRow(row_index)
+        self._sync_select_all_header()
 
     def collect_flashcards_for_save(self) -> tuple[list[tuple[str, str]], set[int]]:
         """Collect and validate table content before save.
