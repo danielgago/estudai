@@ -5,6 +5,7 @@ description = "flashcard timer for studying while multitasking"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "pylatexenc>=2.10",
     "pyside6>=6.10.2",
 ]
 

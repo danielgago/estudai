@@ -1,0 +1,25 @@
+"Qual é a fórmula da distância euclidiana entre dois pontos $(a, b)$ e $(c, d)$ em $\mathbb{R}^2$?",$\sqrt{(a-c)^2 + (b-d)^2}$
+Como se define o gráfico de uma função $f: D \subseteq \mathbb{R}^2 \to \mathbb{R}$?,"É o conjunto $G_f = \{(x, y, z) \in \mathbb{R}^3 | z = f(x, y) \wedge (x, y) \in D\}$."
+"Qual é o domínio natural da função $f(x, y) = \ln(x + y)$?","$D_f = \{(x, y) \in \mathbb{R}^2 | x + y > 0\}$"
+"Seja $f(x, y) = xy^2$. Qual é a derivada parcial de $f$ em ordem a $x$?",$y^2$
+"Seja $f(x, y) = xy^2$. Qual é a derivada parcial de $f$ em ordem a $y$?",$2xy$
+"Segundo o Teorema de Schwarz, que condição garante que as derivadas parciais cruzadas $f''_{xy}$ e $f''_{yx}$ sejam iguais?",As derivadas parciais de segunda ordem devem ser contínuas num dado ponto.
+"O que caracteriza um ponto estacionário $(a, b)$ de uma função diferenciável $f$?","O gradiente da função no ponto é nulo, ou seja, $\nabla f(a, b) = (0, 0)$."
+"Como se define o vetor gradiente de uma função $f(x, y)$?","$\nabla f(x, y) = (f'_x(x, y), f'_y(x, y))$"
+"Num ponto estacionário, se o determinante da matriz Hessiana for positivo ($h_f > 0$) e $f''_{xx} > 0$, o ponto é um _____.",Mínimo local
+"Se o determinante da matriz Hessiana for negativo ($h_f < 0$) num ponto estacionário, a função tem um _____.",Ponto de sela
+"Qual é o valor de $\lim_{(x, y) \to (0, 0)} \frac{3x^2y}{x^2+y^2}$?",0
+"Por que razão o limite $\lim_{(x, y) \to (0, 0)} \frac{x^2-y^2}{x^2+y^2}$ não existe?","Os limites repetidos (ao longo dos eixos) dão valores diferentes, $1$ e $-1$."
+"Se uma função $f$ é diferenciável num ponto $(a, b)$, então $f$ é obrigatoriamente _____ nesse ponto.",Contínua
+"Na mudança para coordenadas polares, quais são as expressões para $x$ e $y$?",$x = \rho \cos \theta$ e $y = \rho \sin \theta$
+Qual é o determinante do Jacobiano na mudança para coordenadas polares?,$\rho$
+Qual é o determinante do Jacobiano na mudança para coordenadas cilíndricas?,$\rho$
+Como se calcula a área de uma região $D$ utilizando integrais duplos?,"$Area(D) = \int \int_D 1 \,dA$"
+Qual é a fórmula para o volume de uma esfera de raio $r$?,$\frac{4}{3}\pi r^3$
+"Determine o valor de $\int_{0}^{1} \int_{0}^{2} (x+y) \,dy \,dx$.",3
+"Determine o valor de $\int_{0}^{1} \int_{x^2}^{x} y \,dy \,dx$.",$\frac{1}{15}$
+"Determine o valor de $\int_{0}^{\pi/2} \int_{0}^{1} y \cos(x) \,dy \,dx$.",$\frac{1}{2}$
+"Determine o valor de $\int_{0}^{1} \int_{0}^{1} \int_{0}^{1} (xy + xyz) \,dz \,dy \,dx$.",$\frac{3}{8}$
+"Qual é o valor de $\int_{0}^{2\pi} \int_{0}^{2} 4\rho - \rho^3 \,d\rho \,d\theta$?",$8\pi$
+"Determine o valor de $\int_{1}^{2} \int_{-3}^{4} x^2 y \,dy \,dx$.",$\frac{49}{6}$
+"Qual é a definição de uma curva de nível $k$ para uma função $f(x, y)$?","É o conjunto de pontos no domínio onde $f(x, y) = k$."
