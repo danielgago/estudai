@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QUrl, Signal
-from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
@@ -18,6 +17,12 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+try:
+    from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+except ImportError:  # pragma: no cover - depends on system multimedia libraries.
+    QAudioOutput = None  # type: ignore[assignment]
+    QMediaPlayer = None  # type: ignore[assignment]
 
 from estudai.services.settings import (
     AppSettings,
@@ -38,9 +43,12 @@ class SettingsPage(QWidget):
         super().__init__()
         self._notification_sound_path = ""
         self._default_notification_sound_path = get_default_notification_sound_path()
-        self._audio_output = QAudioOutput(self)
-        self._sound_player = QMediaPlayer(self)
-        self._sound_player.setAudioOutput(self._audio_output)
+        self._audio_output: object | None = None
+        self._sound_player: object | None = None
+        if QAudioOutput is not None and QMediaPlayer is not None:
+            self._audio_output = QAudioOutput(self)
+            self._sound_player = QMediaPlayer(self)
+            self._sound_player.setAudioOutput(self._audio_output)
         self._build_ui()
         self._load_persisted_settings()
         self._connect_signals()
@@ -57,7 +65,7 @@ class SettingsPage(QWidget):
 
         description = QLabel(
             "Configure timer behavior and flashcard popup defaults. "
-            "Changes are saved automatically."
+            "Use Save to apply changes or Cancel to discard edits."
         )
         description.setWordWrap(True)
         description.setStyleSheet("color: #666;")
@@ -110,18 +118,21 @@ class SettingsPage(QWidget):
         sound_buttons_layout.addStretch()
         sound_layout.addLayout(sound_buttons_layout)
         layout.addWidget(sound_group)
+        footer_layout = QHBoxLayout()
+        footer_layout.addStretch()
+        self.cancel_button = QPushButton("Cancel")
+        self.save_button = QPushButton("Save")
+        footer_layout.addWidget(self.cancel_button)
+        footer_layout.addWidget(self.save_button)
+        layout.addLayout(footer_layout)
         layout.addStretch()
 
     def _connect_signals(self) -> None:
         """Connect widget signals."""
-        self.timer_duration_spinbox.valueChanged.connect(self._handle_value_changed)
-        self.flashcard_probability_spinbox.valueChanged.connect(
-            self._handle_value_changed
-        )
-        self.question_duration_spinbox.valueChanged.connect(self._handle_value_changed)
-        self.answer_duration_spinbox.valueChanged.connect(self._handle_value_changed)
         self.upload_sound_button.clicked.connect(self._handle_upload_sound_clicked)
         self.test_sound_button.clicked.connect(self._handle_test_sound_clicked)
+        self.cancel_button.clicked.connect(self._handle_cancel_clicked)
+        self.save_button.clicked.connect(self._handle_save_clicked)
 
     def _load_persisted_settings(self) -> None:
         """Load persisted settings into controls."""
@@ -159,6 +170,7 @@ class SettingsPage(QWidget):
 
     def _update_sound_summary(self) -> None:
         """Refresh selected sound label and test button state."""
+        can_play_sound = self._sound_player is not None
         if not self._notification_sound_path:
             if self._default_notification_sound_path:
                 default_name = Path(self._default_notification_sound_path).name
@@ -168,6 +180,7 @@ class SettingsPage(QWidget):
                 )
                 self.test_sound_button.setEnabled(
                     Path(self._default_notification_sound_path).exists()
+                    and can_play_sound
                 )
                 return
             self.notification_sound_label.setText("Selected sound: None")
@@ -175,15 +188,7 @@ class SettingsPage(QWidget):
             return
         sound_path = Path(self._notification_sound_path)
         self.notification_sound_label.setText(f"Selected sound: {sound_path.name}")
-        self.test_sound_button.setEnabled(sound_path.exists())
-
-    def _handle_value_changed(self, _value: int) -> None:
-        """Persist numeric settings as values change.
-
-        Args:
-            _value: New value emitted by Qt.
-        """
-        self._persist_settings()
+        self.test_sound_button.setEnabled(sound_path.exists() and can_play_sound)
 
     def _handle_upload_sound_clicked(self) -> None:
         """Open a file picker to set notification sound."""
@@ -205,10 +210,24 @@ class SettingsPage(QWidget):
             return
 
         self._update_sound_summary()
+
+    def _handle_cancel_clicked(self) -> None:
+        """Discard unsaved form edits and restore persisted settings."""
+        self._load_persisted_settings()
+
+    def _handle_save_clicked(self) -> None:
+        """Persist current form edits."""
         self._persist_settings()
 
     def _handle_test_sound_clicked(self) -> None:
         """Play the currently selected notification sound."""
+        if self._sound_player is None:
+            QMessageBox.warning(
+                self,
+                "Test sound",
+                "Audio playback is unavailable on this system.",
+            )
+            return
         sound_path_value = (
             self._notification_sound_path or self._default_notification_sound_path
         )

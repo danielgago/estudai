@@ -74,8 +74,9 @@ def test_copy_notification_sound_file_rejects_unsupported_extension(
         copy_notification_sound_file(source_sound)
 
 
-def test_settings_page_persists_spinbox_changes(app: QApplication) -> None:
-    """Verify editing spinbox values writes to persisted settings."""
+def test_settings_page_only_persists_changes_after_save(app: QApplication) -> None:
+    """Verify editing spinbox values persists only when save is clicked."""
+    save_app_settings(AppSettings())
     page = SettingsPage()
 
     page.timer_duration_spinbox.setValue(90)
@@ -83,6 +84,10 @@ def test_settings_page_persists_spinbox_changes(app: QApplication) -> None:
     page.question_duration_spinbox.setValue(5)
     page.answer_duration_spinbox.setValue(11)
 
+    unchanged = load_app_settings()
+    assert unchanged == AppSettings()
+
+    page._handle_save_clicked()
     persisted = load_app_settings()
     assert persisted.timer_duration_seconds == 90
     assert persisted.flashcard_probability_percent == 80
@@ -95,34 +100,58 @@ def test_settings_page_uploads_sound_and_plays_test(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify sound upload copies file and test button triggers playback."""
+    """Verify upload sets pending sound and save persists it."""
     selected_sound = tmp_path / "notification.mp3"
     selected_sound.write_bytes(b"ID3")
+    save_app_settings(AppSettings())
     page = SettingsPage()
     played: list[str] = []
     source_values: list[str] = []
+
+    class _FakePlayer:
+        def setSource(self, url) -> None:  # noqa: N802
+            source_values.append(url.toLocalFile())
+
+        def play(self) -> None:
+            played.append("played")
+
+    monkeypatch.setattr(page, "_sound_player", _FakePlayer())
 
     monkeypatch.setattr(
         "estudai.ui.pages.settings_page.QFileDialog.getOpenFileName",
         lambda *_args, **_kwargs: (str(selected_sound), "Sound files (*.mp3 *.wav)"),
     )
-    monkeypatch.setattr(
-        page._sound_player,
-        "setSource",
-        lambda url: source_values.append(url.toLocalFile()),
-    )
-    monkeypatch.setattr(page._sound_player, "play", lambda: played.append("played"))
-
     page._handle_upload_sound_clicked()
-    persisted = load_app_settings()
-    persisted_sound = Path(persisted.notification_sound_path)
-    assert persisted_sound.exists()
-    assert persisted_sound.suffix == ".mp3"
+    assert page.test_sound_button.isEnabled()
+    assert load_app_settings().notification_sound_path == ""
+
+    page._handle_save_clicked()
+    persisted_sound = Path(load_app_settings().notification_sound_path)
     assert page.test_sound_button.isEnabled()
 
     page._handle_test_sound_clicked()
     assert played == ["played"]
     assert source_values == [str(persisted_sound)]
+
+
+def test_settings_page_cancel_restores_persisted_values(app: QApplication) -> None:
+    """Verify cancel discards unsaved edits and restores persisted values."""
+    save_app_settings(
+        AppSettings(
+            timer_duration_seconds=120,
+            flashcard_probability_percent=55,
+            question_display_duration_seconds=4,
+            answer_display_duration_seconds=7,
+        )
+    )
+    page = SettingsPage()
+    page.timer_duration_spinbox.setValue(999)
+    page.flashcard_probability_spinbox.setValue(1)
+
+    page._handle_cancel_clicked()
+
+    assert page.timer_duration_spinbox.value() == 120
+    assert page.flashcard_probability_spinbox.value() == 55
 
 
 def test_settings_page_warns_and_tests_default_sound(
@@ -139,12 +168,14 @@ def test_settings_page_warns_and_tests_default_sound(
     played: list[str] = []
     source_values: list[str] = []
 
-    monkeypatch.setattr(
-        page._sound_player,
-        "setSource",
-        lambda url: source_values.append(url.toLocalFile()),
-    )
-    monkeypatch.setattr(page._sound_player, "play", lambda: played.append("played"))
+    class _FakePlayer:
+        def setSource(self, url) -> None:  # noqa: N802
+            source_values.append(url.toLocalFile())
+
+        def play(self) -> None:
+            played.append("played")
+
+    monkeypatch.setattr(page, "_sound_player", _FakePlayer())
 
     page._update_sound_summary()
     assert "Selected sound: None." in page.notification_sound_label.text()

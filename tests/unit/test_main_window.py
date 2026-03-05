@@ -10,7 +10,9 @@ import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QPushButton
 
+from estudai.services.csv_flashcards import Flashcard
 from estudai.services.folder_storage import list_persisted_folders
+from estudai.services.settings import AppSettings
 from estudai.ui.main_window import MainWindow
 
 
@@ -229,9 +231,175 @@ def test_start_timer_hides_navigation_until_stopped(app: QApplication) -> None:
     assert window.settings_button.isHidden()
     assert not window.sidebar.isVisible()
 
+    window.timer_page.pause_timer()
+    assert window.sidebar_toggle_button.isHidden()
+    assert window.settings_button.isHidden()
+
     window.timer_page.stop_timer()
     assert not window.sidebar_toggle_button.isHidden()
     assert not window.settings_button.isHidden()
+
+
+def test_settings_save_returns_to_timer_page(app: QApplication) -> None:
+    """Verify saving settings returns focus to timer page."""
+    window = MainWindow()
+    window.switch_to_settings()
+
+    window.settings_page.save_button.click()
+
+    assert window.stacked_widget.currentWidget() is window.timer_page
+
+
+def test_timer_completion_without_trigger_restarts_cycle(
+    app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify completion restarts timer when probability roll does not trigger."""
+    window = MainWindow()
+    monkeypatch.setattr("estudai.ui.main_window.random.randint", lambda *_args: 100)
+
+    window.handle_timer_cycle_completed()
+
+    assert window.timer_page.is_running is True
+    assert window.timer_page.timer_display.text() == "25:00"
+    window.timer_page.stop_timer()
+
+
+def test_timer_completion_with_trigger_and_no_folder_warns_and_restarts(
+    app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify triggered completion warns and restarts when no folder is selected."""
+    window = MainWindow()
+    warnings: list[str] = []
+    monkeypatch.setattr("estudai.ui.main_window.random.randint", lambda *_args: 1)
+    monkeypatch.setattr(
+        "estudai.ui.main_window.QMessageBox.warning",
+        lambda *_args: warnings.append("warning"),
+    )
+
+    window.handle_timer_cycle_completed()
+
+    assert warnings
+    assert window.timer_page.is_running is True
+    window.timer_page.stop_timer()
+
+
+def test_timer_completion_with_trigger_and_no_flashcards_warns_and_restarts(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify triggered completion warns and restarts when selected folders are empty."""
+    window = MainWindow()
+    empty_folder = tmp_path / "empty"
+    empty_folder.mkdir()
+    (empty_folder / "cards.csv").write_text("", encoding="utf-8")
+    assert window.add_folder(empty_folder) is True
+    warnings: list[str] = []
+    monkeypatch.setattr("estudai.ui.main_window.random.randint", lambda *_args: 1)
+    monkeypatch.setattr(
+        "estudai.ui.main_window.QMessageBox.warning",
+        lambda *_args: warnings.append("warning"),
+    )
+
+    window.handle_timer_cycle_completed()
+
+    assert warnings
+    assert window.timer_page.is_running is True
+    window.timer_page.stop_timer()
+
+
+def test_timer_completion_with_trigger_emits_flashcard_event(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify triggered completion emits show-flashcard event with random card."""
+    shown_flashcards: list[str] = []
+    monkeypatch.setattr(
+        "estudai.ui.main_window.MainWindow.show_flashcard_popup",
+        lambda self, flashcard: shown_flashcards.append(flashcard.question),
+    )
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text(
+        "DNA?,Genetic material.\n", encoding="utf-8"
+    )
+    assert window.add_folder(biology_folder) is True
+    emitted_flashcards: list[object] = []
+    warnings: list[str] = []
+    window.show_flashcard_requested.connect(
+        lambda flashcard: emitted_flashcards.append(flashcard)
+    )
+    monkeypatch.setattr("estudai.ui.main_window.random.randint", lambda *_args: 1)
+    monkeypatch.setattr(
+        "estudai.ui.main_window.QMessageBox.warning",
+        lambda *_args: warnings.append("warning"),
+    )
+
+    window.handle_timer_cycle_completed()
+
+    assert not warnings
+    assert len(emitted_flashcards) == 1
+    assert emitted_flashcards[0].question == "DNA?"
+    assert shown_flashcards == ["DNA?"]
+
+
+def test_flashcard_sequence_plays_sound_for_question_and_answer(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify flashcard flow plays notification sound at both phases."""
+    sound_path = tmp_path / "alert.wav"
+    sound_path.write_bytes(b"RIFF....WAVEfmt ")
+    callbacks: list[object] = []
+    source_values: list[str] = []
+    plays: list[str] = []
+    restart_calls: list[str] = []
+    window = MainWindow()
+    flashcard = Flashcard(
+        question="Q?",
+        answer="A.",
+        source_file=tmp_path / "cards.csv",
+        source_line=1,
+    )
+
+    class _FakePlayer:
+        def setSource(self, url) -> None:  # noqa: N802
+            source_values.append(url.toLocalFile())
+
+        def play(self) -> None:
+            plays.append("play")
+
+    monkeypatch.setattr(window, "_flashcard_sound_player", _FakePlayer())
+
+    monkeypatch.setattr(
+        "estudai.ui.main_window.QTimer.singleShot",
+        lambda _delay, callback: callbacks.append(callback),
+    )
+    monkeypatch.setattr(
+        "estudai.ui.main_window.load_app_settings",
+        lambda: AppSettings(
+            timer_duration_seconds=1500,
+            flashcard_probability_percent=30,
+            question_display_duration_seconds=2,
+            answer_display_duration_seconds=3,
+            notification_sound_path=str(sound_path),
+        ),
+    )
+    monkeypatch.setattr(
+        window.timer_page,
+        "restart_timer_cycle",
+        lambda: restart_calls.append("restart"),
+    )
+
+    window.show_flashcard_popup(flashcard)
+    assert window.timer_page.flashcard_question_label.text() == "Q?"
+    assert plays == ["play"]
+    assert len(callbacks) == 1
+
+    callbacks.pop(0)()
+    assert window.timer_page.flashcard_answer_label.text() == "A."
+    assert plays == ["play", "play"]
+    assert len(callbacks) == 1
+
+    callbacks.pop(0)()
+    assert restart_calls == ["restart"]
 
 
 def test_create_folder_from_prompt(
