@@ -234,3 +234,28 @@ def delete_flashcards_from_folder(
     managed_csv = get_managed_csv_path(folder_path)
     _write_flashcards_to_csv(managed_csv, flashcard_rows)
     return load_flashcards_from_csv(managed_csv)
+
+
+def replace_flashcards_in_folder(
+    folder_path: Path,
+    flashcard_rows: list[tuple[str, str]],
+) -> list[Flashcard]:
+    """Replace all flashcards inside one folder.
+
+    Args:
+        folder_path: Target folder path.
+        flashcard_rows: Sequence of `(question, answer)` rows.
+
+    Returns:
+        list[Flashcard]: Updated flashcards from managed CSV.
+    """
+    normalized_rows = [
+        (
+            _validate_flashcard_field(question, "Question"),
+            _validate_flashcard_field(answer, "Answer"),
+        )
+        for question, answer in flashcard_rows
+    ]
+    managed_csv = get_managed_csv_path(folder_path)
+    _write_flashcards_to_csv(managed_csv, normalized_rows)
+    return load_flashcards_from_csv(managed_csv)

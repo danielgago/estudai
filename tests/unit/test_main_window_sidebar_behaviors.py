@@ -28,7 +28,9 @@ def isolated_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ESTUDAI_DATA_DIR", str(tmp_path / "app-data"))
 
 
-def _add_sample_folder(window: MainWindow, tmp_path: Path, name: str = "biology") -> None:
+def _add_sample_folder(
+    window: MainWindow, tmp_path: Path, name: str = "biology"
+) -> None:
     """Create and add a sample folder with one flashcard."""
     folder = tmp_path / name
     folder.mkdir()
@@ -36,7 +38,9 @@ def _add_sample_folder(window: MainWindow, tmp_path: Path, name: str = "biology"
     assert window.add_folder(folder) is True
 
 
-def test_inline_rename_triggers_editor(app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_inline_rename_triggers_editor(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify rename action starts inline editor through timer callback."""
     window = MainWindow()
     _add_sample_folder(window, tmp_path)
@@ -47,7 +51,9 @@ def test_inline_rename_triggers_editor(app: QApplication, tmp_path: Path, monkey
         "estudai.ui.main_window.QTimer.singleShot",
         lambda _delay, callback: callback(),
     )
-    monkeypatch.setattr(window.sidebar_folder_list, "editItem", lambda item: edited_items.append(item))
+    monkeypatch.setattr(
+        window.sidebar_folder_list, "editItem", lambda item: edited_items.append(item)
+    )
 
     window.rename_sidebar_folder(folder_item)
 
@@ -101,7 +107,7 @@ def test_sidebar_click_ignores_non_folder_item(app: QApplication) -> None:
 def test_open_sidebar_menu_rename_action_uses_expected_labels(
     app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Verify context menu uses lowercase labels and dispatches rename action."""
+    """Verify context menu labels and rename dispatch are correct."""
     window = MainWindow()
     _add_sample_folder(window, tmp_path)
     folder_item = window.sidebar_folder_list.item(0)
@@ -136,14 +142,24 @@ def test_open_sidebar_menu_rename_action_uses_expected_labels(
 
     monkeypatch.setattr("estudai.ui.main_window.QMenu", _FakeMenu)
     monkeypatch.setattr(window.sidebar_folder_list, "itemAt", lambda _pos: folder_item)
-    monkeypatch.setattr(window, "rename_sidebar_folder", lambda _item: called.append("rename"))
-    monkeypatch.setattr(window, "delete_sidebar_folders", lambda _items: called.append("delete"))
+    monkeypatch.setattr(
+        window, "rename_sidebar_folder", lambda _item: called.append("rename")
+    )
+    monkeypatch.setattr(
+        window, "delete_sidebar_folders", lambda _items: called.append("delete")
+    )
 
     window.open_sidebar_folder_menu(QPoint(0, 0))
 
     assert called == ["rename"]
-    assert [action.text for action in _FakeMenu.last_instance.actions] == ["rename", "delete"]
-    assert [action.tooltip for action in _FakeMenu.last_instance.actions] == ["rename", "delete"]
+    assert [action.text for action in _FakeMenu.last_instance.actions] == [
+        "Rename",
+        "Delete",
+    ]
+    assert [action.tooltip for action in _FakeMenu.last_instance.actions] == [
+        "Rename",
+        "Delete",
+    ]
 
 
 def test_open_sidebar_menu_delete_dispatch_and_cancel_delete(
@@ -182,9 +198,15 @@ def test_open_sidebar_menu_delete_dispatch_and_cancel_delete(
 
     monkeypatch.setattr("estudai.ui.main_window.QMenu", _FakeMenu)
     monkeypatch.setattr(window.sidebar_folder_list, "itemAt", lambda _pos: first_item)
-    monkeypatch.setattr(window, "_selected_folder_items", lambda: [first_item, second_item])
-    monkeypatch.setattr(window, "rename_sidebar_folder", lambda _item: called.append("rename"))
-    monkeypatch.setattr(window, "delete_sidebar_folders", lambda _items: called.append("delete"))
+    monkeypatch.setattr(
+        window, "_selected_folder_items", lambda: [first_item, second_item]
+    )
+    monkeypatch.setattr(
+        window, "rename_sidebar_folder", lambda _item: called.append("rename")
+    )
+    monkeypatch.setattr(
+        window, "delete_sidebar_folders", lambda _items: called.append("delete")
+    )
 
     window.open_sidebar_folder_menu(QPoint(0, 0))
     assert called == ["delete"]
@@ -223,7 +245,9 @@ def test_handle_management_data_changed_skips_missing_stored_folder(
         source_path="",
         stored_path=str(tmp_path / "not-there"),
     )
-    monkeypatch.setattr("estudai.ui.main_window.list_persisted_folders", lambda: [fake_folder])
+    monkeypatch.setattr(
+        "estudai.ui.main_window.list_persisted_folders", lambda: [fake_folder]
+    )
 
     window.handle_management_data_changed()
 

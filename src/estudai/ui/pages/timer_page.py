@@ -1,11 +1,13 @@
 """Timer page."""
 
-from PySide6.QtCore import QTime, Qt, QTimer
+from PySide6.QtCore import QTime, Qt, QTimer, Signal
 from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
 
 
 class TimerPage(QWidget):
     """Timer page for study sessions."""
+
+    timer_running_changed = Signal(bool)
 
     def __init__(self):
         super().__init__()
@@ -56,6 +58,7 @@ class TimerPage(QWidget):
             self.timer.start(1000)
             self.start_button.setEnabled(False)
             self.stop_button.setEnabled(True)
+            self.timer_running_changed.emit(True)
 
     def stop_timer(self):
         """Stop the timer."""
@@ -64,6 +67,7 @@ class TimerPage(QWidget):
             self.timer.stop()
             self.start_button.setEnabled(True)
             self.stop_button.setEnabled(False)
+            self.timer_running_changed.emit(False)
 
     def reset_timer(self):
         """Reset the timer."""

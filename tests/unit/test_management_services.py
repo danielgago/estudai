@@ -9,6 +9,7 @@ from estudai.services.csv_flashcards import (
     add_flashcard_to_folder,
     delete_flashcards_from_folder,
     load_flashcards_from_folder,
+    replace_flashcards_in_folder,
     update_flashcard_in_folder,
 )
 from estudai.services.folder_storage import (
@@ -77,3 +78,25 @@ def test_add_flashcard_validates_non_empty_fields() -> None:
 
     with pytest.raises(ValueError):
         add_flashcard_to_folder(folder_path, "Valid question", "")
+
+
+def test_replace_flashcards_persists_and_validates() -> None:
+    """Verify replacing all flashcards validates fields and writes managed CSV."""
+    created_folder = create_managed_folder("History")
+    folder_path = Path(created_folder.stored_path)
+
+    with pytest.raises(ValueError):
+        replace_flashcards_in_folder(folder_path, [(" ", "Valid answer")])
+
+    flashcards = replace_flashcards_in_folder(
+        folder_path,
+        [
+            ("Who discovered Brazil?", "Pedro Alvares Cabral."),
+            ("What year was it?", "1500."),
+        ],
+    )
+    loaded_flashcards = load_flashcards_from_folder(folder_path)
+
+    assert len(flashcards) == 2
+    assert loaded_flashcards[0].question == "Who discovered Brazil?"
+    assert loaded_flashcards[1].answer == "1500."

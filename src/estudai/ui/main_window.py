@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -19,15 +20,20 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from estudai.services.csv_flashcards import Flashcard, load_flashcards_from_folder
+from estudai.services.csv_flashcards import (
+    Flashcard,
+    load_flashcards_from_folder,
+    replace_flashcards_in_folder,
+)
 from estudai.services.folder_storage import (
+    create_managed_folder,
     delete_persisted_folder,
     import_folder,
     list_persisted_folders,
     rename_persisted_folder,
 )
 
-from .pages import SettingsPage, TimerPage
+from .pages import ManagementPage, SettingsPage, TimerPage
 
 
 class MainWindow(QMainWindow):
@@ -36,10 +42,13 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.flashcards_by_folder: dict[str, list[Flashcard]] = {}
+        self.persisted_folder_paths: dict[str, Path] = {}
+        self.selected_flashcard_indexes_by_folder: dict[str, set[int]] = {}
         self.loaded_flashcards: list[Flashcard] = []
         self.selected_folder_ids: set[str] = set()
         self.current_folder_id: str | None = None
         self.current_folder_name = "No folders selected"
+        self._editing_folder_id: str | None = None
         self._renaming_folder_id: str | None = None
         self._renaming_original_name: str | None = None
         self.setWindowTitle("Estudai!")
@@ -55,9 +64,20 @@ class MainWindow(QMainWindow):
         self._build_content_area(root_layout)
 
         self.timer_page = TimerPage()
+        self.management_page = ManagementPage()
         self.settings_page = SettingsPage()
         self.stacked_widget.addWidget(self.timer_page)
+        self.stacked_widget.addWidget(self.management_page)
         self.stacked_widget.addWidget(self.settings_page)
+        self.timer_page.timer_running_changed.connect(self.handle_timer_running_changed)
+        self.management_page.add_flashcard_button.clicked.connect(
+            self.management_page.add_empty_flashcard_row
+        )
+        self.management_page.delete_flashcard_button.clicked.connect(
+            self.delete_selected_flashcards_from_management
+        )
+        self.management_page.save_button.clicked.connect(self.save_management_changes)
+        self.management_page.cancel_button.clicked.connect(self.switch_to_timer)
 
         self.stacked_widget.setCurrentWidget(self.timer_page)
         self.timer_page.set_flashcard_context(self.current_folder_name, 0)
@@ -83,6 +103,9 @@ class MainWindow(QMainWindow):
         self.sidebar_folder_list.setEditTriggers(QListWidget.NoEditTriggers)
         self.sidebar_folder_list.itemChanged.connect(self.handle_sidebar_item_changed)
         self.sidebar_folder_list.itemClicked.connect(self.handle_sidebar_folder_click)
+        self.sidebar_folder_list.itemDoubleClicked.connect(
+            self.handle_sidebar_folder_double_click
+        )
         self.sidebar_folder_list.itemDelegate().closeEditor.connect(
             self.handle_sidebar_editor_closed
         )
@@ -92,9 +115,13 @@ class MainWindow(QMainWindow):
         )
         sidebar_layout.addWidget(self.sidebar_folder_list)
 
-        add_folder_button = QPushButton("Add Folder")
-        add_folder_button.clicked.connect(self.prompt_and_add_folder)
-        sidebar_layout.addWidget(add_folder_button)
+        import_folder_button = QPushButton("Import Folder")
+        import_folder_button.clicked.connect(self.prompt_and_add_folder)
+        sidebar_layout.addWidget(import_folder_button)
+
+        create_folder_button = QPushButton("Create Folder")
+        create_folder_button.clicked.connect(self.prompt_and_create_folder)
+        sidebar_layout.addWidget(create_folder_button)
         sidebar_layout.addStretch()
 
         root_layout.addWidget(self.sidebar)
@@ -139,12 +166,24 @@ class MainWindow(QMainWindow):
         """Switch to timer page."""
         self.stacked_widget.setCurrentWidget(self.timer_page)
 
+    def switch_to_management(self) -> None:
+        """Switch to flashcard management page."""
+        self.stacked_widget.setCurrentWidget(self.management_page)
+
     def switch_to_settings(self):
         """Switch to settings page or back to timer when already there."""
         if self.stacked_widget.currentWidget() is self.settings_page:
             self.switch_to_timer()
             return
         self.stacked_widget.setCurrentWidget(self.settings_page)
+
+    def handle_timer_running_changed(self, is_running: bool) -> None:
+        """Hide editing/navigation controls while timer is active.
+
+        Args:
+            is_running: Whether timer is currently running.
+        """
+        self.set_navigation_visible(not is_running)
 
     def toggle_sidebar(self):
         """Show or hide the left sidebar."""
@@ -198,6 +237,7 @@ class MainWindow(QMainWindow):
         """Refresh selected flashcards from checked folders."""
         checked_folder_ids: list[str] = []
         checked_folder_names: list[str] = []
+        selected_flashcards: list[Flashcard] = []
         for index in range(self.sidebar_folder_list.count()):
             item = self.sidebar_folder_list.item(index)
             folder_id = item.data(Qt.UserRole)
@@ -205,6 +245,16 @@ class MainWindow(QMainWindow):
                 continue
             checked_folder_ids.append(folder_id)
             checked_folder_names.append(item.text())
+            folder_flashcards = self.flashcards_by_folder.get(folder_id, [])
+            selected_indexes = self.selected_flashcard_indexes_by_folder.get(
+                folder_id,
+                set(range(len(folder_flashcards))),
+            )
+            selected_flashcards.extend(
+                flashcard
+                for flashcard_index, flashcard in enumerate(folder_flashcards)
+                if flashcard_index in selected_indexes
+            )
 
         self.selected_folder_ids = set(checked_folder_ids)
         if not checked_folder_ids:
@@ -214,17 +264,11 @@ class MainWindow(QMainWindow):
         elif len(checked_folder_ids) == 1:
             self.current_folder_id = checked_folder_ids[0]
             self.current_folder_name = checked_folder_names[0]
-            self.loaded_flashcards = self.flashcards_by_folder.get(
-                self.current_folder_id, []
-            )
+            self.loaded_flashcards = selected_flashcards
         else:
             self.current_folder_id = None
             self.current_folder_name = f"{len(checked_folder_ids)} folders selected"
-            self.loaded_flashcards = [
-                flashcard
-                for folder_id in checked_folder_ids
-                for flashcard in self.flashcards_by_folder.get(folder_id, [])
-            ]
+            self.loaded_flashcards = selected_flashcards
         self.timer_page.set_flashcard_context(
             self.current_folder_name,
             len(self.loaded_flashcards),
@@ -239,6 +283,17 @@ class MainWindow(QMainWindow):
         if not self._is_folder_item(item):
             return
         self._handle_inline_rename(item)
+        folder_id = item.data(Qt.UserRole)
+        if folder_id is not None:
+            is_checked = item.checkState() == Qt.Checked
+            was_checked = folder_id in self.selected_folder_ids
+            if is_checked and not was_checked:
+                folder_flashcards = self.flashcards_by_folder.get(folder_id, [])
+                self.selected_flashcard_indexes_by_folder[folder_id] = set(
+                    range(len(folder_flashcards))
+                )
+            elif not is_checked and was_checked:
+                self.selected_flashcard_indexes_by_folder[folder_id] = set()
         self._refresh_loaded_flashcards()
 
     def _handle_inline_rename(self, item: QListWidgetItem) -> None:
@@ -278,6 +333,19 @@ class MainWindow(QMainWindow):
         if not self._is_folder_item(clicked_item):
             return
         self.switch_to_timer()
+
+    def handle_sidebar_folder_double_click(self, clicked_item: QListWidgetItem) -> None:
+        """Open folder management when a folder is double-clicked.
+
+        Args:
+            clicked_item: The double-clicked folder list item.
+        """
+        if not self._is_folder_item(clicked_item):
+            return
+        folder_id = clicked_item.data(Qt.UserRole)
+        if folder_id is None:
+            return
+        self.open_management_for_folder(folder_id, clicked_item.text())
 
     def open_sidebar_folder_menu(self, position: QPoint) -> None:
         """Open the right-click folder menu.
@@ -362,6 +430,136 @@ class MainWindow(QMainWindow):
             return
         self.add_folder(Path(selected_path))
 
+    def prompt_and_create_folder(self) -> None:
+        """Prompt for a folder name and create a managed empty folder."""
+        folder_name, accepted = QInputDialog.getText(
+            self,
+            "Create folder",
+            "Folder name:",
+        )
+        if not accepted:
+            return
+        checked_ids = self._get_checked_folder_ids()
+        try:
+            persisted_folder = create_managed_folder(folder_name)
+        except ValueError as error:
+            QMessageBox.warning(self, "Create folder", str(error))
+            return
+        checked_ids.add(persisted_folder.id)
+        self.handle_management_data_changed(preferred_checked_ids=checked_ids)
+
+    def open_management_from_selection(self) -> None:
+        """Open management for one selected/checked folder."""
+        selected_items = self._selected_folder_items()
+        if len(selected_items) == 1:
+            folder_item = selected_items[0]
+            folder_id = folder_item.data(Qt.UserRole)
+            if folder_id is not None:
+                self.open_management_for_folder(folder_id, folder_item.text())
+                return
+        checked_items = [
+            self.sidebar_folder_list.item(index)
+            for index in range(self.sidebar_folder_list.count())
+            if self._is_folder_item(self.sidebar_folder_list.item(index))
+            and self.sidebar_folder_list.item(index).checkState() == Qt.Checked
+        ]
+        if len(checked_items) == 1:
+            folder_item = checked_items[0]
+            folder_id = folder_item.data(Qt.UserRole)
+            if folder_id is not None:
+                self.open_management_for_folder(folder_id, folder_item.text())
+                return
+        QMessageBox.information(
+            self,
+            "Manage flashcards",
+            "Select one folder (or double-click one) to edit its flashcards.",
+        )
+
+    def open_management_for_folder(self, folder_id: str, folder_name: str) -> None:
+        """Load one folder into management page and switch to it.
+
+        Args:
+            folder_id: Folder identifier.
+            folder_name: Display name used in the sidebar.
+        """
+        if folder_id not in self.flashcards_by_folder:
+            self.handle_management_data_changed(
+                preferred_checked_ids=self._get_checked_folder_ids()
+            )
+        if folder_id not in self.flashcards_by_folder:
+            QMessageBox.warning(
+                self,
+                "Manage flashcards",
+                "This folder is unavailable. Try re-importing it.",
+            )
+            return
+        folder_flashcards = self.flashcards_by_folder.get(folder_id, [])
+        selected_indexes = self.selected_flashcard_indexes_by_folder.get(
+            folder_id,
+            set(range(len(folder_flashcards))),
+        )
+        self._editing_folder_id = folder_id
+        self.management_page.set_folder_flashcards(
+            folder_id,
+            folder_name,
+            folder_flashcards,
+            selected_indexes,
+        )
+        self.switch_to_management()
+
+    def delete_selected_flashcards_from_management(self) -> None:
+        """Delete selected rows from management table with confirmation."""
+        selected_rows = self.management_page.selected_table_rows()
+        if not selected_rows:
+            QMessageBox.information(
+                self,
+                "Delete flashcards",
+                "Select one or more flashcards first.",
+            )
+            return
+        confirmation = QMessageBox.question(
+            self,
+            "Delete flashcards",
+            f"Delete {len(selected_rows)} selected flashcard(s)?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirmation != QMessageBox.Yes:
+            return
+        self.management_page.remove_rows(selected_rows)
+
+    def save_management_changes(self) -> None:
+        """Persist flashcard table edits and return to timer page."""
+        if self._editing_folder_id is None:
+            QMessageBox.warning(
+                self,
+                "Save flashcards",
+                "No folder selected for editing.",
+            )
+            return
+        folder_path = self.persisted_folder_paths.get(self._editing_folder_id)
+        if folder_path is None:
+            QMessageBox.warning(
+                self,
+                "Save flashcards",
+                "Folder storage is unavailable. Please refresh and try again.",
+            )
+            return
+        try:
+            flashcard_rows, selected_indexes = (
+                self.management_page.collect_flashcards_for_save()
+            )
+            replace_flashcards_in_folder(folder_path, flashcard_rows)
+        except ValueError as error:
+            QMessageBox.warning(self, "Save flashcards", str(error))
+            return
+        checked_ids = self._get_checked_folder_ids()
+        self.selected_flashcard_indexes_by_folder[self._editing_folder_id] = (
+            selected_indexes
+        )
+        self.handle_management_data_changed(preferred_checked_ids=checked_ids)
+        self.switch_to_timer()
+
     def add_folder(self, folder_path: Path) -> bool:
         """Copy one selected folder, persist it, and load flashcards.
 
@@ -414,6 +612,8 @@ class MainWindow(QMainWindow):
             preferred_checked_ids: Folder ids that should remain checked.
         """
         self.flashcards_by_folder = {}
+        self.persisted_folder_paths = {}
+        remaining_folder_ids: set[str] = set()
         self.sidebar_folder_list.blockSignals(True)
         self.sidebar_folder_list.clear()
 
@@ -421,9 +621,25 @@ class MainWindow(QMainWindow):
             stored_folder = Path(persisted_folder.stored_path)
             if not stored_folder.exists():
                 continue
+            remaining_folder_ids.add(persisted_folder.id)
+            self.persisted_folder_paths[persisted_folder.id] = stored_folder
             self.flashcards_by_folder[persisted_folder.id] = (
                 load_flashcards_from_folder(stored_folder)
             )
+            folder_flashcards = self.flashcards_by_folder[persisted_folder.id]
+            existing_indexes = self.selected_flashcard_indexes_by_folder.get(
+                persisted_folder.id
+            )
+            if existing_indexes is None:
+                self.selected_flashcard_indexes_by_folder[persisted_folder.id] = set(
+                    range(len(folder_flashcards))
+                )
+            else:
+                self.selected_flashcard_indexes_by_folder[persisted_folder.id] = {
+                    flashcard_index
+                    for flashcard_index in existing_indexes
+                    if 0 <= flashcard_index < len(folder_flashcards)
+                }
             is_checked = (
                 True
                 if preferred_checked_ids is None
@@ -443,6 +659,11 @@ class MainWindow(QMainWindow):
         else:
             self.sidebar_folder_list.setCurrentRow(0)
         self.sidebar_folder_list.blockSignals(False)
+        self.selected_flashcard_indexes_by_folder = {
+            folder_id: indexes
+            for folder_id, indexes in self.selected_flashcard_indexes_by_folder.items()
+            if folder_id in remaining_folder_ids
+        }
         self._refresh_loaded_flashcards()
 
     def set_navigation_visible(self, visible: bool):
