@@ -15,6 +15,21 @@ estudai = "estudai.main:main"
 [tool.uv]
 package = true
 
+[tool.cxfreeze]
+executables = [
+    { script = "src/estudai/main.py", base = "gui", target_name = "Estudai.exe" },
+]
+
+[tool.cxfreeze.build_exe]
+include_msvcr = true
+packages = ["PySide6", "pylatexenc"]
+
+[tool.cxfreeze.bdist_msi]
+add_to_path = false
+all_users = false
+initial_target_dir = "[ProgramFiles64Folder]Estudai"
+upgrade_code = "{D143C7D2-37F8-4B4A-AFC2-9D45E8A6A6C8}"
+
 [dependency-groups]
 dev = [
     "ruff>=0.15.4",
@@ -32,4 +47,3 @@ markers = [
     "unit: unit tests",
     "integration: integration tests",
 ]
-
