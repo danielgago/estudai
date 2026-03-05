@@ -20,8 +20,14 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from estudai.services.folder_storage import create_managed_folder, list_persisted_folders
-from estudai.services.notebooklm_import import NotebookLMPreviewRow, parse_notebooklm_csv
+from estudai.services.folder_storage import (
+    create_managed_folder,
+    list_persisted_folders,
+)
+from estudai.services.notebooklm_import import (
+    NotebookLMPreviewRow,
+    parse_notebooklm_csv,
+)
 
 
 class NotebookLMCsvImportDialog(QDialog):
@@ -85,8 +91,12 @@ class NotebookLMCsvImportDialog(QDialog):
             1,
             QHeaderView.ResizeToContents,
         )
-        self.preview_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        self.preview_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.preview_table.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.Stretch
+        )
+        self.preview_table.horizontalHeader().setSectionResizeMode(
+            3, QHeaderView.Stretch
+        )
         self.preview_table.horizontalHeader().setSectionResizeMode(
             4,
             QHeaderView.Stretch,
@@ -174,7 +184,9 @@ class NotebookLMCsvImportDialog(QDialog):
             status = "Valid" if row.is_valid else "Invalid"
             reason = "" if row.is_valid else row.reason
             self.preview_table.setItem(row_index, 0, QTableWidgetItem(status))
-            self.preview_table.setItem(row_index, 1, QTableWidgetItem(str(row.row_number)))
+            self.preview_table.setItem(
+                row_index, 1, QTableWidgetItem(str(row.row_number))
+            )
             self.preview_table.setItem(row_index, 2, QTableWidgetItem(row.question))
             self.preview_table.setItem(row_index, 3, QTableWidgetItem(row.answer))
             self.preview_table.setItem(row_index, 4, QTableWidgetItem(reason))

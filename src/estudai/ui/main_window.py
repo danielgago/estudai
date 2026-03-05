@@ -523,7 +523,11 @@ class MainWindow(QMainWindow):
             return
 
         persisted_folder = next(
-            (folder for folder in list_persisted_folders() if folder.id == target_folder_id),
+            (
+                folder
+                for folder in list_persisted_folders()
+                if folder.id == target_folder_id
+            ),
             None,
         )
         if persisted_folder is None:
