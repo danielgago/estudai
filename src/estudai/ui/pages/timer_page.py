@@ -9,9 +9,10 @@ class TimerPage(QWidget):
 
     timer_running_changed = Signal(bool)
 
-    def __init__(self):
+    def __init__(self, default_duration_seconds: int = 25 * 60):
         super().__init__()
-        self.time = QTime(0, 25, 0)
+        self._default_duration_seconds = max(1, int(default_duration_seconds))
+        self.time = QTime(0, 0, 0).addSecs(self._default_duration_seconds)
         self.is_running = False
         self.init_ui()
 
@@ -72,7 +73,7 @@ class TimerPage(QWidget):
     def reset_timer(self):
         """Reset the timer."""
         self.stop_timer()
-        self.time = QTime(0, 25, 0)
+        self.time = QTime(0, 0, 0).addSecs(self._default_duration_seconds)
         self.timer_display.setText(self.time.toString("mm:ss"))
 
     def update_timer(self):
@@ -91,3 +92,14 @@ class TimerPage(QWidget):
             card_count: Number of loaded flashcards in scope.
         """
         self.folder_context_label.setText(f"Folder: {folder_name} ({card_count} cards)")
+
+    def set_timer_duration_seconds(self, duration_seconds: int) -> None:
+        """Set the default timer duration used by reset and idle display.
+
+        Args:
+            duration_seconds: New default countdown duration in seconds.
+        """
+        self._default_duration_seconds = max(1, int(duration_seconds))
+        if not self.is_running:
+            self.time = QTime(0, 0, 0).addSecs(self._default_duration_seconds)
+            self.timer_display.setText(self.time.toString("mm:ss"))
