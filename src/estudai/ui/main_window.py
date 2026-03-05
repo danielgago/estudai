@@ -51,6 +51,21 @@ class MainWindow(QMainWindow):
         root_layout.setContentsMargins(12, 12, 12, 12)
         root_layout.setSpacing(12)
 
+        self._build_sidebar(root_layout)
+        self._build_content_area(root_layout)
+
+        self.timer_page = TimerPage()
+        self.settings_page = SettingsPage()
+        self.stacked_widget.addWidget(self.timer_page)
+        self.stacked_widget.addWidget(self.settings_page)
+
+        self.stacked_widget.setCurrentWidget(self.timer_page)
+        self.timer_page.set_flashcard_context(self.current_folder_name, 0)
+        self.handle_management_data_changed()
+        self._update_sidebar_width()
+
+    def _build_sidebar(self, root_layout: QHBoxLayout) -> None:
+        """Build the sidebar area."""
         self.sidebar = QFrame()
         self.sidebar.setFrameShape(QFrame.StyledPanel)
         self.sidebar.setVisible(False)
@@ -84,6 +99,8 @@ class MainWindow(QMainWindow):
 
         root_layout.addWidget(self.sidebar)
 
+    def _build_content_area(self, root_layout: QHBoxLayout) -> None:
+        """Build the content area with top actions and pages stack."""
         content_container = QWidget()
         content_layout = QVBoxLayout(content_container)
         content_layout.setContentsMargins(0, 0, 0, 0)
@@ -107,16 +124,6 @@ class MainWindow(QMainWindow):
         self.stacked_widget = QStackedWidget()
         content_layout.addWidget(self.stacked_widget)
         root_layout.addWidget(content_container)
-
-        self.timer_page = TimerPage()
-        self.settings_page = SettingsPage()
-        self.stacked_widget.addWidget(self.timer_page)
-        self.stacked_widget.addWidget(self.settings_page)
-
-        self.stacked_widget.setCurrentWidget(self.timer_page)
-        self.timer_page.set_flashcard_context(self.current_folder_name, 0)
-        self.handle_management_data_changed()
-        self._update_sidebar_width()
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         """Resize sidebar width proportionally with window size."""
@@ -153,6 +160,23 @@ class MainWindow(QMainWindow):
             bool: True when item represents a folder.
         """
         return item is not None and item.data(Qt.UserRole) is not None
+
+    def _selected_folder_items(self) -> list[QListWidgetItem]:
+        """Return selected list items that map to persisted folders.
+
+        Returns:
+            list[QListWidgetItem]: Selected folder items.
+        """
+        return [
+            item
+            for item in self.sidebar_folder_list.selectedItems()
+            if self._is_folder_item(item)
+        ]
+
+    def _clear_rename_tracking(self) -> None:
+        """Clear inline-rename tracking state."""
+        self._renaming_folder_id = None
+        self._renaming_original_name = None
 
     def _get_checked_folder_ids(self) -> set[str]:
         """Return ids for currently checked folders.
@@ -232,8 +256,7 @@ class MainWindow(QMainWindow):
             return
 
         checked_ids = self._get_checked_folder_ids()
-        self._renaming_folder_id = None
-        self._renaming_original_name = None
+        self._clear_rename_tracking()
         try:
             rename_persisted_folder(folder_id, new_name)
         except (KeyError, ValueError) as error:
@@ -244,8 +267,7 @@ class MainWindow(QMainWindow):
 
     def handle_sidebar_editor_closed(self, *_: object) -> None:
         """Clear inline rename tracking when editor closes."""
-        self._renaming_folder_id = None
-        self._renaming_original_name = None
+        self._clear_rename_tracking()
 
     def handle_sidebar_folder_click(self, clicked_item: QListWidgetItem):
         """Handle folder clicks and switch back to timer.
@@ -270,19 +292,15 @@ class MainWindow(QMainWindow):
         if not clicked_item.isSelected():
             self.sidebar_folder_list.clearSelection()
             clicked_item.setSelected(True)
-        selected_folder_items = [
-            item
-            for item in self.sidebar_folder_list.selectedItems()
-            if self._is_folder_item(item)
-        ]
+        selected_folder_items = self._selected_folder_items()
         if not selected_folder_items:
             return
 
         menu = QMenu(self)
-        rename_action = menu.addAction("Rename")
-        rename_action.setToolTip("Rename")
-        delete_action = menu.addAction("Delete")
-        delete_action.setToolTip("Delete")
+        rename_action = menu.addAction("rename")
+        rename_action.setToolTip("rename")
+        delete_action = menu.addAction("delete")
+        delete_action.setToolTip("delete")
         rename_action.setEnabled(len(selected_folder_items) == 1)
         chosen_action = menu.exec(
             self.sidebar_folder_list.viewport().mapToGlobal(position)
@@ -362,6 +380,31 @@ class MainWindow(QMainWindow):
         self.handle_management_data_changed(preferred_checked_ids=checked_ids)
         return True
 
+    def _create_sidebar_folder_item(
+        self, folder_id: str, folder_name: str, checked: bool
+    ) -> QListWidgetItem:
+        """Create one folder item for the sidebar list.
+
+        Args:
+            folder_id: Folder identifier.
+            folder_name: Display name.
+            checked: Whether the item starts checked.
+
+        Returns:
+            QListWidgetItem: Configured list item.
+        """
+        folder_item = QListWidgetItem(folder_name)
+        folder_item.setData(Qt.UserRole, folder_id)
+        folder_item.setFlags(
+            folder_item.flags()
+            | Qt.ItemIsUserCheckable
+            | Qt.ItemIsEnabled
+            | Qt.ItemIsSelectable
+            | Qt.ItemIsEditable
+        )
+        folder_item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
+        return folder_item
+
     def handle_management_data_changed(
         self, preferred_checked_ids: set[str] | None = None
     ) -> None:
@@ -381,23 +424,16 @@ class MainWindow(QMainWindow):
             self.flashcards_by_folder[persisted_folder.id] = (
                 load_flashcards_from_folder(stored_folder)
             )
-            folder_item = QListWidgetItem(persisted_folder.name)
-            folder_item.setData(Qt.UserRole, persisted_folder.id)
-            folder_item.setFlags(
-                folder_item.flags()
-                | Qt.ItemIsUserCheckable
-                | Qt.ItemIsEnabled
-                | Qt.ItemIsSelectable
-                | Qt.ItemIsEditable
+            is_checked = (
+                True
+                if preferred_checked_ids is None
+                else persisted_folder.id in preferred_checked_ids
             )
-            if preferred_checked_ids is None:
-                folder_item.setCheckState(Qt.Checked)
-            else:
-                folder_item.setCheckState(
-                    Qt.Checked
-                    if persisted_folder.id in preferred_checked_ids
-                    else Qt.Unchecked
-                )
+            folder_item = self._create_sidebar_folder_item(
+                persisted_folder.id,
+                persisted_folder.name,
+                checked=is_checked,
+            )
             self.sidebar_folder_list.addItem(folder_item)
 
         if self.sidebar_folder_list.count() == 0:
