@@ -15,6 +15,7 @@ from estudai.services.csv_flashcards import (
 from estudai.services.folder_storage import (
     create_managed_folder,
     delete_persisted_folder,
+    get_registry_path,
     list_persisted_folders,
     rename_persisted_folder,
 )
@@ -100,3 +101,19 @@ def test_replace_flashcards_persists_and_validates() -> None:
     assert len(flashcards) == 2
     assert loaded_flashcards[0].question == "Who discovered Brazil?"
     assert loaded_flashcards[1].answer == "1500."
+
+
+def test_list_persisted_folders_handles_corrupt_registry_json() -> None:
+    """Verify corrupt registry JSON does not crash folder listing."""
+    registry_path = get_registry_path()
+    registry_path.write_text("{invalid json", encoding="utf-8")
+
+    assert list_persisted_folders() == []
+
+
+def test_list_persisted_folders_ignores_non_list_registry_payload() -> None:
+    """Verify non-list registry payloads are treated as empty data."""
+    registry_path = get_registry_path()
+    registry_path.write_text('{"id":"single-object"}', encoding="utf-8")
+
+    assert list_persisted_folders() == []

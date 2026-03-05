@@ -98,7 +98,12 @@ def list_persisted_folders() -> list[PersistedFolder]:
     if not registry_path.exists():
         return []
 
-    entries = json.loads(registry_path.read_text(encoding="utf-8"))
+    try:
+        entries = json.loads(registry_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(entries, list):
+        return []
     persisted_folders: list[PersistedFolder] = []
     for entry in entries:
         try:
@@ -108,7 +113,7 @@ def list_persisted_folders() -> list[PersistedFolder]:
                 source_path=str(entry["source_path"]),
                 stored_path=str(entry["stored_path"]),
             )
-        except KeyError:
+        except (KeyError, TypeError):
             continue
         if Path(persisted_folder.stored_path).exists():
             persisted_folders.append(persisted_folder)
