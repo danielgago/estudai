@@ -40,7 +40,9 @@ def get_app_data_dir() -> Path:
         data_dir = base_dir / APP_NAME
     else:
         xdg_data_home = os.getenv("XDG_DATA_HOME")
-        base_dir = Path(xdg_data_home) if xdg_data_home else Path.home() / ".local" / "share"
+        base_dir = (
+            Path(xdg_data_home) if xdg_data_home else Path.home() / ".local" / "share"
+        )
         data_dir = base_dir / APP_NAME
 
     data_dir.mkdir(parents=True, exist_ok=True)

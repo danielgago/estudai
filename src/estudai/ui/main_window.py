@@ -18,7 +18,11 @@ from PySide6.QtWidgets import (
 )
 
 from estudai.services.csv_flashcards import Flashcard, load_flashcards_from_folder
-from estudai.services.folder_storage import PersistedFolder, import_folder, list_persisted_folders
+from estudai.services.folder_storage import (
+    PersistedFolder,
+    import_folder,
+    list_persisted_folders,
+)
 
 from .pages import FoldersPage, SettingsPage
 from .timer_page import TimerPage
@@ -154,7 +158,9 @@ class MainWindow(QMainWindow):
                 for flashcard in flashcards
             ]
         else:
-            self.loaded_flashcards = self.flashcards_by_folder.get(self.current_folder_id, [])
+            self.loaded_flashcards = self.flashcards_by_folder.get(
+                self.current_folder_id, []
+            )
         self.timer_page.set_flashcard_context(
             self.current_folder_name, len(self.loaded_flashcards)
         )
@@ -219,7 +225,9 @@ class MainWindow(QMainWindow):
             if item.data(Qt.UserRole) == persisted_folder.id:
                 item.setText(persisted_folder.name)
                 if self.current_folder_id == persisted_folder.id:
-                    self.loaded_flashcards = self.flashcards_by_folder[persisted_folder.id]
+                    self.loaded_flashcards = self.flashcards_by_folder[
+                        persisted_folder.id
+                    ]
                     self.timer_page.set_flashcard_context(
                         self.current_folder_name, len(self.loaded_flashcards)
                     )

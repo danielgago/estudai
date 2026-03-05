@@ -30,6 +30,8 @@ class FoldersPage(QWidget):
         layout.addWidget(subtitle)
 
         placeholder = QLabel("Selected folders appear in the sidebar.")
-        placeholder.setStyleSheet("padding: 16px; border: 1px dashed #aaa; border-radius: 6px;")
+        placeholder.setStyleSheet(
+            "padding: 16px; border: 1px dashed #aaa; border-radius: 6px;"
+        )
         layout.addWidget(placeholder)
         layout.addStretch()

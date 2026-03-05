@@ -123,4 +123,7 @@ def test_folder_copy_persists_after_source_deletion(
     second_window.handle_sidebar_folder_click(second_window.sidebar_folder_list.item(1))
     assert second_window.current_folder_name == "chemistry"
     assert len(second_window.loaded_flashcards) == 1
-    assert second_window.timer_page.folder_context_label.text() == "Folder: chemistry (1 cards)"
+    assert (
+        second_window.timer_page.folder_context_label.text()
+        == "Folder: chemistry (1 cards)"
+    )
