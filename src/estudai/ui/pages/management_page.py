@@ -167,7 +167,9 @@ class ManagementPage(QWidget):
 
         menu = QMenu(self)
         delete_action = menu.addAction("Delete")
-        chosen_action = menu.exec(self.flashcards_table.viewport().mapToGlobal(position))
+        chosen_action = menu.exec(
+            self.flashcards_table.viewport().mapToGlobal(position)
+        )
         if chosen_action is delete_action:
             self.delete_requested.emit()
 

@@ -238,7 +238,9 @@ class MainWindow(QMainWindow):
             QPoint(0, self.sidebar_toggle_button.height() + 8),
         )
         bottom_margin = 12
-        available_height = max(120, central_widget.height() - anchor_point.y() - bottom_margin)
+        available_height = max(
+            120, central_widget.height() - anchor_point.y() - bottom_margin
+        )
         self.sidebar.setFixedHeight(available_height)
         self.sidebar.move(anchor_point.x(), anchor_point.y())
         self.sidebar.raise_()
@@ -1036,7 +1038,9 @@ class MainWindow(QMainWindow):
         folder_name = item.data(self.FOLDER_NAME_ROLE)
         return folder_name if isinstance(folder_name, str) else item.text()
 
-    def _format_sidebar_folder_label(self, folder_name: str, flashcard_count: int) -> str:
+    def _format_sidebar_folder_label(
+        self, folder_name: str, flashcard_count: int
+    ) -> str:
         """Build sidebar folder label with card count."""
         card_word = "card" if flashcard_count == 1 else "cards"
         return f"{folder_name} ({flashcard_count} {card_word})"
