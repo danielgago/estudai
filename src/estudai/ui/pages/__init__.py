@@ -1,6 +1,6 @@
 """UI pages package."""
 
-from .folders_page import FoldersPage
 from .settings_page import SettingsPage
+from .timer_page import TimerPage
 
-__all__ = ["FoldersPage", "SettingsPage"]
+__all__ = ["SettingsPage", "TimerPage"]

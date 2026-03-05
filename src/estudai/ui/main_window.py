@@ -2,15 +2,18 @@
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMenu,
+    QMessageBox,
     QPushButton,
     QStackedWidget,
     QVBoxLayout,
@@ -19,13 +22,13 @@ from PySide6.QtWidgets import (
 
 from estudai.services.csv_flashcards import Flashcard, load_flashcards_from_folder
 from estudai.services.folder_storage import (
-    PersistedFolder,
+    delete_persisted_folder,
     import_folder,
     list_persisted_folders,
+    rename_persisted_folder,
 )
 
-from .pages import FoldersPage, SettingsPage
-from .timer_page import TimerPage
+from .pages import SettingsPage, TimerPage
 
 
 class MainWindow(QMainWindow):
@@ -35,9 +38,11 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.flashcards_by_folder: dict[str, list[Flashcard]] = {}
         self.loaded_flashcards: list[Flashcard] = []
+        self.selected_folder_ids: set[str] = set()
         self.current_folder_id: str | None = None
+        self.current_folder_name = "No folders selected"
         self.setWindowTitle("Estudai!")
-        self.setGeometry(100, 100, 800, 600)
+        self.setGeometry(100, 100, 900, 650)
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -47,7 +52,6 @@ class MainWindow(QMainWindow):
 
         self.sidebar = QFrame()
         self.sidebar.setFrameShape(QFrame.StyledPanel)
-        self.sidebar.setFixedWidth(180)
         self.sidebar.setVisible(False)
         sidebar_layout = QVBoxLayout(self.sidebar)
         sidebar_layout.setContentsMargins(8, 8, 8, 8)
@@ -59,25 +63,20 @@ class MainWindow(QMainWindow):
 
         self.sidebar_folder_list = QListWidget()
         self.sidebar_folder_list.setSpacing(4)
-        self.sidebar_folder_list.addItem("All folders")
-        empty_item = QListWidgetItem("No saved folders yet.")
-        empty_item.setFlags(Qt.NoItemFlags)
-        self.sidebar_folder_list.addItem(empty_item)
-        self.sidebar_folder_list.setCurrentRow(0)
-        self.sidebar_folder_list.currentItemChanged.connect(
-            self.select_folder_from_sidebar
+        self.sidebar_folder_list.setSelectionMode(QListWidget.ExtendedSelection)
+        self.sidebar_folder_list.itemChanged.connect(
+            self.handle_folder_check_state_changed
         )
         self.sidebar_folder_list.itemClicked.connect(self.handle_sidebar_folder_click)
+        self.sidebar_folder_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.sidebar_folder_list.customContextMenuRequested.connect(
+            self.open_sidebar_folder_menu
+        )
         sidebar_layout.addWidget(self.sidebar_folder_list)
 
         add_folder_button = QPushButton("Add Folder")
         add_folder_button.clicked.connect(self.prompt_and_add_folder)
         sidebar_layout.addWidget(add_folder_button)
-
-        manage_folders_button = QPushButton("Manage Folders")
-        manage_folders_button.clicked.connect(self.switch_to_folders)
-        sidebar_layout.addWidget(manage_folders_button)
-
         sidebar_layout.addStretch()
 
         root_layout.addWidget(self.sidebar)
@@ -107,25 +106,28 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(content_container)
 
         self.timer_page = TimerPage()
-        self.folders_page = FoldersPage()
         self.settings_page = SettingsPage()
-
         self.stacked_widget.addWidget(self.timer_page)
-        self.stacked_widget.addWidget(self.folders_page)
         self.stacked_widget.addWidget(self.settings_page)
 
         self.stacked_widget.setCurrentWidget(self.timer_page)
-        self.current_folder_name = "All folders"
         self.timer_page.set_flashcard_context(self.current_folder_name, 0)
-        self._load_persisted_folders()
+        self.handle_management_data_changed()
+        self._update_sidebar_width()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        """Resize sidebar width proportionally with window size."""
+        super().resizeEvent(event)
+        self._update_sidebar_width()
+
+    def _update_sidebar_width(self) -> None:
+        """Keep sidebar wide enough to read folder names."""
+        responsive_width = max(280, min(500, int(self.width() * 0.30)))
+        self.sidebar.setFixedWidth(responsive_width)
 
     def switch_to_timer(self):
         """Switch to timer page."""
         self.stacked_widget.setCurrentWidget(self.timer_page)
-
-    def switch_to_folders(self):
-        """Switch to folders page."""
-        self.stacked_widget.setCurrentWidget(self.folders_page)
 
     def switch_to_settings(self):
         """Switch to settings page or back to timer when already there."""
@@ -138,41 +140,174 @@ class MainWindow(QMainWindow):
         """Show or hide the left sidebar."""
         self.sidebar.setHidden(not self.sidebar.isHidden())
 
-    def select_folder_from_sidebar(
-        self, current_item: QListWidgetItem | None, _: QListWidgetItem | None
-    ):
-        """Handle folder selection from the sidebar list.
+    def _is_folder_item(self, item: QListWidgetItem | None) -> bool:
+        """Return whether a sidebar item maps to a persisted folder.
 
         Args:
-            current_item: The newly selected folder list item.
-            _: The previously selected folder list item.
+            item: Sidebar item.
+
+        Returns:
+            bool: True when item represents a folder.
         """
-        if current_item is None or not bool(current_item.flags() & Qt.ItemIsEnabled):
-            return
-        self.current_folder_name = current_item.text()
-        self.current_folder_id = current_item.data(Qt.UserRole)
-        if self.current_folder_id is None:
-            self.loaded_flashcards = [
-                flashcard
-                for flashcards in self.flashcards_by_folder.values()
-                for flashcard in flashcards
-            ]
-        else:
+        return item is not None and item.data(Qt.UserRole) is not None
+
+    def _get_checked_folder_ids(self) -> set[str]:
+        """Return ids for currently checked folders.
+
+        Returns:
+            set[str]: Checked folder ids.
+        """
+        checked_ids: set[str] = set()
+        for index in range(self.sidebar_folder_list.count()):
+            item = self.sidebar_folder_list.item(index)
+            folder_id = item.data(Qt.UserRole)
+            if folder_id is None:
+                continue
+            if item.checkState() == Qt.Checked:
+                checked_ids.add(folder_id)
+        return checked_ids
+
+    def _refresh_loaded_flashcards(self) -> None:
+        """Refresh selected flashcards from checked folders."""
+        checked_folder_ids: list[str] = []
+        checked_folder_names: list[str] = []
+        for index in range(self.sidebar_folder_list.count()):
+            item = self.sidebar_folder_list.item(index)
+            folder_id = item.data(Qt.UserRole)
+            if folder_id is None or item.checkState() != Qt.Checked:
+                continue
+            checked_folder_ids.append(folder_id)
+            checked_folder_names.append(item.text())
+
+        self.selected_folder_ids = set(checked_folder_ids)
+        if not checked_folder_ids:
+            self.current_folder_id = None
+            self.current_folder_name = "No folders selected"
+            self.loaded_flashcards = []
+        elif len(checked_folder_ids) == 1:
+            self.current_folder_id = checked_folder_ids[0]
+            self.current_folder_name = checked_folder_names[0]
             self.loaded_flashcards = self.flashcards_by_folder.get(
                 self.current_folder_id, []
             )
+        else:
+            self.current_folder_id = None
+            self.current_folder_name = f"{len(checked_folder_ids)} folders selected"
+            self.loaded_flashcards = [
+                flashcard
+                for folder_id in checked_folder_ids
+                for flashcard in self.flashcards_by_folder.get(folder_id, [])
+            ]
         self.timer_page.set_flashcard_context(
-            self.current_folder_name, len(self.loaded_flashcards)
+            self.current_folder_name,
+            len(self.loaded_flashcards),
         )
-        self.switch_to_timer()
+
+    def handle_folder_check_state_changed(self, item: QListWidgetItem) -> None:
+        """Handle checkbox updates from sidebar folder items.
+
+        Args:
+            item: Updated sidebar item.
+        """
+        if not self._is_folder_item(item):
+            return
+        self._refresh_loaded_flashcards()
 
     def handle_sidebar_folder_click(self, clicked_item: QListWidgetItem):
-        """Handle explicit folder clicks, even when selection is unchanged.
+        """Handle folder clicks and switch back to timer.
 
         Args:
             clicked_item: The clicked folder list item.
         """
-        self.select_folder_from_sidebar(clicked_item, None)
+        if not self._is_folder_item(clicked_item):
+            return
+        self.switch_to_timer()
+
+    def open_sidebar_folder_menu(self, position: QPoint) -> None:
+        """Open the right-click folder menu.
+
+        Args:
+            position: Position where the menu is requested.
+        """
+        clicked_item = self.sidebar_folder_list.itemAt(position)
+        if not self._is_folder_item(clicked_item):
+            return
+
+        if not clicked_item.isSelected():
+            self.sidebar_folder_list.clearSelection()
+            clicked_item.setSelected(True)
+        selected_folder_items = [
+            item
+            for item in self.sidebar_folder_list.selectedItems()
+            if self._is_folder_item(item)
+        ]
+        if not selected_folder_items:
+            return
+
+        menu = QMenu(self)
+        rename_action = menu.addAction("Rename folder")
+        delete_action = menu.addAction("Delete folder(s)")
+        rename_action.setEnabled(len(selected_folder_items) == 1)
+        chosen_action = menu.exec(
+            self.sidebar_folder_list.viewport().mapToGlobal(position)
+        )
+        if chosen_action is rename_action and len(selected_folder_items) == 1:
+            self.rename_sidebar_folder(selected_folder_items[0])
+        if chosen_action is delete_action:
+            self.delete_sidebar_folders(selected_folder_items)
+
+    def rename_sidebar_folder(self, folder_item: QListWidgetItem) -> None:
+        """Rename one folder from sidebar action.
+
+        Args:
+            folder_item: Folder item selected from sidebar.
+        """
+        folder_id = folder_item.data(Qt.UserRole)
+        if folder_id is None:
+            return
+        new_name, accepted = QInputDialog.getText(
+            self,
+            "Rename folder",
+            "Folder name:",
+            text=folder_item.text(),
+        )
+        if not accepted:
+            return
+        checked_ids = self._get_checked_folder_ids()
+        try:
+            rename_persisted_folder(folder_id, new_name)
+        except (KeyError, ValueError) as error:
+            QMessageBox.warning(self, "Rename folder", str(error))
+            return
+        self.handle_management_data_changed(preferred_checked_ids=checked_ids)
+
+    def delete_sidebar_folders(self, folder_items: list[QListWidgetItem]) -> None:
+        """Delete one or many folders from sidebar action.
+
+        Args:
+            folder_items: Folder items selected for deletion.
+        """
+        folder_ids = {
+            item.data(Qt.UserRole)
+            for item in folder_items
+            if item.data(Qt.UserRole) is not None
+        }
+        if not folder_ids:
+            return
+        confirmation = QMessageBox.question(
+            self,
+            "Delete folder",
+            f"Delete {len(folder_ids)} selected folder(s)?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirmation != QMessageBox.Yes:
+            return
+
+        checked_ids = self._get_checked_folder_ids() - folder_ids
+        for folder_id in folder_ids:
+            delete_persisted_folder(folder_id)
+        self.handle_management_data_changed(preferred_checked_ids=checked_ids)
 
     def prompt_and_add_folder(self) -> None:
         """Prompt the user for a folder and load CSV flashcards from it."""
@@ -193,73 +328,60 @@ class MainWindow(QMainWindow):
         Returns:
             bool: True when the folder was loaded.
         """
+        checked_ids = self._get_checked_folder_ids()
         try:
             persisted_folder = import_folder(folder_path)
         except (FileNotFoundError, NotADirectoryError, OSError):
             return False
-        return self._load_persisted_folder(persisted_folder)
+        checked_ids.add(persisted_folder.id)
+        self.handle_management_data_changed(preferred_checked_ids=checked_ids)
+        return True
 
-    def _load_persisted_folders(self) -> None:
-        """Load previously persisted folders into memory and sidebar."""
-        for persisted_folder in list_persisted_folders():
-            self._load_persisted_folder(persisted_folder)
-
-    def _load_persisted_folder(self, persisted_folder: PersistedFolder) -> bool:
-        """Load one persisted folder from managed storage.
+    def handle_management_data_changed(
+        self, preferred_checked_ids: set[str] | None = None
+    ) -> None:
+        """Reload sidebar and current context after folder data changes.
 
         Args:
-            persisted_folder: Persisted folder metadata entry.
-
-        Returns:
-            bool: True when folder data was loaded.
+            preferred_checked_ids: Folder ids that should remain checked.
         """
-        stored_folder = Path(persisted_folder.stored_path)
-        if not stored_folder.exists():
-            return False
-        self.flashcards_by_folder[persisted_folder.id] = load_flashcards_from_folder(
-            stored_folder
-        )
+        self.flashcards_by_folder = {}
+        self.sidebar_folder_list.blockSignals(True)
+        self.sidebar_folder_list.clear()
 
-        for index in range(self.sidebar_folder_list.count()):
-            item = self.sidebar_folder_list.item(index)
-            if item.data(Qt.UserRole) == persisted_folder.id:
-                item.setText(persisted_folder.name)
-                if self.current_folder_id == persisted_folder.id:
-                    self.loaded_flashcards = self.flashcards_by_folder[
-                        persisted_folder.id
-                    ]
-                    self.timer_page.set_flashcard_context(
-                        self.current_folder_name, len(self.loaded_flashcards)
-                    )
-                elif self.current_folder_id is None:
-                    self.loaded_flashcards = [
-                        flashcard
-                        for flashcards in self.flashcards_by_folder.values()
-                        for flashcard in flashcards
-                    ]
-                    self.timer_page.set_flashcard_context(
-                        self.current_folder_name, len(self.loaded_flashcards)
-                    )
-                return True
-
-        if self.sidebar_folder_list.count() == 2:
-            placeholder_item = self.sidebar_folder_list.item(1)
-            if not bool(placeholder_item.flags() & Qt.ItemIsEnabled):
-                self.sidebar_folder_list.takeItem(1)
-
-        folder_item = QListWidgetItem(persisted_folder.name)
-        folder_item.setData(Qt.UserRole, persisted_folder.id)
-        self.sidebar_folder_list.addItem(folder_item)
-        if self.current_folder_id is None:
-            self.loaded_flashcards = [
-                flashcard
-                for flashcards in self.flashcards_by_folder.values()
-                for flashcard in flashcards
-            ]
-            self.timer_page.set_flashcard_context(
-                self.current_folder_name, len(self.loaded_flashcards)
+        for persisted_folder in list_persisted_folders():
+            stored_folder = Path(persisted_folder.stored_path)
+            if not stored_folder.exists():
+                continue
+            self.flashcards_by_folder[persisted_folder.id] = (
+                load_flashcards_from_folder(stored_folder)
             )
-        return True
+            folder_item = QListWidgetItem(persisted_folder.name)
+            folder_item.setData(Qt.UserRole, persisted_folder.id)
+            folder_item.setFlags(
+                folder_item.flags()
+                | Qt.ItemIsUserCheckable
+                | Qt.ItemIsEnabled
+                | Qt.ItemIsSelectable
+            )
+            if preferred_checked_ids is None:
+                folder_item.setCheckState(Qt.Checked)
+            else:
+                folder_item.setCheckState(
+                    Qt.Checked
+                    if persisted_folder.id in preferred_checked_ids
+                    else Qt.Unchecked
+                )
+            self.sidebar_folder_list.addItem(folder_item)
+
+        if self.sidebar_folder_list.count() == 0:
+            empty_item = QListWidgetItem("No saved folders yet.")
+            empty_item.setFlags(Qt.NoItemFlags)
+            self.sidebar_folder_list.addItem(empty_item)
+        else:
+            self.sidebar_folder_list.setCurrentRow(0)
+        self.sidebar_folder_list.blockSignals(False)
+        self._refresh_loaded_flashcards()
 
     def set_navigation_visible(self, visible: bool):
         """Control navigation visibility for focused timer mode.
