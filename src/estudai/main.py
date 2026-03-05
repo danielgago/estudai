@@ -1,5 +1,7 @@
 import sys
+
 from PySide6.QtWidgets import QApplication
+
 from estudai.ui.main_window import MainWindow
 
 

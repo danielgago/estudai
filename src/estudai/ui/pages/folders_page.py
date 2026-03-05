@@ -1,18 +1,10 @@
 """Folders page."""
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QLabel,
-    QListWidget,
-    QListWidgetItem,
-    QPushButton,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 
 class FoldersPage(QWidget):
-    """Barebone folders page with a clear empty state."""
+    """Simple folders page with usage guidance."""
 
     def __init__(self) -> None:
         """Initialize the folders page."""
@@ -30,23 +22,14 @@ class FoldersPage(QWidget):
         layout.addWidget(title)
 
         subtitle = QLabel(
-            "Pick folders from the left sidebar while studying. "
-            "Use this page to manage folder setup."
+            "Use 'Add Folder' in the left sidebar to choose CSV folders. "
+            "Selected folders are copied and kept for future sessions."
         )
         subtitle.setWordWrap(True)
         subtitle.setStyleSheet("color: #666;")
         layout.addWidget(subtitle)
 
-        folder_list = QListWidget()
-        folder_list.setSpacing(4)
-        placeholder_item = QListWidgetItem(
-            "No folders yet. Create your first folder to get started."
-        )
-        placeholder_item.setFlags(Qt.NoItemFlags)
-        folder_list.addItem(placeholder_item)
-        layout.addWidget(folder_list)
-
-        create_button = QPushButton("Create Folder")
-        create_button.setEnabled(False)
-        create_button.setToolTip("Folder management is coming soon.")
-        layout.addWidget(create_button, alignment=Qt.AlignLeft)
+        placeholder = QLabel("Selected folders appear in the sidebar.")
+        placeholder.setStyleSheet("padding: 16px; border: 1px dashed #aaa; border-radius: 6px;")
+        layout.addWidget(placeholder)
+        layout.addStretch()

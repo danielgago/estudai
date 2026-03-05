@@ -24,6 +24,11 @@ class TimerPage(QWidget):
         self.timer_display.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.timer_display)
 
+        self.folder_context_label = QLabel("Folder: All folders (0 cards)")
+        self.folder_context_label.setAlignment(Qt.AlignCenter)
+        self.folder_context_label.setStyleSheet("color: #666;")
+        layout.addWidget(self.folder_context_label)
+
         self.start_button = QPushButton("Start")
         self.start_button.clicked.connect(self.start_timer)
         layout.addWidget(self.start_button)
@@ -71,3 +76,12 @@ class TimerPage(QWidget):
 
         if self.time.second() == 0 and self.time.minute() == 0:
             self.stop_timer()
+
+    def set_flashcard_context(self, folder_name: str, card_count: int) -> None:
+        """Update the selected folder summary shown on the timer page.
+
+        Args:
+            folder_name: Selected folder display name.
+            card_count: Number of loaded flashcards in scope.
+        """
+        self.folder_context_label.setText(f"Folder: {folder_name} ({card_count} cards)")
