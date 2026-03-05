@@ -108,17 +108,19 @@ def test_settings_page_uploads_sound_and_plays_test(
     played: list[str] = []
     source_values: list[str] = []
 
+    class _FakePlayer:
+        def setSource(self, url) -> None:  # noqa: N802
+            source_values.append(url.toLocalFile())
+
+        def play(self) -> None:
+            played.append("played")
+
+    monkeypatch.setattr(page, "_sound_player", _FakePlayer())
+
     monkeypatch.setattr(
         "estudai.ui.pages.settings_page.QFileDialog.getOpenFileName",
         lambda *_args, **_kwargs: (str(selected_sound), "Sound files (*.mp3 *.wav)"),
     )
-    monkeypatch.setattr(
-        page._sound_player,
-        "setSource",
-        lambda url: source_values.append(url.toLocalFile()),
-    )
-    monkeypatch.setattr(page._sound_player, "play", lambda: played.append("played"))
-
     page._handle_upload_sound_clicked()
     assert page.test_sound_button.isEnabled()
     assert load_app_settings().notification_sound_path == ""
@@ -166,12 +168,14 @@ def test_settings_page_warns_and_tests_default_sound(
     played: list[str] = []
     source_values: list[str] = []
 
-    monkeypatch.setattr(
-        page._sound_player,
-        "setSource",
-        lambda url: source_values.append(url.toLocalFile()),
-    )
-    monkeypatch.setattr(page._sound_player, "play", lambda: played.append("played"))
+    class _FakePlayer:
+        def setSource(self, url) -> None:  # noqa: N802
+            source_values.append(url.toLocalFile())
+
+        def play(self) -> None:
+            played.append("played")
+
+    monkeypatch.setattr(page, "_sound_player", _FakePlayer())
 
     page._update_sound_summary()
     assert "Selected sound: None." in page.notification_sound_label.text()

@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QUrl, Signal
-from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
@@ -18,6 +17,12 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+try:
+    from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+except ImportError:  # pragma: no cover - depends on system multimedia libraries.
+    QAudioOutput = None  # type: ignore[assignment]
+    QMediaPlayer = None  # type: ignore[assignment]
 
 from estudai.services.settings import (
     AppSettings,
@@ -38,9 +43,12 @@ class SettingsPage(QWidget):
         super().__init__()
         self._notification_sound_path = ""
         self._default_notification_sound_path = get_default_notification_sound_path()
-        self._audio_output = QAudioOutput(self)
-        self._sound_player = QMediaPlayer(self)
-        self._sound_player.setAudioOutput(self._audio_output)
+        self._audio_output: object | None = None
+        self._sound_player: object | None = None
+        if QAudioOutput is not None and QMediaPlayer is not None:
+            self._audio_output = QAudioOutput(self)
+            self._sound_player = QMediaPlayer(self)
+            self._sound_player.setAudioOutput(self._audio_output)
         self._build_ui()
         self._load_persisted_settings()
         self._connect_signals()
@@ -162,6 +170,7 @@ class SettingsPage(QWidget):
 
     def _update_sound_summary(self) -> None:
         """Refresh selected sound label and test button state."""
+        can_play_sound = self._sound_player is not None
         if not self._notification_sound_path:
             if self._default_notification_sound_path:
                 default_name = Path(self._default_notification_sound_path).name
@@ -171,6 +180,7 @@ class SettingsPage(QWidget):
                 )
                 self.test_sound_button.setEnabled(
                     Path(self._default_notification_sound_path).exists()
+                    and can_play_sound
                 )
                 return
             self.notification_sound_label.setText("Selected sound: None")
@@ -178,7 +188,7 @@ class SettingsPage(QWidget):
             return
         sound_path = Path(self._notification_sound_path)
         self.notification_sound_label.setText(f"Selected sound: {sound_path.name}")
-        self.test_sound_button.setEnabled(sound_path.exists())
+        self.test_sound_button.setEnabled(sound_path.exists() and can_play_sound)
 
     def _handle_upload_sound_clicked(self) -> None:
         """Open a file picker to set notification sound."""
@@ -211,6 +221,13 @@ class SettingsPage(QWidget):
 
     def _handle_test_sound_clicked(self) -> None:
         """Play the currently selected notification sound."""
+        if self._sound_player is None:
+            QMessageBox.warning(
+                self,
+                "Test sound",
+                "Audio playback is unavailable on this system.",
+            )
+            return
         sound_path_value = (
             self._notification_sound_path or self._default_notification_sound_path
         )

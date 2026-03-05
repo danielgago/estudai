@@ -4,7 +4,6 @@ import random
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QPoint, QTimer, Qt, QUrl, Signal
-from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -23,6 +22,12 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+try:
+    from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+except ImportError:  # pragma: no cover - depends on system multimedia libraries.
+    QAudioOutput = None  # type: ignore[assignment]
+    QMediaPlayer = None  # type: ignore[assignment]
 
 from estudai.services.csv_flashcards import (
     Flashcard,
@@ -63,9 +68,12 @@ class MainWindow(QMainWindow):
         self._renaming_folder_id: str | None = None
         self._renaming_original_name: str | None = None
         self._active_flashcard_sequence_id = 0
-        self._flashcard_sound_output = QAudioOutput(self)
-        self._flashcard_sound_player = QMediaPlayer(self)
-        self._flashcard_sound_player.setAudioOutput(self._flashcard_sound_output)
+        self._flashcard_sound_output: object | None = None
+        self._flashcard_sound_player: object | None = None
+        if QAudioOutput is not None and QMediaPlayer is not None:
+            self._flashcard_sound_output = QAudioOutput(self)
+            self._flashcard_sound_player = QMediaPlayer(self)
+            self._flashcard_sound_player.setAudioOutput(self._flashcard_sound_output)
         self.setWindowTitle("Estudai!")
         self.setGeometry(100, 100, 900, 650)
 
@@ -244,6 +252,8 @@ class MainWindow(QMainWindow):
 
     def _play_flashcard_notification_sound(self) -> None:
         """Play notification sound configured in settings when available."""
+        if self._flashcard_sound_player is None:
+            return
         settings = load_app_settings()
         sound_path_value = (
             settings.notification_sound_path or get_default_notification_sound_path()

@@ -359,19 +359,18 @@ def test_flashcard_sequence_plays_sound_for_question_and_answer(
         source_line=1,
     )
 
+    class _FakePlayer:
+        def setSource(self, url) -> None:  # noqa: N802
+            source_values.append(url.toLocalFile())
+
+        def play(self) -> None:
+            plays.append("play")
+
+    monkeypatch.setattr(window, "_flashcard_sound_player", _FakePlayer())
+
     monkeypatch.setattr(
         "estudai.ui.main_window.QTimer.singleShot",
         lambda _delay, callback: callbacks.append(callback),
-    )
-    monkeypatch.setattr(
-        window._flashcard_sound_player,
-        "setSource",
-        lambda url: source_values.append(url.toLocalFile()),
-    )
-    monkeypatch.setattr(
-        window._flashcard_sound_player,
-        "play",
-        lambda: plays.append("play"),
     )
     monkeypatch.setattr(
         "estudai.ui.main_window.load_app_settings",
