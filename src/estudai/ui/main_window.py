@@ -6,7 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, QSize, QTimer, Qt, QUrl, Signal
-from PySide6.QtGui import QColor, QIcon, QPainter, QPalette, QPen, QPixmap
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -148,7 +148,10 @@ class MainWindow(QMainWindow):
         sidebar_layout.setSpacing(8)
 
         sidebar_title = QLabel("Folders")
-        sidebar_title.setStyleSheet("font-size: 16px; font-weight: bold;")
+        sidebar_title_font = QFont(sidebar_title.font())
+        sidebar_title_font.setPointSize(16)
+        sidebar_title_font.setBold(True)
+        sidebar_title.setFont(sidebar_title_font)
         sidebar_layout.addWidget(sidebar_title)
 
         self.sidebar_folder_list = QListWidget()
@@ -1179,10 +1182,22 @@ class MainWindow(QMainWindow):
         """Apply visual cues that keep checked folders easy to identify."""
         if not self._is_folder_item(item):
             return
+        list_palette = self.sidebar_folder_list.palette()
         is_checked = item.checkState() == Qt.Checked
         item_font = item.font()
         item_font.setBold(is_checked)
         item.setFont(item_font)
+        item.setForeground(list_palette.color(QPalette.Text))
+        if is_checked:
+            # Keep checked rows distinguishable even when native checkbox glyphs are subtle.
+            checked_background = self._blend_colors(
+                list_palette.color(QPalette.Base),
+                list_palette.color(QPalette.Highlight),
+                overlay_ratio=0.18,
+            )
+            item.setBackground(checked_background)
+            return
+        item.setBackground(list_palette.color(QPalette.Base))
 
     @staticmethod
     def _blend_colors(base: QColor, overlay: QColor, overlay_ratio: float) -> QColor:

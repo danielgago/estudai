@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, Qt, Signal
-from PySide6.QtGui import QMouseEvent, QPainter
+from PySide6.QtCore import QEvent, QPoint, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
@@ -106,11 +106,14 @@ class ManagementPage(QWidget):
         layout.setSpacing(10)
 
         self.title_label = QLabel("No folder selected")
-        self.title_label.setStyleSheet("font-size: 24px; font-weight: bold;")
+        title_font = QFont(self.title_label.font())
+        title_font.setPointSize(24)
+        title_font.setBold(True)
+        self.title_label.setFont(title_font)
         layout.addWidget(self.title_label)
 
         self.folder_context_label = QLabel("0 cards")
-        self.folder_context_label.setStyleSheet("color: #666;")
+        self._set_muted_label_color(self.folder_context_label)
         layout.addWidget(self.folder_context_label)
 
         table_actions_layout = QHBoxLayout()
@@ -162,6 +165,34 @@ class ManagementPage(QWidget):
         footer_layout.addWidget(self.cancel_button)
         footer_layout.addWidget(self.save_button)
         layout.addLayout(footer_layout)
+
+    def changeEvent(self, event: QEvent) -> None:  # noqa: N802
+        """Refresh palette-driven colors when theme/palette changes."""
+        if event.type() in (QEvent.PaletteChange, QEvent.ApplicationPaletteChange):
+            self._set_muted_label_color(self.folder_context_label)
+        super().changeEvent(event)
+
+    def _set_muted_label_color(self, label: QLabel) -> None:
+        """Apply a readable secondary-text color derived from the active palette."""
+        palette = label.palette()
+        muted_color = self._blend_colors(
+            palette.color(QPalette.WindowText),
+            palette.color(QPalette.Window),
+            overlay_ratio=0.35,
+        )
+        palette.setColor(QPalette.WindowText, muted_color)
+        label.setPalette(palette)
+
+    @staticmethod
+    def _blend_colors(base: QColor, overlay: QColor, overlay_ratio: float) -> QColor:
+        """Return a deterministic blend between base and overlay colors."""
+        clamped_ratio = max(0.0, min(1.0, overlay_ratio))
+        base_ratio = 1.0 - clamped_ratio
+        return QColor(
+            int((base.red() * base_ratio) + (overlay.red() * clamped_ratio)),
+            int((base.green() * base_ratio) + (overlay.green() * clamped_ratio)),
+            int((base.blue() * base_ratio) + (overlay.blue() * clamped_ratio)),
+        )
 
     def set_folder_flashcards(
         self,
