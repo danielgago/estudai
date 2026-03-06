@@ -51,6 +51,7 @@ uv run ruff check --fix src/ tests/
 ## Windows MSI Packaging and VM Testing
 
 Use the `Windows Package` GitHub Actions workflow to produce an MSI installer.
+The generated installer is configured to create an `Estudai` desktop shortcut by default.
 
 ### Build artifacts for VM testing (before release)
 

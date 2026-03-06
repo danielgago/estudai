@@ -17,12 +17,12 @@ package = true
 
 [tool.cxfreeze]
 executables = [
-    { script = "src/estudai/main.py", base = "gui", target_name = "Estudai.exe" },
+    { script = "src/estudai/main.py", base = "gui", target_name = "Estudai.exe", icon = "data/estudai.svg", shortcut_name = "Estudai", shortcut_dir = "DesktopFolder" },
 ]
 
 [tool.cxfreeze.build_exe]
 include_msvcr = true
-include_files = ["data/alarm.mp3"]
+include_files = ["data/alarm.mp3", "data/estudai.svg"]
 excludes = ["tkinter", "unittest", "test", "pydoc"]
 
 [tool.cxfreeze.bdist_msi]
