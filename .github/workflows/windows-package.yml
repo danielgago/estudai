@@ -30,10 +30,7 @@ jobs:
         run: uv sync --locked
 
       - name: Install packaging tools
-        run: uv pip install --python .venv\Scripts\python.exe pyinstaller cx-Freeze
-
-      - name: Build PyInstaller bundle
-        run: uv run python -m PyInstaller --noconfirm --clean --windowed --name Estudai src/estudai/main.py
+        run: uv pip install --python .venv\Scripts\python.exe cx-Freeze
 
       - name: Build MSI installer
         run: uv run python -m cx_Freeze bdist_msi
@@ -42,7 +39,6 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path artifacts | Out-Null
-          Compress-Archive -Path dist/Estudai/* -DestinationPath artifacts/Estudai-win64.zip
           $msi = Get-ChildItem -Path . -Recurse -Filter *.msi | Select-Object -First 1
           if (-not $msi) {
             throw "MSI file not found."
@@ -64,6 +60,4 @@ jobs:
           draft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
-          files: |
-            artifacts/*.msi
-            artifacts/*.zip
+          files: artifacts/*.msi
