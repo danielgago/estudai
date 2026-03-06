@@ -347,24 +347,7 @@ class MainWindow(QMainWindow):
             f" border: 1px solid {border_color};"
             "}"
         )
-        self.sidebar_folder_list.setStyleSheet(
-            "QListWidget {"
-            " selection-background-color: palette(highlight);"
-            " selection-color: palette(highlighted-text);"
-            "}"
-            "QListWidget::item {"
-            " margin: 0px;"
-            " padding: 4px 6px 4px 0px;"
-            "}"
-            "QListWidget::item:selected {"
-            " background-color: palette(highlight);"
-            " color: palette(highlighted-text);"
-            "}"
-            "QListWidget::item:selected:!active {"
-            " background-color: palette(highlight);"
-            " color: palette(highlighted-text);"
-            "}"
-        )
+        self.sidebar_folder_list.setStyleSheet("")
 
     def _update_sidebar_width(self) -> None:
         """Keep sidebar wide enough to read folder names."""
@@ -1183,22 +1166,12 @@ class MainWindow(QMainWindow):
         """Apply visual cues that keep checked folders easy to identify."""
         if not self._is_folder_item(item):
             return
-        list_palette = self.sidebar_folder_list.palette()
         is_checked = item.checkState() == Qt.Checked
         item_font = item.font()
         item_font.setBold(is_checked)
         item.setFont(item_font)
-        item.setForeground(list_palette.color(QPalette.Text))
-        if is_checked:
-            # Keep checked rows distinguishable even when native checkbox glyphs are subtle.
-            checked_background = self._blend_colors(
-                list_palette.color(QPalette.Base),
-                list_palette.color(QPalette.Highlight),
-                overlay_ratio=0.18,
-            )
-            item.setBackground(checked_background)
-            return
-        item.setBackground(list_palette.color(QPalette.Base))
+        item.setData(Qt.ForegroundRole, None)
+        item.setData(Qt.BackgroundRole, None)
 
     @staticmethod
     def _blend_colors(base: QColor, overlay: QColor, overlay_ratio: float) -> QColor:

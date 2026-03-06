@@ -74,16 +74,15 @@ def test_top_navigation_buttons_are_larger(app: QApplication) -> None:
     assert window.settings_button.width() == 44
 
 
-def test_sidebar_stylesheet_does_not_force_decoration_selected(
+def test_sidebar_uses_native_list_rendering(
     app: QApplication,
 ) -> None:
-    """Verify sidebar lets platform style control decoration highlight behavior."""
+    """Verify sidebar list rendering is left to native platform styling."""
     window = MainWindow()
 
     stylesheet = window.sidebar_folder_list.styleSheet()
 
-    assert "selection-background-color: palette(highlight);" in stylesheet
-    assert "show-decoration-selected" not in stylesheet
+    assert stylesheet == ""
 
 
 def test_primary_button_tooltips_are_short(app: QApplication) -> None:
