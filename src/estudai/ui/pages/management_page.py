@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPoint, Qt, Signal
+from PySide6.QtGui import QMouseEvent, QPainter
 from PySide6.QtWidgets import (
+    QApplication,
     QAbstractItemView,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QMenu,
     QPushButton,
+    QStyle,
+    QStyleOptionButton,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -17,6 +21,68 @@ from PySide6.QtWidgets import (
 )
 
 from estudai.services.csv_flashcards import Flashcard
+
+
+class SelectAllHeaderView(QHeaderView):
+    """Header view that paints a native checkbox in the first column."""
+
+    toggle_requested = Signal()
+
+    def __init__(self, orientation: Qt.Orientation, parent: QWidget) -> None:
+        """Initialize the custom header view.
+
+        Args:
+            orientation: Header orientation.
+            parent: Parent widget.
+        """
+        super().__init__(orientation, parent)
+        self._checked = False
+
+    def set_checked(self, checked: bool) -> None:
+        """Update the painted checkbox state.
+
+        Args:
+            checked: Checkbox state.
+        """
+        if self._checked == checked:
+            return
+        self._checked = checked
+        self.viewport().update()
+
+    def is_checked(self) -> bool:
+        """Return current checkbox state."""
+        return self._checked
+
+    def paintSection(self, painter: QPainter, rect, logical_index: int) -> None:  # noqa: N802
+        """Paint the first section with a native checkbox indicator."""
+        if logical_index != 0:
+            super().paintSection(painter, rect, logical_index)
+            return
+
+        super().paintSection(painter, rect, logical_index)
+        style = QApplication.style()
+        option = QStyleOptionButton()
+        checkbox_rect = style.subElementRect(QStyle.SE_CheckBoxIndicator, option, self)
+        checkbox_rect.moveCenter(rect.center())
+
+        option.rect = checkbox_rect
+        option.state = QStyle.State_Enabled
+        if self._checked:
+            option.state |= QStyle.State_On
+        else:
+            option.state |= QStyle.State_Off
+
+        painter.save()
+        style.drawPrimitive(QStyle.PE_IndicatorCheckBox, option, painter, self)
+        painter.restore()
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        """Emit toggle request when clicking inside first header section."""
+        if event.button() == Qt.LeftButton and self.logicalIndexAt(event.pos()) == 0:
+            self.toggle_requested.emit()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
 
 class ManagementPage(QWidget):
@@ -54,16 +120,19 @@ class ManagementPage(QWidget):
         layout.addLayout(table_actions_layout)
 
         self.flashcards_table = QTableWidget(0, 3)
-        self.flashcards_table.setHorizontalHeaderLabels(["☑", "Question", "Answer"])
+        self.flashcards_table.setHorizontalHeaderLabels(["", "Question", "Answer"])
+        self.select_all_header = SelectAllHeaderView(
+            Qt.Horizontal,
+            self.flashcards_table,
+        )
+        self.flashcards_table.setHorizontalHeader(self.select_all_header)
         self.flashcards_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.flashcards_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.flashcards_table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.flashcards_table.customContextMenuRequested.connect(
             self.open_flashcards_table_menu
         )
-        self.flashcards_table.horizontalHeader().sectionClicked.connect(
-            self.handle_table_header_click
-        )
+        self.select_all_header.toggle_requested.connect(self._toggle_header_selection)
         self.flashcards_table.itemChanged.connect(self.handle_table_item_changed)
         self.flashcards_table.horizontalHeader().setSectionResizeMode(
             0,
@@ -205,10 +274,15 @@ class ManagementPage(QWidget):
 
     def _sync_select_all_header(self) -> None:
         """Update first-column header indicator to match row checkbox state."""
-        header_item = self.flashcards_table.horizontalHeaderItem(0)
-        if header_item is None:
-            return
-        header_item.setText("☑" if self._are_all_flashcards_checked() else "☐")
+        self.select_all_header.set_checked(self._are_all_flashcards_checked())
+
+    def _toggle_header_selection(self) -> None:
+        """Toggle row selection state from header checkbox interaction."""
+        self._set_all_flashcards_checked(not self._are_all_flashcards_checked())
+
+    def is_header_checkbox_checked(self) -> bool:
+        """Expose header checkbox state for tests and callers."""
+        return self.select_all_header.is_checked()
 
     def _set_all_flashcards_checked(self, checked: bool) -> None:
         """Set checkbox state for all flashcard rows.

@@ -162,6 +162,47 @@ def test_sidebar_folder_selection_updates_current_folder(
     assert len(window.loaded_flashcards) == 1
 
 
+def test_checked_sidebar_folder_is_rendered_bold(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify checked folders have a clear visual cue in the sidebar."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("What is DNA?,Genetic material.\n")
+    assert window.add_folder(biology_folder) is True
+    folder_item = window.sidebar_folder_list.item(0)
+
+    assert folder_item.checkState() == Qt.Checked
+    assert folder_item.font().bold() is True
+
+    folder_item.setCheckState(Qt.Unchecked)
+
+    assert folder_item.font().bold() is False
+
+
+def test_palette_change_reapplies_sidebar_item_visuals(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify palette changes trigger sidebar checked-state visual recomputation."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("What is DNA?,Genetic material.\n")
+    assert window.add_folder(biology_folder) is True
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        window,
+        "_refresh_sidebar_item_visual_states",
+        lambda: calls.append("refresh"),
+    )
+
+    window.changeEvent(QEvent(QEvent.PaletteChange))
+
+    assert calls == ["refresh"]
+
+
 def test_add_folder_loads_csv_flashcards(app: QApplication, tmp_path: Path) -> None:
     """Verify adding a folder loads CSV flashcards and updates selection context."""
     window = MainWindow()
@@ -644,16 +685,16 @@ def test_management_select_and_unselect_all_controls(
     table.item(0, 0).setCheckState(Qt.Unchecked)
     table.item(1, 0).setCheckState(Qt.Checked)
 
-    assert table.horizontalHeaderItem(0).text() == "☐"
+    assert window.management_page.is_header_checkbox_checked() is False
     window.management_page.handle_table_header_click(0)
     assert table.item(0, 0).checkState() == Qt.Checked
     assert table.item(1, 0).checkState() == Qt.Checked
-    assert table.horizontalHeaderItem(0).text() == "☑"
+    assert window.management_page.is_header_checkbox_checked() is True
 
     window.management_page.handle_table_header_click(0)
     assert table.item(0, 0).checkState() == Qt.Unchecked
     assert table.item(1, 0).checkState() == Qt.Unchecked
-    assert table.horizontalHeaderItem(0).text() == "☐"
+    assert window.management_page.is_header_checkbox_checked() is False
 
 
 def test_management_add_button_is_plus_at_top(

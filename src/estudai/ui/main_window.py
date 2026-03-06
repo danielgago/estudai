@@ -5,6 +5,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QPoint, QTimer, Qt, QUrl, Signal
+from PySide6.QtGui import QBrush, QColor, QPalette
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -153,6 +154,29 @@ class MainWindow(QMainWindow):
         self.sidebar_folder_list.setSpacing(4)
         self.sidebar_folder_list.setSelectionMode(QListWidget.ExtendedSelection)
         self.sidebar_folder_list.setEditTriggers(QListWidget.NoEditTriggers)
+        self.sidebar_folder_list.setStyleSheet(
+            "QListWidget {"
+            " show-decoration-selected: 1;"
+            " selection-background-color: palette(highlight);"
+            " selection-color: palette(highlighted-text);"
+            "}"
+            "QListWidget::item:selected {"
+            " background-color: palette(highlight);"
+            " color: palette(highlighted-text);"
+            "}"
+            "QListWidget::item:selected:!active {"
+            " background-color: palette(highlight);"
+            " color: palette(highlighted-text);"
+            "}"
+            "QListWidget::indicator:unchecked {"
+            " border: 1px solid palette(mid);"
+            " background: palette(base);"
+            "}"
+            "QListWidget::indicator:checked {"
+            " border: 1px solid palette(dark);"
+            " background: palette(highlight);"
+            "}"
+        )
         self.sidebar_folder_list.itemChanged.connect(self.handle_sidebar_item_changed)
         self.sidebar_folder_list.itemClicked.connect(self.handle_sidebar_folder_click)
         self.sidebar_folder_list.itemDoubleClicked.connect(
@@ -221,6 +245,12 @@ class MainWindow(QMainWindow):
         """Resize sidebar width proportionally with window size."""
         super().resizeEvent(event)
         self._update_sidebar_width()
+
+    def changeEvent(self, event: QEvent) -> None:  # noqa: N802
+        """Refresh palette-driven sidebar visuals when theme/palette changes."""
+        if event.type() in (QEvent.PaletteChange, QEvent.ApplicationPaletteChange):
+            self._refresh_sidebar_item_visual_states()
+        super().changeEvent(event)
 
     def _update_sidebar_width(self) -> None:
         """Keep sidebar wide enough to read folder names."""
@@ -649,6 +679,7 @@ class MainWindow(QMainWindow):
         """
         if not self._is_folder_item(item):
             return
+        self._apply_sidebar_item_visual_state(item)
         self._handle_inline_rename(item)
         folder_id = item.data(Qt.UserRole)
         if folder_id is not None:
@@ -1031,7 +1062,43 @@ class MainWindow(QMainWindow):
             | Qt.ItemIsEditable
         )
         folder_item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
+        self._apply_sidebar_item_visual_state(folder_item)
         return folder_item
+
+    def _apply_sidebar_item_visual_state(self, item: QListWidgetItem) -> None:
+        """Apply visual cues that keep checked folders easy to identify."""
+        if not self._is_folder_item(item):
+            return
+        is_checked = item.checkState() == Qt.Checked
+        item_font = item.font()
+        item_font.setBold(is_checked)
+        item.setFont(item_font)
+        palette = self.sidebar_folder_list.palette()
+        if is_checked:
+            checked_background = self._blend_colors(
+                palette.color(QPalette.Base),
+                palette.color(QPalette.Highlight),
+                overlay_ratio=0.22,
+            )
+            item.setBackground(QBrush(checked_background))
+            return
+        item.setBackground(QBrush(palette.color(QPalette.Base)))
+
+    @staticmethod
+    def _blend_colors(base: QColor, overlay: QColor, overlay_ratio: float) -> QColor:
+        """Return a deterministic blend between base and overlay colors."""
+        clamped_ratio = max(0.0, min(1.0, overlay_ratio))
+        base_ratio = 1.0 - clamped_ratio
+        return QColor(
+            int((base.red() * base_ratio) + (overlay.red() * clamped_ratio)),
+            int((base.green() * base_ratio) + (overlay.green() * clamped_ratio)),
+            int((base.blue() * base_ratio) + (overlay.blue() * clamped_ratio)),
+        )
+
+    def _refresh_sidebar_item_visual_states(self) -> None:
+        """Recompute item visuals for current palette/theme values."""
+        for index in range(self.sidebar_folder_list.count()):
+            self._apply_sidebar_item_visual_state(self.sidebar_folder_list.item(index))
 
     def _folder_item_name(self, item: QListWidgetItem) -> str:
         """Return folder name without flashcard count suffix."""
