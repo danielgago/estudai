@@ -22,7 +22,8 @@ executables = [
 
 [tool.cxfreeze.build_exe]
 include_msvcr = true
-packages = ["PySide6", "pylatexenc"]
+include_files = ["data/alarm.mp3"]
+excludes = ["tkinter", "unittest", "test", "pydoc"]
 
 [tool.cxfreeze.bdist_msi]
 add_to_path = false

@@ -50,7 +50,7 @@ uv run ruff check --fix src/ tests/
 
 ## Windows MSI Packaging and VM Testing
 
-Use the `Windows Package` GitHub Actions workflow to produce both a portable PyInstaller build and an MSI installer.
+Use the `Windows Package` GitHub Actions workflow to produce an MSI installer.
 
 ### Build artifacts for VM testing (before release)
 
@@ -61,7 +61,7 @@ Use the `Windows Package` GitHub Actions workflow to produce both a portable PyI
 
 ### Create draft prerelease assets from a tag
 
-Push a version tag to trigger the same workflow and attach the MSI/ZIP to a draft prerelease:
+Push a version tag to trigger the same workflow and attach the MSI to a draft prerelease:
 
 ```bash
 git tag v1.0.0-rc1
