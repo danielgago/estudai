@@ -32,6 +32,7 @@ from estudai.services.settings import (
     load_app_settings,
     save_app_settings,
 )
+from estudai.ui.utils import build_checkbox_indicator_styles
 
 
 class SettingsPage(QWidget):
@@ -90,6 +91,9 @@ class SettingsPage(QWidget):
 
         self.flashcard_random_order_checkbox = QCheckBox(
             "Show flashcards in random order"
+        )
+        self.flashcard_random_order_checkbox.setStyleSheet(
+            build_checkbox_indicator_styles(("QCheckBox",))
         )
         timer_form.addRow("", self.flashcard_random_order_checkbox)
 

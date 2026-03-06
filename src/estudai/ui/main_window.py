@@ -4,8 +4,8 @@ import random
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QPoint, QTimer, Qt, QUrl, Signal
-from PySide6.QtGui import QBrush, QColor, QPalette
+from PySide6.QtCore import QEvent, QPoint, QSize, QTimer, Qt, QUrl, Signal
+from PySide6.QtGui import QBrush, QColor, QIcon, QPalette
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QStackedWidget,
+    QStyle,
     QVBoxLayout,
     QWidget,
 )
@@ -51,6 +52,7 @@ from estudai.services.settings import (
 
 from .dialog.notebooklm_import_dialog import NotebookLMCsvImportDialog
 from .pages import ManagementPage, SettingsPage, TimerPage
+from .utils import build_checkbox_indicator_styles
 
 
 class MainWindow(QMainWindow):
@@ -140,7 +142,6 @@ class MainWindow(QMainWindow):
         """Build the sidebar area."""
         self.sidebar = QFrame(self.centralWidget())
         self.sidebar.setFrameShape(QFrame.StyledPanel)
-        self.sidebar.setStyleSheet("QFrame { background-color: palette(window); }")
         self.sidebar.setVisible(False)
         sidebar_layout = QVBoxLayout(self.sidebar)
         sidebar_layout.setContentsMargins(8, 8, 8, 8)
@@ -154,29 +155,6 @@ class MainWindow(QMainWindow):
         self.sidebar_folder_list.setSpacing(4)
         self.sidebar_folder_list.setSelectionMode(QListWidget.ExtendedSelection)
         self.sidebar_folder_list.setEditTriggers(QListWidget.NoEditTriggers)
-        self.sidebar_folder_list.setStyleSheet(
-            "QListWidget {"
-            " show-decoration-selected: 1;"
-            " selection-background-color: palette(highlight);"
-            " selection-color: palette(highlighted-text);"
-            "}"
-            "QListWidget::item:selected {"
-            " background-color: palette(highlight);"
-            " color: palette(highlighted-text);"
-            "}"
-            "QListWidget::item:selected:!active {"
-            " background-color: palette(highlight);"
-            " color: palette(highlighted-text);"
-            "}"
-            "QListWidget::indicator:unchecked {"
-            " border: 1px solid palette(mid);"
-            " background: palette(base);"
-            "}"
-            "QListWidget::indicator:checked {"
-            " border: 1px solid palette(dark);"
-            " background: palette(highlight);"
-            "}"
-        )
         self.sidebar_folder_list.itemChanged.connect(self.handle_sidebar_item_changed)
         self.sidebar_folder_list.itemClicked.connect(self.handle_sidebar_folder_click)
         self.sidebar_folder_list.itemDoubleClicked.connect(
@@ -205,6 +183,7 @@ class MainWindow(QMainWindow):
         import_folder_button.clicked.connect(self.prompt_and_add_folder)
         sidebar_layout.addWidget(import_folder_button)
         sidebar_layout.addStretch()
+        self._apply_sidebar_palette_styles()
         self.sidebar.raise_()
 
     def _build_content_area(self, root_layout: QHBoxLayout) -> None:
@@ -221,19 +200,20 @@ class MainWindow(QMainWindow):
         self.header_container.setFixedHeight(52)
         header_layout = QHBoxLayout(self.header_container)
         header_layout.setContentsMargins(0, 0, 0, 0)
-        self.sidebar_toggle_button = QPushButton("☰")
+        self.sidebar_toggle_button = QPushButton("")
         self.sidebar_toggle_button.setFixedSize(44, 44)
-        self.sidebar_toggle_button.setToolTip("")
-        self.sidebar_toggle_button.setStyleSheet("font-size: 20px; font-weight: 700;")
+        self.sidebar_toggle_button.setToolTip("Toggle folders sidebar")
+        self.sidebar_toggle_button.setIconSize(QSize(20, 20))
         self.sidebar_toggle_button.clicked.connect(self.toggle_sidebar)
         header_layout.addWidget(self.sidebar_toggle_button, alignment=Qt.AlignLeft)
         header_layout.addStretch()
 
-        self.settings_button = QPushButton("⚙")
+        self.settings_button = QPushButton("")
         self.settings_button.setFixedSize(44, 44)
-        self.settings_button.setStyleSheet("font-size: 20px; font-weight: 700;")
-        self.settings_button.setToolTip("")
+        self.settings_button.setToolTip("Open settings")
+        self.settings_button.setIconSize(QSize(20, 20))
         self.settings_button.clicked.connect(self.switch_to_settings)
+        self._apply_navigation_button_icons()
         header_layout.addWidget(self.settings_button, alignment=Qt.AlignRight)
         content_layout.addWidget(self.header_container)
 
@@ -249,8 +229,68 @@ class MainWindow(QMainWindow):
     def changeEvent(self, event: QEvent) -> None:  # noqa: N802
         """Refresh palette-driven sidebar visuals when theme/palette changes."""
         if event.type() in (QEvent.PaletteChange, QEvent.ApplicationPaletteChange):
+            self._apply_navigation_button_icons()
+            self._apply_sidebar_palette_styles()
             self._refresh_sidebar_item_visual_states()
         super().changeEvent(event)
+
+    def _apply_navigation_button_icons(self) -> None:
+        """Set cross-platform navigation icons with theme/native fallback."""
+        self.sidebar_toggle_button.setIcon(
+            self._load_navigation_icon(
+                theme_names=("application-menu", "open-menu-symbolic"),
+                fallback=QStyle.SP_TitleBarMenuButton,
+            )
+        )
+        self.settings_button.setIcon(
+            self._load_navigation_icon(
+                theme_names=("preferences-system", "settings"),
+                fallback=QStyle.SP_FileDialogDetailedView,
+            )
+        )
+
+    def _load_navigation_icon(
+        self,
+        theme_names: tuple[str, ...],
+        fallback: QStyle.StandardPixmap,
+    ) -> QIcon:
+        """Return a theme icon when available, else a native standard icon."""
+        for theme_name in theme_names:
+            theme_icon = QIcon.fromTheme(theme_name)
+            if not theme_icon.isNull():
+                return theme_icon
+        return self.style().standardIcon(fallback, None, self)
+
+    def _apply_sidebar_palette_styles(self) -> None:
+        """Apply palette-aware sidebar frame and checkbox styles."""
+        palette = self.sidebar.palette()
+        border_color = self._blend_colors(
+            palette.color(QPalette.Window),
+            palette.color(QPalette.WindowText),
+            overlay_ratio=0.28,
+        ).name(QColor.HexRgb)
+        self.sidebar.setStyleSheet(
+            "QFrame {"
+            " background-color: palette(window);"
+            f" border: 1px solid {border_color};"
+            "}"
+        )
+        self.sidebar_folder_list.setStyleSheet(
+            "QListWidget {"
+            " show-decoration-selected: 1;"
+            " selection-background-color: palette(highlight);"
+            " selection-color: palette(highlighted-text);"
+            "}"
+            "QListWidget::item:selected {"
+            " background-color: palette(highlight);"
+            " color: palette(highlighted-text);"
+            "}"
+            "QListWidget::item:selected:!active {"
+            " background-color: palette(highlight);"
+            " color: palette(highlighted-text);"
+            "}"
+            + build_checkbox_indicator_styles(("QListWidget",))
+        )
 
     def _update_sidebar_width(self) -> None:
         """Keep sidebar wide enough to read folder names."""

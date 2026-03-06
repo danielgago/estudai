@@ -78,8 +78,12 @@ def test_primary_button_tooltips_are_short(app: QApplication) -> None:
     """Verify key control tooltips use concise labels."""
     window = MainWindow()
 
-    assert window.sidebar_toggle_button.toolTip() == ""
-    assert window.settings_button.toolTip() == ""
+    assert window.sidebar_toggle_button.toolTip() == "Toggle folders sidebar"
+    assert window.settings_button.toolTip() == "Open settings"
+    assert window.sidebar_toggle_button.text() == ""
+    assert window.settings_button.text() == ""
+    assert not window.sidebar_toggle_button.icon().isNull()
+    assert not window.settings_button.icon().isNull()
     assert window.timer_page.start_button.toolTip() == "Start"
     assert window.timer_page.pause_button.toolTip() == "Pause"
     assert window.timer_page.stop_button.toolTip() == "Stop"
@@ -201,6 +205,24 @@ def test_palette_change_reapplies_sidebar_item_visuals(
     window.changeEvent(QEvent(QEvent.PaletteChange))
 
     assert calls == ["refresh"]
+
+
+def test_palette_change_reapplies_sidebar_palette_styles(
+    app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify palette changes reapply sidebar frame/list palette styles."""
+    window = MainWindow()
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        window,
+        "_apply_sidebar_palette_styles",
+        lambda: calls.append("styles"),
+    )
+
+    window.changeEvent(QEvent(QEvent.ApplicationPaletteChange))
+
+    assert calls == ["styles"]
 
 
 def test_add_folder_loads_csv_flashcards(app: QApplication, tmp_path: Path) -> None:
@@ -717,6 +739,24 @@ def test_management_add_button_is_plus_at_top(
     assert management_layout.itemAt(3).widget() is table
     window.management_page.add_flashcard_button.click()
     assert table.rowCount() == 2
+
+
+def test_management_table_uses_sidebar_checkbox_indicator_styles(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify management checkbox indicators mirror sidebar indicator styles."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+    window.handle_sidebar_folder_double_click(window.sidebar_folder_list.item(0))
+    stylesheet = window.management_page.flashcards_table.styleSheet()
+
+    assert "QTableWidget::indicator:unchecked" in stylesheet
+    assert "QTableWidget::indicator:checked" in stylesheet
+    assert "border: 1px solid palette(mid);" in stylesheet
+    assert "border: 1px solid palette(dark);" in stylesheet
 
 
 def test_management_right_click_delete_selected_rows(

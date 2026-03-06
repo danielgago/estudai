@@ -5,7 +5,6 @@ from __future__ import annotations
 from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtGui import QMouseEvent, QPainter
 from PySide6.QtWidgets import (
-    QApplication,
     QAbstractItemView,
     QHBoxLayout,
     QHeaderView,
@@ -21,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from estudai.services.csv_flashcards import Flashcard
+from estudai.ui.utils import build_checkbox_indicator_styles
 
 
 class SelectAllHeaderView(QHeaderView):
@@ -60,8 +60,9 @@ class SelectAllHeaderView(QHeaderView):
             return
 
         super().paintSection(painter, rect, logical_index)
-        style = QApplication.style()
+        style = self.style()
         option = QStyleOptionButton()
+        option.initFrom(self)
         checkbox_rect = style.subElementRect(QStyle.SE_CheckBoxIndicator, option, self)
         checkbox_rect.moveCenter(rect.center())
 
@@ -121,6 +122,9 @@ class ManagementPage(QWidget):
 
         self.flashcards_table = QTableWidget(0, 3)
         self.flashcards_table.setHorizontalHeaderLabels(["", "Question", "Answer"])
+        self.flashcards_table.setStyleSheet(
+            build_checkbox_indicator_styles(("QTableWidget", "QHeaderView"))
+        )
         self.select_all_header = SelectAllHeaderView(
             Qt.Horizontal,
             self.flashcards_table,
@@ -138,6 +142,7 @@ class ManagementPage(QWidget):
             0,
             QHeaderView.ResizeToContents,
         )
+        self.flashcards_table.verticalHeader().setVisible(False)
         self.flashcards_table.horizontalHeader().setSectionResizeMode(
             1,
             QHeaderView.Stretch,
@@ -208,6 +213,7 @@ class ManagementPage(QWidget):
         checkbox_item.setFlags(
             Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable
         )
+        checkbox_item.setTextAlignment(Qt.AlignCenter)
         checkbox_item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
         self.flashcards_table.setItem(row_index, 0, checkbox_item)
         self.flashcards_table.setItem(row_index, 1, QTableWidgetItem(question))
