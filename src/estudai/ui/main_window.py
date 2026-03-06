@@ -349,7 +349,6 @@ class MainWindow(QMainWindow):
         )
         self.sidebar_folder_list.setStyleSheet(
             "QListWidget {"
-            " show-decoration-selected: 1;"
             " selection-background-color: palette(highlight);"
             " selection-color: palette(highlighted-text);"
             "}"
