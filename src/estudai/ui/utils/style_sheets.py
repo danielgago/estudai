@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import platform
+
 
 def build_checkbox_indicator_styles(widget_selectors: tuple[str, ...]) -> str:
     """Build palette-aware checkbox indicator rules for selectors.
@@ -15,6 +17,10 @@ def build_checkbox_indicator_styles(widget_selectors: tuple[str, ...]) -> str:
         str: Concatenated style-sheet rules for unchecked/checked/indeterminate
             indicator states.
     """
+    # On Windows, preserve native checkbox indicators for correct glyph rendering.
+    if platform.system() == "Windows":
+        return ""
+
     style_rules: list[str] = []
     for selector in widget_selectors:
         style_rules.extend(

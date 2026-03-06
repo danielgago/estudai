@@ -1,11 +1,12 @@
 """Main application window."""
 
+import math
 import random
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QPoint, QSize, QTimer, Qt, QUrl, Signal
-from PySide6.QtGui import QBrush, QColor, QIcon, QPalette
+from PySide6.QtCore import QEvent, QPoint, QPointF, QSize, QTimer, Qt, QUrl, Signal
+from PySide6.QtGui import QColor, QIcon, QPainter, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -22,7 +23,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QStackedWidget,
-    QStyle,
     QVBoxLayout,
     QWidget,
 )
@@ -152,7 +152,8 @@ class MainWindow(QMainWindow):
         sidebar_layout.addWidget(sidebar_title)
 
         self.sidebar_folder_list = QListWidget()
-        self.sidebar_folder_list.setSpacing(4)
+        self.sidebar_folder_list.setSpacing(0)
+        self.sidebar_folder_list.setUniformItemSizes(True)
         self.sidebar_folder_list.setSelectionMode(QListWidget.ExtendedSelection)
         self.sidebar_folder_list.setEditTriggers(QListWidget.NoEditTriggers)
         self.sidebar_folder_list.itemChanged.connect(self.handle_sidebar_item_changed)
@@ -238,28 +239,94 @@ class MainWindow(QMainWindow):
         """Set cross-platform navigation icons with theme/native fallback."""
         self.sidebar_toggle_button.setIcon(
             self._load_navigation_icon(
-                theme_names=("application-menu", "open-menu-symbolic"),
-                fallback=QStyle.SP_TitleBarMenuButton,
+                theme_names=("open-menu-symbolic", "application-menu"),
+                fallback=self._build_menu_navigation_icon(
+                    self.sidebar_toggle_button.iconSize()
+                ),
             )
         )
         self.settings_button.setIcon(
             self._load_navigation_icon(
-                theme_names=("preferences-system", "settings"),
-                fallback=QStyle.SP_FileDialogDetailedView,
+                theme_names=("preferences-system", "settings-configure", "settings"),
+                fallback=self._build_settings_navigation_icon(
+                    self.settings_button.iconSize()
+                ),
             )
         )
 
     def _load_navigation_icon(
         self,
         theme_names: tuple[str, ...],
-        fallback: QStyle.StandardPixmap,
+        fallback: QIcon,
     ) -> QIcon:
-        """Return a theme icon when available, else a native standard icon."""
+        """Return a theme icon when available, else the provided fallback icon."""
         for theme_name in theme_names:
             theme_icon = QIcon.fromTheme(theme_name)
             if not theme_icon.isNull():
                 return theme_icon
-        return self.style().standardIcon(fallback, None, self)
+        return fallback
+
+    def _navigation_icon_color(self) -> QColor:
+        """Return icon color with contrast against the current button background."""
+        return self.palette().color(QPalette.ButtonText)
+
+    def _build_menu_navigation_icon(self, icon_size: QSize) -> QIcon:
+        """Build a deterministic hamburger icon used when no themed icon exists."""
+        icon_extent = max(16, min(icon_size.width(), icon_size.height()))
+        pixmap = QPixmap(icon_extent, icon_extent)
+        pixmap.fill(Qt.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        pen = QPen(self._navigation_icon_color())
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setWidthF(max(1.6, icon_extent * 0.11))
+        painter.setPen(pen)
+
+        margin = icon_extent * 0.22
+        for y_ratio in (0.30, 0.50, 0.70):
+            y_pos = icon_extent * y_ratio
+            painter.drawLine(QPointF(margin, y_pos), QPointF(icon_extent - margin, y_pos))
+        painter.end()
+        return QIcon(pixmap)
+
+    def _build_settings_navigation_icon(self, icon_size: QSize) -> QIcon:
+        """Build a deterministic cog icon used when no themed icon exists."""
+        icon_extent = max(16, min(icon_size.width(), icon_size.height()))
+        pixmap = QPixmap(icon_extent, icon_extent)
+        pixmap.fill(Qt.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        pen = QPen(self._navigation_icon_color())
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setWidthF(max(1.4, icon_extent * 0.10))
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+
+        center = QPointF(icon_extent / 2.0, icon_extent / 2.0)
+        outer_radius = icon_extent * 0.34
+        inner_radius = icon_extent * 0.14
+        tooth_inner = outer_radius * 0.73
+
+        for angle_degrees in range(0, 360, 45):
+            angle_radians = math.radians(angle_degrees)
+            cos_angle = math.cos(angle_radians)
+            sin_angle = math.sin(angle_radians)
+            start_point = QPointF(
+                center.x() + (tooth_inner * cos_angle),
+                center.y() + (tooth_inner * sin_angle),
+            )
+            end_point = QPointF(
+                center.x() + (outer_radius * cos_angle),
+                center.y() + (outer_radius * sin_angle),
+            )
+            painter.drawLine(start_point, end_point)
+
+        painter.drawEllipse(center, outer_radius * 0.62, outer_radius * 0.62)
+        painter.drawEllipse(center, inner_radius, inner_radius)
+        painter.end()
+        return QIcon(pixmap)
 
     def _apply_sidebar_palette_styles(self) -> None:
         """Apply palette-aware sidebar frame and checkbox styles."""
@@ -280,6 +347,10 @@ class MainWindow(QMainWindow):
             " show-decoration-selected: 1;"
             " selection-background-color: palette(highlight);"
             " selection-color: palette(highlighted-text);"
+            "}"
+            "QListWidget::item {"
+            " margin: 0px;"
+            " padding: 4px 6px;"
             "}"
             "QListWidget::item:selected {"
             " background-color: palette(highlight);"
@@ -1112,16 +1183,6 @@ class MainWindow(QMainWindow):
         item_font = item.font()
         item_font.setBold(is_checked)
         item.setFont(item_font)
-        palette = self.sidebar_folder_list.palette()
-        if is_checked:
-            checked_background = self._blend_colors(
-                palette.color(QPalette.Base),
-                palette.color(QPalette.Highlight),
-                overlay_ratio=0.22,
-            )
-            item.setBackground(QBrush(checked_background))
-            return
-        item.setBackground(QBrush(palette.color(QPalette.Base)))
 
     @staticmethod
     def _blend_colors(base: QColor, overlay: QColor, overlay_ratio: float) -> QColor:
