@@ -53,7 +53,9 @@ class SelectAllHeaderView(QHeaderView):
         """Return current checkbox state."""
         return self._checked
 
-    def paintSection(self, painter: QPainter, rect, logical_index: int) -> None:  # noqa: N802
+    def paintSection(
+        self, painter: QPainter, rect, logical_index: int
+    ) -> None:  # noqa: N802
         """Paint the first section with a native checkbox indicator."""
         if logical_index != 0:
             super().paintSection(painter, rect, logical_index)

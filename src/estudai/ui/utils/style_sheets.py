@@ -34,4 +34,3 @@ def build_checkbox_indicator_styles(widget_selectors: tuple[str, ...]) -> str:
             ]
         )
     return "".join(style_rules)
-

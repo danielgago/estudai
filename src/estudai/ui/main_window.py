@@ -288,8 +288,7 @@ class MainWindow(QMainWindow):
             "QListWidget::item:selected:!active {"
             " background-color: palette(highlight);"
             " color: palette(highlighted-text);"
-            "}"
-            + build_checkbox_indicator_styles(("QListWidget",))
+            "}" + build_checkbox_indicator_styles(("QListWidget",))
         )
 
     def _update_sidebar_width(self) -> None:
