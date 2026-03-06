@@ -5,6 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import QEvent, QPoint, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPalette
 from PySide6.QtWidgets import (
+    QApplication,
     QAbstractItemView,
     QHBoxLayout,
     QHeaderView,
@@ -13,6 +14,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QStyle,
     QStyleOptionButton,
+    QStyleOptionViewItem,
+    QStyledItemDelegate,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -88,6 +91,86 @@ class SelectAllHeaderView(QHeaderView):
         super().mouseReleaseEvent(event)
 
 
+class CenteredCheckboxDelegate(QStyledItemDelegate):
+    """Delegate that paints checkboxes centered inside their table cell."""
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
+        """Paint first-column checkboxes centered to match header indicator."""
+        if index.column() != 0:
+            super().paint(painter, option, index)
+            return
+
+        style = (
+            option.widget.style() if option.widget is not None else QApplication.style()
+        )
+        item_option = QStyleOptionViewItem(option)
+        self.initStyleOption(item_option, index)
+        item_option.text = ""
+        style.drawControl(QStyle.CE_ItemViewItem, item_option, painter, option.widget)
+
+        check_state = index.data(Qt.CheckStateRole)
+        if check_state is None:
+            return
+        checkbox_option = QStyleOptionButton()
+        checkbox_option.state = QStyle.State_Enabled
+        if Qt.CheckState(check_state) == Qt.Checked:
+            checkbox_option.state |= QStyle.State_On
+        else:
+            checkbox_option.state |= QStyle.State_Off
+        checkbox_option.rect = self._checkbox_rect(option)
+        style.drawPrimitive(
+            QStyle.PE_IndicatorCheckBox,
+            checkbox_option,
+            painter,
+            option.widget,
+        )
+
+    def editorEvent(self, event, model, option: QStyleOptionViewItem, index) -> bool:
+        """Toggle first-column checkboxes only when centered indicator is clicked."""
+        if index.column() != 0:
+            return super().editorEvent(event, model, option, index)
+
+        flags = model.flags(index)
+        if not (flags & Qt.ItemIsUserCheckable and flags & Qt.ItemIsEnabled):
+            return False
+
+        if event.type() not in (
+            QEvent.MouseButtonRelease,
+            QEvent.MouseButtonPress,
+            QEvent.MouseButtonDblClick,
+        ):
+            return super().editorEvent(event, model, option, index)
+        if not isinstance(event, QMouseEvent) or event.button() != Qt.LeftButton:
+            return False
+
+        if event.type() == QEvent.MouseButtonPress:
+            return True
+        if not self._checkbox_rect(option).contains(event.position().toPoint()):
+            return False
+
+        check_state = index.data(Qt.CheckStateRole)
+        if check_state is None:
+            return False
+        target_state = Qt.Unchecked
+        if Qt.CheckState(check_state) != Qt.Checked:
+            target_state = Qt.Checked
+        return model.setData(index, target_state, Qt.CheckStateRole)
+
+    def _checkbox_rect(self, option: QStyleOptionViewItem):
+        """Return centered checkbox indicator rect for the given item option."""
+        style = (
+            option.widget.style() if option.widget is not None else QApplication.style()
+        )
+        checkbox_option = QStyleOptionButton()
+        indicator_rect = style.subElementRect(
+            QStyle.SE_CheckBoxIndicator,
+            checkbox_option,
+            option.widget,
+        )
+        indicator_rect.moveCenter(option.rect.center())
+        return indicator_rect
+
+
 class ManagementPage(QWidget):
     """Page to edit flashcards inside one selected folder."""
 
@@ -135,6 +218,10 @@ class ManagementPage(QWidget):
             self.flashcards_table,
         )
         self.flashcards_table.setHorizontalHeader(self.select_all_header)
+        self.flashcards_table.setItemDelegateForColumn(
+            0,
+            CenteredCheckboxDelegate(self.flashcards_table),
+        )
         self.flashcards_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.flashcards_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.flashcards_table.setContextMenuPolicy(Qt.CustomContextMenu)

@@ -152,6 +152,7 @@ class MainWindow(QMainWindow):
         sidebar_title_font.setPointSize(16)
         sidebar_title_font.setBold(True)
         sidebar_title.setFont(sidebar_title_font)
+        sidebar_title.setStyleSheet("border: none;")
         sidebar_layout.addWidget(sidebar_title)
 
         self.sidebar_folder_list = QListWidget()
