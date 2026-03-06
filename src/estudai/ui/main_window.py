@@ -5,8 +5,27 @@ import random
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QPoint, QPointF, QSize, QTimer, Qt, QUrl, Signal
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPalette, QPen, QPixmap
+from PySide6.QtCore import (
+    QEvent,
+    QPoint,
+    QPointF,
+    QRect,
+    QSize,
+    QTimer,
+    Qt,
+    QUrl,
+    Signal,
+)
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QIcon,
+    QMouseEvent,
+    QPainter,
+    QPalette,
+    QPen,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -23,6 +42,10 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QStackedWidget,
+    QStyle,
+    QStyleOptionButton,
+    QStyleOptionViewItem,
+    QStyledItemDelegate,
     QVBoxLayout,
     QWidget,
 )
@@ -52,6 +75,120 @@ from estudai.services.settings import (
 
 from .dialog.notebooklm_import_dialog import NotebookLMCsvImportDialog
 from .pages import ManagementPage, SettingsPage, TimerPage
+
+
+class SidebarCheckboxDelegate(QStyledItemDelegate):
+    """Delegate that paints native checkbox indicators for sidebar folder items."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        """Initialize the delegate."""
+        super().__init__(parent)
+        self._indicator_margin = 8
+        self._text_spacing = 8
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
+        """Paint list items with native checkbox indicators and aligned text."""
+        check_state = index.data(Qt.CheckStateRole)
+        if check_state is None:
+            super().paint(painter, option, index)
+            return
+
+        style = (
+            option.widget.style() if option.widget is not None else QApplication.style()
+        )
+        item_option = QStyleOptionViewItem(option)
+        self.initStyleOption(item_option, index)
+        item_text = item_option.text
+        item_option.text = ""
+        item_option.features &= ~QStyleOptionViewItem.HasCheckIndicator
+        style.drawControl(QStyle.CE_ItemViewItem, item_option, painter, option.widget)
+
+        checkbox_option = QStyleOptionButton()
+        checkbox_option.state = QStyle.State_Enabled
+        if item_option.state & QStyle.State_MouseOver:
+            checkbox_option.state |= QStyle.State_MouseOver
+        if Qt.CheckState(check_state) == Qt.Checked:
+            checkbox_option.state |= QStyle.State_On
+        else:
+            checkbox_option.state |= QStyle.State_Off
+        checkbox_option.rect = self._checkbox_rect(option)
+        style.drawPrimitive(
+            QStyle.PE_IndicatorCheckBox,
+            checkbox_option,
+            painter,
+            option.widget,
+        )
+
+        text_rect = option.rect.adjusted(
+            checkbox_option.rect.width()
+            + (self._indicator_margin * 2)
+            + self._text_spacing,
+            0,
+            -self._indicator_margin,
+            0,
+        )
+        text_color_role = (
+            QPalette.HighlightedText
+            if item_option.state & QStyle.State_Selected
+            else QPalette.Text
+        )
+        style.drawItemText(
+            painter,
+            text_rect,
+            Qt.AlignVCenter | Qt.AlignLeft,
+            item_option.palette,
+            bool(item_option.state & QStyle.State_Enabled),
+            item_text,
+            text_color_role,
+        )
+
+    def editorEvent(self, event, model, option: QStyleOptionViewItem, index) -> bool:
+        """Toggle checkbox state when the checkbox indicator is clicked."""
+        flags = model.flags(index)
+        if not (flags & Qt.ItemIsUserCheckable and flags & Qt.ItemIsEnabled):
+            return False
+        if event.type() not in (
+            QEvent.MouseButtonRelease,
+            QEvent.MouseButtonPress,
+            QEvent.MouseButtonDblClick,
+        ):
+            return super().editorEvent(event, model, option, index)
+        if not isinstance(event, QMouseEvent) or event.button() != Qt.LeftButton:
+            return False
+        if event.type() == QEvent.MouseButtonPress:
+            return self._checkbox_rect(option).contains(event.position().toPoint())
+        if event.type() == QEvent.MouseButtonDblClick:
+            return True
+        if not self._checkbox_rect(option).contains(event.position().toPoint()):
+            return False
+        check_state = index.data(Qt.CheckStateRole)
+        if check_state is None:
+            return False
+        target_state = Qt.Unchecked
+        if Qt.CheckState(check_state) != Qt.Checked:
+            target_state = Qt.Checked
+        return model.setData(index, target_state, Qt.CheckStateRole)
+
+    def _checkbox_rect(self, option: QStyleOptionViewItem) -> QRect:
+        """Return checkbox rect anchored to the left with vertical centering."""
+        style = (
+            option.widget.style() if option.widget is not None else QApplication.style()
+        )
+        checkbox_option = QStyleOptionButton()
+        indicator_rect = style.subElementRect(
+            QStyle.SE_CheckBoxIndicator,
+            checkbox_option,
+            option.widget,
+        )
+        y_position = option.rect.y() + (
+            (option.rect.height() - indicator_rect.height()) // 2
+        )
+        return QRect(
+            option.rect.x() + self._indicator_margin,
+            y_position,
+            indicator_rect.width(),
+            indicator_rect.height(),
+        )
 
 
 class MainWindow(QMainWindow):
@@ -159,6 +296,9 @@ class MainWindow(QMainWindow):
         self.sidebar_folder_list.setUniformItemSizes(True)
         self.sidebar_folder_list.setSelectionMode(QListWidget.ExtendedSelection)
         self.sidebar_folder_list.setEditTriggers(QListWidget.NoEditTriggers)
+        self.sidebar_folder_list.setItemDelegate(
+            SidebarCheckboxDelegate(self.sidebar_folder_list)
+        )
         self.sidebar_folder_list.itemChanged.connect(self.handle_sidebar_item_changed)
         self.sidebar_folder_list.itemClicked.connect(self.handle_sidebar_folder_click)
         self.sidebar_folder_list.itemDoubleClicked.connect(
@@ -347,7 +487,9 @@ class MainWindow(QMainWindow):
             f" border: 1px solid {border_color};"
             "}"
         )
-        self.sidebar_folder_list.setStyleSheet("")
+        self.sidebar_folder_list.setStyleSheet(
+            "QListWidget {" " show-decoration-selected: 0;" "}"
+        )
 
     def _update_sidebar_width(self) -> None:
         """Keep sidebar wide enough to read folder names."""

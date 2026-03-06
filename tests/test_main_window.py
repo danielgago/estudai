@@ -7,14 +7,20 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import QEvent, QPoint, Qt
-from PySide6.QtGui import QKeyEvent
-from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QPushButton
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, Qt
+from PySide6.QtGui import QKeyEvent, QMouseEvent
+from PySide6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QMessageBox,
+    QPushButton,
+    QStyleOptionViewItem,
+)
 
 from estudai.services.csv_flashcards import Flashcard
 from estudai.services.folder_storage import list_persisted_folders
 from estudai.services.settings import AppSettings
-from estudai.ui.main_window import MainWindow
+from estudai.ui.main_window import MainWindow, SidebarCheckboxDelegate
 
 
 @pytest.fixture(scope="session")
@@ -74,16 +80,63 @@ def test_top_navigation_buttons_are_larger(app: QApplication) -> None:
     assert window.settings_button.width() == 44
 
 
-def test_sidebar_uses_native_list_rendering(
+def test_sidebar_uses_delegate_checkbox_rendering(
     app: QApplication,
 ) -> None:
-    """Verify sidebar avoids selected-row decoration on checkbox indicators."""
+    """Verify sidebar uses native checkbox delegate rendering with stable style hints."""
     window = MainWindow()
 
     stylesheet = window.sidebar_folder_list.styleSheet()
 
+    assert isinstance(
+        window.sidebar_folder_list.itemDelegate(), SidebarCheckboxDelegate
+    )
     assert "show-decoration-selected: 0;" in stylesheet
     assert "QListWidget::indicator" not in stylesheet
+
+
+def test_sidebar_checkbox_delegate_toggles_checkbox_on_indicator_click(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify sidebar checkbox delegate toggles folder checks from indicator clicks."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("What is DNA?,Genetic material.\n")
+    assert window.add_folder(biology_folder) is True
+
+    folder_item = window.sidebar_folder_list.item(0)
+    model = window.sidebar_folder_list.model()
+    index = model.index(0, 0)
+    delegate = window.sidebar_folder_list.itemDelegate()
+    option = QStyleOptionViewItem()
+    option.widget = window.sidebar_folder_list
+    option.rect = QRect(0, 0, 260, 28)
+    click_position = QPointF(12, 14)
+
+    press_event = QMouseEvent(
+        QEvent.MouseButtonPress,
+        click_position,
+        click_position,
+        click_position,
+        Qt.LeftButton,
+        Qt.LeftButton,
+        Qt.NoModifier,
+    )
+    release_event = QMouseEvent(
+        QEvent.MouseButtonRelease,
+        click_position,
+        click_position,
+        click_position,
+        Qt.LeftButton,
+        Qt.LeftButton,
+        Qt.NoModifier,
+    )
+
+    assert folder_item.checkState() == Qt.Checked
+    assert delegate.editorEvent(press_event, model, option, index) is True
+    assert delegate.editorEvent(release_event, model, option, index) is True
+    assert folder_item.checkState() == Qt.Unchecked
 
 
 def test_primary_button_tooltips_are_short(app: QApplication) -> None:
