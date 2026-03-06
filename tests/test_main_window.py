@@ -77,12 +77,13 @@ def test_top_navigation_buttons_are_larger(app: QApplication) -> None:
 def test_sidebar_uses_native_list_rendering(
     app: QApplication,
 ) -> None:
-    """Verify sidebar list rendering is left to native platform styling."""
+    """Verify sidebar avoids selected-row decoration on checkbox indicators."""
     window = MainWindow()
 
     stylesheet = window.sidebar_folder_list.styleSheet()
 
-    assert stylesheet == ""
+    assert "show-decoration-selected: 0;" in stylesheet
+    assert "QListWidget::indicator" not in stylesheet
 
 
 def test_primary_button_tooltips_are_short(app: QApplication) -> None:

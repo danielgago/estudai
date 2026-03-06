@@ -347,7 +347,15 @@ class MainWindow(QMainWindow):
             f" border: 1px solid {border_color};"
             "}"
         )
-        self.sidebar_folder_list.setStyleSheet("")
+        self.sidebar_folder_list.setStyleSheet(
+            "QListWidget {"
+            " selection-background-color: palette(highlight);"
+            " selection-color: palette(highlighted-text);"
+            "}"
+            "QListWidget::item {"
+            " show-decoration-selected: 0;"
+            "}"
+        )
 
     def _update_sidebar_width(self) -> None:
         """Keep sidebar wide enough to read folder names."""
