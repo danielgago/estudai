@@ -116,16 +116,14 @@ def test_settings_page_only_persists_changes_after_save(app: QApplication) -> No
     assert persisted.answer_display_duration_seconds == 11
 
 
-def test_settings_page_checkbox_uses_shared_indicator_styles(app: QApplication) -> None:
-    """Verify random-order checkbox uses palette-driven indicator styling."""
+def test_settings_page_checkbox_keeps_native_indicator_styles(
+    app: QApplication,
+) -> None:
+    """Verify random-order checkbox avoids fragile indicator stylesheet overrides."""
     page = SettingsPage()
     stylesheet = page.flashcard_random_order_checkbox.styleSheet()
 
-    assert "QCheckBox::indicator:unchecked" in stylesheet
-    assert "QCheckBox::indicator:checked" in stylesheet
-    assert "QCheckBox::indicator:indeterminate" in stylesheet
-    assert "border: 1px solid palette(mid);" in stylesheet
-    assert "background: palette(highlight);" in stylesheet
+    assert stylesheet == ""
 
 
 def test_settings_page_uploads_sound_and_plays_test(

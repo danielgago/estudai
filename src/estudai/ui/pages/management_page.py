@@ -23,7 +23,10 @@ from PySide6.QtWidgets import (
 )
 
 from estudai.services.csv_flashcards import Flashcard
-from estudai.ui.utils import build_checkbox_indicator_styles
+from estudai.ui.utils import (
+    build_checkbox_indicator_styles,
+    create_checkable_table_item,
+)
 
 
 class SelectAllHeaderView(QHeaderView):
@@ -329,12 +332,7 @@ class ManagementPage(QWidget):
             checked: Whether this row is selected for timer usage.
         """
         self.flashcards_table.insertRow(row_index)
-        checkbox_item = QTableWidgetItem()
-        checkbox_item.setFlags(
-            Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable
-        )
-        checkbox_item.setTextAlignment(Qt.AlignCenter)
-        checkbox_item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
+        checkbox_item = create_checkable_table_item(checked=checked)
         self.flashcards_table.setItem(row_index, 0, checkbox_item)
         self.flashcards_table.setItem(row_index, 1, QTableWidgetItem(question))
         self.flashcards_table.setItem(row_index, 2, QTableWidgetItem(answer))

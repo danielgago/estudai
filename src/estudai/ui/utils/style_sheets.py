@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import platform
-
 
 def build_checkbox_indicator_styles(widget_selectors: tuple[str, ...]) -> str:
-    """Build palette-aware checkbox indicator rules for selectors.
+    """Return checkbox indicator styles.
 
     Args:
         widget_selectors: Widget selectors that expose ``::indicator`` in CSS,
@@ -14,29 +12,7 @@ def build_checkbox_indicator_styles(widget_selectors: tuple[str, ...]) -> str:
             ``QCheckBox``.
 
     Returns:
-        str: Concatenated style-sheet rules for unchecked/checked/indeterminate
-            indicator states.
+        str: Empty style-sheet snippet so checkboxes render with native style.
     """
-    # On Windows, preserve native checkbox indicators for correct glyph rendering.
-    if platform.system() == "Windows":
-        return ""
-
-    style_rules: list[str] = []
-    for selector in widget_selectors:
-        style_rules.extend(
-            [
-                f"{selector}::indicator:unchecked {{"
-                " border: 1px solid palette(mid);"
-                " background: palette(base);"
-                "}",
-                f"{selector}::indicator:checked {{"
-                " border: 1px solid palette(dark);"
-                " background: palette(highlight);"
-                "}",
-                f"{selector}::indicator:indeterminate {{"
-                " border: 1px solid palette(dark);"
-                " background: palette(midlight);"
-                "}",
-            ]
-        )
-    return "".join(style_rules)
+    _ = widget_selectors
+    return ""

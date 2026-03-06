@@ -753,10 +753,10 @@ def test_management_add_button_is_plus_at_top(
     assert table.rowCount() == 2
 
 
-def test_management_table_uses_sidebar_checkbox_indicator_styles(
+def test_management_table_keeps_native_checkbox_indicator_styles(
     app: QApplication, tmp_path: Path
 ) -> None:
-    """Verify management checkbox indicators mirror sidebar indicator styles."""
+    """Verify management table does not override native checkbox indicator styles."""
     window = MainWindow()
     biology_folder = tmp_path / "biology"
     biology_folder.mkdir()
@@ -765,10 +765,7 @@ def test_management_table_uses_sidebar_checkbox_indicator_styles(
     window.handle_sidebar_folder_double_click(window.sidebar_folder_list.item(0))
     stylesheet = window.management_page.flashcards_table.styleSheet()
 
-    assert "QTableWidget::indicator:unchecked" in stylesheet
-    assert "QTableWidget::indicator:checked" in stylesheet
-    assert "border: 1px solid palette(mid);" in stylesheet
-    assert "border: 1px solid palette(dark);" in stylesheet
+    assert stylesheet == ""
 
 
 def test_management_right_click_delete_selected_rows(
