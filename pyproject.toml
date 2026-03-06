@@ -1,7 +1,7 @@
 [project]
-name = "estudai"
-version = "0.1.0"
-description = "flashcard timer for studying while multitasking"
+name = "Estudai"
+version = "1.0.0"
+description = "Flashcard timer for studying while multitasking"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
