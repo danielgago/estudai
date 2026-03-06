@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" width="100%" height="100%">
+  <defs>
+    <style>
+      .outline {
+        stroke: #1e293b;
+        stroke-width: 4;
+        stroke-linejoin: round;
+        stroke-linecap: round;
+      }
+    </style>
+  </defs>
+
+  <rect x="10" y="16" width="48" height="44" rx="6" fill="#cbd5e1" class="outline" />
+
+  <rect x="18" y="24" width="48" height="44" rx="6" fill="#ffffff" class="outline" />
+
+  <path d="M 36 38 C 36 30, 48 30, 48 38 C 48 45, 42 45, 42 51" fill="none" stroke="#3b82f6" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" />
+  <circle cx="42" cy="58" r="3" fill="#3b82f6" />
+
+  <line x1="52" y1="10" x2="48" y2="6" class="outline" />
+  <line x1="72" y1="10" x2="76" y2="6" class="outline" />
+
+  <rect x="57" y="3" width="10" height="7" rx="2" fill="#ef4444" class="outline" />
+
+  <circle cx="62" cy="20" r="14" fill="#ffffff" class="outline" />
+
+  <circle cx="62" cy="20" r="10" fill="none" stroke="#e2e8f0" stroke-width="2" />
+
+  <line x1="62" y1="20" x2="62" y2="12" stroke="#1e293b" stroke-width="3" stroke-linecap="round" />
+  <line x1="62" y1="20" x2="68" y2="24" stroke="#ef4444" stroke-width="3" stroke-linecap="round" />
+
+  <circle cx="62" cy="20" r="2.5" fill="#1e293b" />
+</svg>

@@ -1,6 +1,15 @@
 """Timer page."""
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QTime, Qt, QTimer, Signal
+from PySide6.QtCore import (
+    QEasingCurve,
+    QEvent,
+    QPropertyAnimation,
+    QTime,
+    Qt,
+    QTimer,
+    Signal,
+)
+from PySide6.QtGui import QColor, QFont, QPalette
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -51,7 +60,10 @@ class TimerPage(QWidget):
         timer_layout.setSpacing(0)
         timer_layout.addStretch(1)
         self.timer_display = QLabel(self.time.toString("mm:ss"))
-        self.timer_display.setStyleSheet("font-size: 74px; font-weight: 800;")
+        timer_font = QFont(self.timer_display.font())
+        timer_font.setPointSize(74)
+        timer_font.setWeight(QFont.ExtraBold)
+        self.timer_display.setFont(timer_font)
         self.timer_display.setAlignment(Qt.AlignCenter)
         timer_layout.addWidget(self.timer_display)
         timer_layout.addStretch(1)
@@ -66,9 +78,10 @@ class TimerPage(QWidget):
         self.flashcard_question_label.setAlignment(Qt.AlignCenter)
         self.flashcard_question_label.setWordWrap(True)
         self.flashcard_question_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.flashcard_question_label.setStyleSheet(
-            "font-size: 40px; font-weight: 800;"
-        )
+        question_font = QFont(self.flashcard_question_label.font())
+        question_font.setPointSize(40)
+        question_font.setWeight(QFont.ExtraBold)
+        self.flashcard_question_label.setFont(question_font)
         self.flashcard_question_label.setVisible(False)
         flashcard_layout.addWidget(self.flashcard_question_label)
 
@@ -76,7 +89,10 @@ class TimerPage(QWidget):
         self.flashcard_answer_label.setAlignment(Qt.AlignCenter)
         self.flashcard_answer_label.setWordWrap(True)
         self.flashcard_answer_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.flashcard_answer_label.setStyleSheet("font-size: 34px; font-weight: 600;")
+        answer_font = QFont(self.flashcard_answer_label.font())
+        answer_font.setPointSize(34)
+        answer_font.setWeight(QFont.DemiBold)
+        self.flashcard_answer_label.setFont(answer_font)
         self.flashcard_answer_label.setVisible(False)
         flashcard_layout.addWidget(self.flashcard_answer_label)
         flashcard_layout.addStretch(1)
@@ -85,7 +101,10 @@ class TimerPage(QWidget):
 
         self.folder_context_label = QLabel("Folder: No folders selected (0 cards)")
         self.folder_context_label.setAlignment(Qt.AlignCenter)
-        self.folder_context_label.setStyleSheet("font-size: 14px; color: #4b5563;")
+        folder_context_font = QFont(self.folder_context_label.font())
+        folder_context_font.setPointSize(14)
+        self.folder_context_label.setFont(folder_context_font)
+        self._set_muted_label_color(self.folder_context_label)
         layout.addWidget(self.folder_context_label)
 
         controls_layout = QHBoxLayout()
@@ -122,20 +141,53 @@ class TimerPage(QWidget):
         self.flashcard_progress_bar.setVisible(False)
         layout.addWidget(self.flashcard_progress_bar)
 
-        self.setStyleSheet("""
-            QProgressBar {
-                border: none;
-                border-radius: 3px;
-                background: #e5e7eb;
-            }
-            QProgressBar::chunk {
-                border-radius: 3px;
-                background: #6366f1;
-            }
-            """)
+        self._apply_palette_styles()
 
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_timer)
+
+    def changeEvent(self, event: QEvent) -> None:  # noqa: N802
+        """Refresh palette-driven colors when theme/palette changes."""
+        if event.type() in (QEvent.PaletteChange, QEvent.ApplicationPaletteChange):
+            self._set_muted_label_color(self.folder_context_label)
+            self._apply_palette_styles()
+        super().changeEvent(event)
+
+    def _apply_palette_styles(self) -> None:
+        """Apply palette-aware styles for non-native progress visuals."""
+        self.setStyleSheet(
+            "QProgressBar {"
+            " border: none;"
+            " border-radius: 3px;"
+            " background: palette(alternate-base);"
+            "}"
+            "QProgressBar::chunk {"
+            " border-radius: 3px;"
+            " background: palette(highlight);"
+            "}"
+        )
+
+    def _set_muted_label_color(self, label: QLabel) -> None:
+        """Apply a readable secondary-text color derived from the active palette."""
+        palette = label.palette()
+        muted_color = self._blend_colors(
+            palette.color(QPalette.WindowText),
+            palette.color(QPalette.Window),
+            overlay_ratio=0.35,
+        )
+        palette.setColor(QPalette.WindowText, muted_color)
+        label.setPalette(palette)
+
+    @staticmethod
+    def _blend_colors(base: QColor, overlay: QColor, overlay_ratio: float) -> QColor:
+        """Return a deterministic blend between base and overlay colors."""
+        clamped_ratio = max(0.0, min(1.0, overlay_ratio))
+        base_ratio = 1.0 - clamped_ratio
+        return QColor(
+            int((base.red() * base_ratio) + (overlay.red() * clamped_ratio)),
+            int((base.green() * base_ratio) + (overlay.green() * clamped_ratio)),
+            int((base.blue() * base_ratio) + (overlay.blue() * clamped_ratio)),
+        )
 
     def start_timer(self):
         """Start the timer."""

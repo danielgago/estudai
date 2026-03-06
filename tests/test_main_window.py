@@ -7,14 +7,20 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import QEvent, QPoint, Qt
-from PySide6.QtGui import QKeyEvent
-from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QPushButton
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, Qt
+from PySide6.QtGui import QKeyEvent, QMouseEvent
+from PySide6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QMessageBox,
+    QPushButton,
+    QStyleOptionViewItem,
+)
 
 from estudai.services.csv_flashcards import Flashcard
 from estudai.services.folder_storage import list_persisted_folders
 from estudai.services.settings import AppSettings
-from estudai.ui.main_window import MainWindow
+from estudai.ui.main_window import MainWindow, SidebarCheckboxDelegate
 
 
 @pytest.fixture(scope="session")
@@ -74,12 +80,75 @@ def test_top_navigation_buttons_are_larger(app: QApplication) -> None:
     assert window.settings_button.width() == 44
 
 
+def test_sidebar_uses_delegate_checkbox_rendering(
+    app: QApplication,
+) -> None:
+    """Verify sidebar uses native checkbox delegate rendering with stable style hints."""
+    window = MainWindow()
+
+    stylesheet = window.sidebar_folder_list.styleSheet()
+
+    assert isinstance(
+        window.sidebar_folder_list.itemDelegate(), SidebarCheckboxDelegate
+    )
+    assert "show-decoration-selected: 0;" in stylesheet
+    assert "QListWidget::indicator" not in stylesheet
+
+
+def test_sidebar_checkbox_delegate_toggles_checkbox_on_indicator_click(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify sidebar checkbox delegate toggles folder checks from indicator clicks."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("What is DNA?,Genetic material.\n")
+    assert window.add_folder(biology_folder) is True
+
+    folder_item = window.sidebar_folder_list.item(0)
+    model = window.sidebar_folder_list.model()
+    index = model.index(0, 0)
+    delegate = window.sidebar_folder_list.itemDelegate()
+    option = QStyleOptionViewItem()
+    option.widget = window.sidebar_folder_list
+    option.rect = QRect(0, 0, 260, 28)
+    click_position = QPointF(12, 14)
+
+    press_event = QMouseEvent(
+        QEvent.MouseButtonPress,
+        click_position,
+        click_position,
+        click_position,
+        Qt.LeftButton,
+        Qt.LeftButton,
+        Qt.NoModifier,
+    )
+    release_event = QMouseEvent(
+        QEvent.MouseButtonRelease,
+        click_position,
+        click_position,
+        click_position,
+        Qt.LeftButton,
+        Qt.LeftButton,
+        Qt.NoModifier,
+    )
+
+    assert folder_item.checkState() == Qt.Checked
+    assert delegate.editorEvent(press_event, model, option, index) is True
+    assert delegate.editorEvent(release_event, model, option, index) is True
+    assert folder_item.checkState() == Qt.Unchecked
+
+
 def test_primary_button_tooltips_are_short(app: QApplication) -> None:
     """Verify key control tooltips use concise labels."""
     window = MainWindow()
 
-    assert window.sidebar_toggle_button.toolTip() == ""
-    assert window.settings_button.toolTip() == ""
+    assert window.sidebar_toggle_button.toolTip() == "Toggle folders sidebar"
+    assert window.settings_button.toolTip() == "Open settings"
+    assert window.sidebar_toggle_button.text() == ""
+    assert window.settings_button.text() == ""
+    assert not window.sidebar_toggle_button.icon().isNull()
+    assert not window.settings_button.icon().isNull()
     assert window.timer_page.start_button.toolTip() == "Start"
     assert window.timer_page.pause_button.toolTip() == "Pause"
     assert window.timer_page.stop_button.toolTip() == "Stop"
@@ -160,6 +229,65 @@ def test_sidebar_folder_selection_updates_current_folder(
     folder_item.setCheckState(Qt.Checked)
     assert window.current_folder_name == "biology"
     assert len(window.loaded_flashcards) == 1
+
+
+def test_checked_sidebar_folder_is_rendered_bold(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify checked folders have a clear visual cue in the sidebar."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("What is DNA?,Genetic material.\n")
+    assert window.add_folder(biology_folder) is True
+    folder_item = window.sidebar_folder_list.item(0)
+
+    assert folder_item.checkState() == Qt.Checked
+    assert folder_item.font().bold() is True
+
+    folder_item.setCheckState(Qt.Unchecked)
+
+    assert folder_item.font().bold() is False
+
+
+def test_palette_change_reapplies_sidebar_item_visuals(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify palette changes trigger sidebar checked-state visual recomputation."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("What is DNA?,Genetic material.\n")
+    assert window.add_folder(biology_folder) is True
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        window,
+        "_refresh_sidebar_item_visual_states",
+        lambda: calls.append("refresh"),
+    )
+
+    window.changeEvent(QEvent(QEvent.PaletteChange))
+
+    assert calls == ["refresh"]
+
+
+def test_palette_change_reapplies_sidebar_palette_styles(
+    app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify palette changes reapply sidebar frame/list palette styles."""
+    window = MainWindow()
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        window,
+        "_apply_sidebar_palette_styles",
+        lambda: calls.append("styles"),
+    )
+
+    window.changeEvent(QEvent(QEvent.ApplicationPaletteChange))
+
+    assert calls == ["styles"]
 
 
 def test_add_folder_loads_csv_flashcards(app: QApplication, tmp_path: Path) -> None:
@@ -644,16 +772,16 @@ def test_management_select_and_unselect_all_controls(
     table.item(0, 0).setCheckState(Qt.Unchecked)
     table.item(1, 0).setCheckState(Qt.Checked)
 
-    assert table.horizontalHeaderItem(0).text() == "☐"
+    assert window.management_page.is_header_checkbox_checked() is False
     window.management_page.handle_table_header_click(0)
     assert table.item(0, 0).checkState() == Qt.Checked
     assert table.item(1, 0).checkState() == Qt.Checked
-    assert table.horizontalHeaderItem(0).text() == "☑"
+    assert window.management_page.is_header_checkbox_checked() is True
 
     window.management_page.handle_table_header_click(0)
     assert table.item(0, 0).checkState() == Qt.Unchecked
     assert table.item(1, 0).checkState() == Qt.Unchecked
-    assert table.horizontalHeaderItem(0).text() == "☐"
+    assert window.management_page.is_header_checkbox_checked() is False
 
 
 def test_management_add_button_is_plus_at_top(
@@ -676,6 +804,21 @@ def test_management_add_button_is_plus_at_top(
     assert management_layout.itemAt(3).widget() is table
     window.management_page.add_flashcard_button.click()
     assert table.rowCount() == 2
+
+
+def test_management_table_keeps_native_checkbox_indicator_styles(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify management table does not override native checkbox indicator styles."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+    window.handle_sidebar_folder_double_click(window.sidebar_folder_list.item(0))
+    stylesheet = window.management_page.flashcards_table.styleSheet()
+
+    assert stylesheet == ""
 
 
 def test_management_right_click_delete_selected_rows(

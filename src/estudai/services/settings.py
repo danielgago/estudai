@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -37,11 +38,22 @@ def get_default_notification_sound_path() -> str:
     """Return the default notification sound path when available.
 
     Returns:
-        str: Absolute path to bundled `data/alarm.mp3`, or empty string.
+        str: Absolute path to bundled `alarm.mp3`, or empty string.
     """
-    repository_alarm = Path(__file__).resolve().parents[3] / "data" / "alarm.mp3"
-    if repository_alarm.exists() and repository_alarm.is_file():
-        return str(repository_alarm)
+    candidates: list[Path] = []
+    if getattr(sys, "frozen", False):
+        executable_dir = Path(sys.executable).resolve().parent
+        candidates.extend(
+            [
+                executable_dir / "data" / "alarm.mp3",
+                executable_dir / "alarm.mp3",
+            ]
+        )
+    candidates.append(Path(__file__).resolve().parents[3] / "data" / "alarm.mp3")
+
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_file():
+            return str(candidate)
     return ""
 
 

@@ -15,6 +15,23 @@ estudai = "estudai.main:main"
 [tool.uv]
 package = true
 
+[tool.cxfreeze]
+executables = [
+    { script = "src/estudai/main.py", base = "gui", target_name = "Estudai.exe", icon = "data/estudai.ico", shortcut_name = "Estudai", shortcut_dir = "DesktopFolder" },
+]
+
+[tool.cxfreeze.build_exe]
+include_msvcr = true
+include_files = ["data/alarm.mp3", "data/estudai.svg", "data/estudai.ico"]
+excludes = ["tkinter", "unittest", "test", "pydoc"]
+
+[tool.cxfreeze.bdist_msi]
+add_to_path = false
+all_users = false
+initial_target_dir = "[ProgramFiles64Folder]Estudai"
+install_icon = "data/estudai.ico"
+upgrade_code = "{D143C7D2-37F8-4B4A-AFC2-9D45E8A6A6C8}"
+
 [dependency-groups]
 dev = [
     "ruff>=0.15.4",
@@ -32,4 +49,3 @@ markers = [
     "unit: unit tests",
     "integration: integration tests",
 ]
-

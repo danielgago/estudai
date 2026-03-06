@@ -1,10 +1,31 @@
 """Main application window."""
 
+import math
 import random
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QPoint, QTimer, Qt, QUrl, Signal
+from PySide6.QtCore import (
+    QEvent,
+    QPoint,
+    QPointF,
+    QRect,
+    QSize,
+    QTimer,
+    Qt,
+    QUrl,
+    Signal,
+)
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QIcon,
+    QMouseEvent,
+    QPainter,
+    QPalette,
+    QPen,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -21,6 +42,10 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QStackedWidget,
+    QStyle,
+    QStyleOptionButton,
+    QStyleOptionViewItem,
+    QStyledItemDelegate,
     QVBoxLayout,
     QWidget,
 )
@@ -50,6 +75,115 @@ from estudai.services.settings import (
 
 from .dialog.notebooklm_import_dialog import NotebookLMCsvImportDialog
 from .pages import ManagementPage, SettingsPage, TimerPage
+
+
+class SidebarCheckboxDelegate(QStyledItemDelegate):
+    """Delegate that paints native checkbox indicators for sidebar folder items."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        """Initialize the delegate."""
+        super().__init__(parent)
+        self._indicator_margin = 8
+        self._text_spacing = 8
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
+        """Paint list items with native checkbox indicators and aligned text."""
+        check_state = index.data(Qt.CheckStateRole)
+        if check_state is None:
+            super().paint(painter, option, index)
+            return
+
+        style = (
+            option.widget.style() if option.widget is not None else QApplication.style()
+        )
+        item_option = QStyleOptionViewItem(option)
+        self.initStyleOption(item_option, index)
+        item_text = item_option.text
+        item_option.text = ""
+        item_option.features &= ~QStyleOptionViewItem.HasCheckIndicator
+        style.drawControl(QStyle.CE_ItemViewItem, item_option, painter, option.widget)
+
+        checkbox_option = QStyleOptionButton()
+        checkbox_option.state = QStyle.State_Enabled
+        if item_option.state & QStyle.State_MouseOver:
+            checkbox_option.state |= QStyle.State_MouseOver
+        if Qt.CheckState(check_state) == Qt.Checked:
+            checkbox_option.state |= QStyle.State_On
+        else:
+            checkbox_option.state |= QStyle.State_Off
+        checkbox_option.rect = self._checkbox_rect(option)
+        style.drawPrimitive(
+            QStyle.PE_IndicatorCheckBox,
+            checkbox_option,
+            painter,
+            option.widget,
+        )
+
+        text_rect = option.rect.adjusted(
+            checkbox_option.rect.width()
+            + (self._indicator_margin * 2)
+            + self._text_spacing,
+            0,
+            -self._indicator_margin,
+            0,
+        )
+        style.drawItemText(
+            painter,
+            text_rect,
+            Qt.AlignVCenter | Qt.AlignLeft,
+            item_option.palette,
+            bool(item_option.state & QStyle.State_Enabled),
+            item_text,
+            QPalette.Text,
+        )
+
+    def editorEvent(self, event, model, option: QStyleOptionViewItem, index) -> bool:
+        """Toggle checkbox state when the checkbox indicator is clicked."""
+        flags = model.flags(index)
+        if not (flags & Qt.ItemIsUserCheckable and flags & Qt.ItemIsEnabled):
+            return False
+        if event.type() not in (
+            QEvent.MouseButtonRelease,
+            QEvent.MouseButtonPress,
+            QEvent.MouseButtonDblClick,
+        ):
+            return super().editorEvent(event, model, option, index)
+        if not isinstance(event, QMouseEvent) or event.button() != Qt.LeftButton:
+            return False
+        if event.type() == QEvent.MouseButtonPress:
+            return self._checkbox_rect(option).contains(event.position().toPoint())
+        if event.type() == QEvent.MouseButtonDblClick:
+            return True
+        if not self._checkbox_rect(option).contains(event.position().toPoint()):
+            return False
+        check_state = index.data(Qt.CheckStateRole)
+        if check_state is None:
+            return False
+        target_state = Qt.Unchecked
+        if Qt.CheckState(check_state) != Qt.Checked:
+            target_state = Qt.Checked
+        return model.setData(index, target_state, Qt.CheckStateRole)
+
+    def _checkbox_rect(self, option: QStyleOptionViewItem) -> QRect:
+        """Return checkbox rect anchored to the left with vertical centering."""
+        style = (
+            option.widget.style() if option.widget is not None else QApplication.style()
+        )
+        checkbox_option = QStyleOptionButton()
+        indicator_rect = style.subElementRect(
+            QStyle.SE_CheckBoxIndicator,
+            checkbox_option,
+            option.widget,
+        )
+        y_position = option.rect.y() + (
+            (option.rect.height() - indicator_rect.height()) // 2
+        )
+        return QRect(
+            option.rect.x() + self._indicator_margin,
+            y_position,
+            indicator_rect.width(),
+            indicator_rect.height(),
+        )
 
 
 class MainWindow(QMainWindow):
@@ -139,20 +273,27 @@ class MainWindow(QMainWindow):
         """Build the sidebar area."""
         self.sidebar = QFrame(self.centralWidget())
         self.sidebar.setFrameShape(QFrame.StyledPanel)
-        self.sidebar.setStyleSheet("QFrame { background-color: palette(window); }")
         self.sidebar.setVisible(False)
         sidebar_layout = QVBoxLayout(self.sidebar)
         sidebar_layout.setContentsMargins(8, 8, 8, 8)
         sidebar_layout.setSpacing(8)
 
         sidebar_title = QLabel("Folders")
-        sidebar_title.setStyleSheet("font-size: 16px; font-weight: bold;")
+        sidebar_title_font = QFont(sidebar_title.font())
+        sidebar_title_font.setPointSize(16)
+        sidebar_title_font.setBold(True)
+        sidebar_title.setFont(sidebar_title_font)
+        sidebar_title.setStyleSheet("border: none;")
         sidebar_layout.addWidget(sidebar_title)
 
         self.sidebar_folder_list = QListWidget()
-        self.sidebar_folder_list.setSpacing(4)
+        self.sidebar_folder_list.setSpacing(0)
+        self.sidebar_folder_list.setUniformItemSizes(True)
         self.sidebar_folder_list.setSelectionMode(QListWidget.ExtendedSelection)
         self.sidebar_folder_list.setEditTriggers(QListWidget.NoEditTriggers)
+        self.sidebar_folder_list.setItemDelegate(
+            SidebarCheckboxDelegate(self.sidebar_folder_list)
+        )
         self.sidebar_folder_list.itemChanged.connect(self.handle_sidebar_item_changed)
         self.sidebar_folder_list.itemClicked.connect(self.handle_sidebar_folder_click)
         self.sidebar_folder_list.itemDoubleClicked.connect(
@@ -181,6 +322,7 @@ class MainWindow(QMainWindow):
         import_folder_button.clicked.connect(self.prompt_and_add_folder)
         sidebar_layout.addWidget(import_folder_button)
         sidebar_layout.addStretch()
+        self._apply_sidebar_palette_styles()
         self.sidebar.raise_()
 
     def _build_content_area(self, root_layout: QHBoxLayout) -> None:
@@ -197,19 +339,20 @@ class MainWindow(QMainWindow):
         self.header_container.setFixedHeight(52)
         header_layout = QHBoxLayout(self.header_container)
         header_layout.setContentsMargins(0, 0, 0, 0)
-        self.sidebar_toggle_button = QPushButton("☰")
+        self.sidebar_toggle_button = QPushButton("")
         self.sidebar_toggle_button.setFixedSize(44, 44)
-        self.sidebar_toggle_button.setToolTip("")
-        self.sidebar_toggle_button.setStyleSheet("font-size: 20px; font-weight: 700;")
+        self.sidebar_toggle_button.setToolTip("Toggle folders sidebar")
+        self.sidebar_toggle_button.setIconSize(QSize(20, 20))
         self.sidebar_toggle_button.clicked.connect(self.toggle_sidebar)
         header_layout.addWidget(self.sidebar_toggle_button, alignment=Qt.AlignLeft)
         header_layout.addStretch()
 
-        self.settings_button = QPushButton("⚙")
+        self.settings_button = QPushButton("")
         self.settings_button.setFixedSize(44, 44)
-        self.settings_button.setStyleSheet("font-size: 20px; font-weight: 700;")
-        self.settings_button.setToolTip("")
+        self.settings_button.setToolTip("Open settings")
+        self.settings_button.setIconSize(QSize(20, 20))
         self.settings_button.clicked.connect(self.switch_to_settings)
+        self._apply_navigation_button_icons()
         header_layout.addWidget(self.settings_button, alignment=Qt.AlignRight)
         content_layout.addWidget(self.header_container)
 
@@ -221,6 +364,127 @@ class MainWindow(QMainWindow):
         """Resize sidebar width proportionally with window size."""
         super().resizeEvent(event)
         self._update_sidebar_width()
+
+    def changeEvent(self, event: QEvent) -> None:  # noqa: N802
+        """Refresh palette-driven sidebar visuals when theme/palette changes."""
+        if event.type() in (QEvent.PaletteChange, QEvent.ApplicationPaletteChange):
+            self._apply_navigation_button_icons()
+            self._apply_sidebar_palette_styles()
+            self._refresh_sidebar_item_visual_states()
+        super().changeEvent(event)
+
+    def _apply_navigation_button_icons(self) -> None:
+        """Set cross-platform navigation icons with theme/native fallback."""
+        self.sidebar_toggle_button.setIcon(
+            self._load_navigation_icon(
+                theme_names=("open-menu-symbolic", "application-menu"),
+                fallback=self._build_menu_navigation_icon(
+                    self.sidebar_toggle_button.iconSize()
+                ),
+            )
+        )
+        self.settings_button.setIcon(
+            self._load_navigation_icon(
+                theme_names=("preferences-system", "settings-configure", "settings"),
+                fallback=self._build_settings_navigation_icon(
+                    self.settings_button.iconSize()
+                ),
+            )
+        )
+
+    def _load_navigation_icon(
+        self,
+        theme_names: tuple[str, ...],
+        fallback: QIcon,
+    ) -> QIcon:
+        """Return a theme icon when available, else the provided fallback icon."""
+        for theme_name in theme_names:
+            theme_icon = QIcon.fromTheme(theme_name)
+            if not theme_icon.isNull():
+                return theme_icon
+        return fallback
+
+    def _navigation_icon_color(self) -> QColor:
+        """Return icon color with contrast against the current button background."""
+        return self.palette().color(QPalette.ButtonText)
+
+    def _build_menu_navigation_icon(self, icon_size: QSize) -> QIcon:
+        """Build a deterministic hamburger icon used when no themed icon exists."""
+        icon_extent = max(16, min(icon_size.width(), icon_size.height()))
+        pixmap = QPixmap(icon_extent, icon_extent)
+        pixmap.fill(Qt.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        pen = QPen(self._navigation_icon_color())
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setWidthF(max(1.6, icon_extent * 0.11))
+        painter.setPen(pen)
+
+        margin = icon_extent * 0.22
+        for y_ratio in (0.30, 0.50, 0.70):
+            y_pos = icon_extent * y_ratio
+            painter.drawLine(
+                QPointF(margin, y_pos), QPointF(icon_extent - margin, y_pos)
+            )
+        painter.end()
+        return QIcon(pixmap)
+
+    def _build_settings_navigation_icon(self, icon_size: QSize) -> QIcon:
+        """Build a deterministic cog icon used when no themed icon exists."""
+        icon_extent = max(16, min(icon_size.width(), icon_size.height()))
+        pixmap = QPixmap(icon_extent, icon_extent)
+        pixmap.fill(Qt.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        pen = QPen(self._navigation_icon_color())
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setWidthF(max(1.4, icon_extent * 0.10))
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+
+        center = QPointF(icon_extent / 2.0, icon_extent / 2.0)
+        outer_radius = icon_extent * 0.34
+        inner_radius = icon_extent * 0.14
+        tooth_inner = outer_radius * 0.73
+
+        for angle_degrees in range(0, 360, 45):
+            angle_radians = math.radians(angle_degrees)
+            cos_angle = math.cos(angle_radians)
+            sin_angle = math.sin(angle_radians)
+            start_point = QPointF(
+                center.x() + (tooth_inner * cos_angle),
+                center.y() + (tooth_inner * sin_angle),
+            )
+            end_point = QPointF(
+                center.x() + (outer_radius * cos_angle),
+                center.y() + (outer_radius * sin_angle),
+            )
+            painter.drawLine(start_point, end_point)
+
+        painter.drawEllipse(center, outer_radius * 0.62, outer_radius * 0.62)
+        painter.drawEllipse(center, inner_radius, inner_radius)
+        painter.end()
+        return QIcon(pixmap)
+
+    def _apply_sidebar_palette_styles(self) -> None:
+        """Apply palette-aware sidebar frame and checkbox styles."""
+        palette = self.sidebar.palette()
+        border_color = self._blend_colors(
+            palette.color(QPalette.Window),
+            palette.color(QPalette.WindowText),
+            overlay_ratio=0.28,
+        ).name(QColor.HexRgb)
+        self.sidebar.setStyleSheet(
+            "QFrame {"
+            " background-color: palette(window);"
+            f" border: 1px solid {border_color};"
+            "}"
+        )
+        self.sidebar_folder_list.setStyleSheet(
+            "QListWidget {" " show-decoration-selected: 0;" "}"
+        )
 
     def _update_sidebar_width(self) -> None:
         """Keep sidebar wide enough to read folder names."""
@@ -649,6 +913,7 @@ class MainWindow(QMainWindow):
         """
         if not self._is_folder_item(item):
             return
+        self._apply_sidebar_item_visual_state(item)
         self._handle_inline_rename(item)
         folder_id = item.data(Qt.UserRole)
         if folder_id is not None:
@@ -1031,7 +1296,35 @@ class MainWindow(QMainWindow):
             | Qt.ItemIsEditable
         )
         folder_item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
+        self._apply_sidebar_item_visual_state(folder_item)
         return folder_item
+
+    def _apply_sidebar_item_visual_state(self, item: QListWidgetItem) -> None:
+        """Apply visual cues that keep checked folders easy to identify."""
+        if not self._is_folder_item(item):
+            return
+        is_checked = item.checkState() == Qt.Checked
+        item_font = item.font()
+        item_font.setBold(is_checked)
+        item.setFont(item_font)
+        item.setData(Qt.ForegroundRole, None)
+        item.setData(Qt.BackgroundRole, None)
+
+    @staticmethod
+    def _blend_colors(base: QColor, overlay: QColor, overlay_ratio: float) -> QColor:
+        """Return a deterministic blend between base and overlay colors."""
+        clamped_ratio = max(0.0, min(1.0, overlay_ratio))
+        base_ratio = 1.0 - clamped_ratio
+        return QColor(
+            int((base.red() * base_ratio) + (overlay.red() * clamped_ratio)),
+            int((base.green() * base_ratio) + (overlay.green() * clamped_ratio)),
+            int((base.blue() * base_ratio) + (overlay.blue() * clamped_ratio)),
+        )
+
+    def _refresh_sidebar_item_visual_states(self) -> None:
+        """Recompute item visuals for current palette/theme values."""
+        for index in range(self.sidebar_folder_list.count()):
+            self._apply_sidebar_item_visual_state(self.sidebar_folder_list.item(index))
 
     def _folder_item_name(self, item: QListWidgetItem) -> str:
         """Return folder name without flashcard count suffix."""

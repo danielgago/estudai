@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QApplication
 from estudai.services.settings import (
     AppSettings,
     copy_notification_sound_file,
+    get_default_notification_sound_path,
     load_app_settings,
     save_app_settings,
 )
@@ -49,6 +50,23 @@ def test_settings_defaults_and_persistence() -> None:
 
     restored = load_app_settings()
     assert restored == expected
+
+
+def test_get_default_notification_sound_path_prefers_frozen_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify packaged installs resolve bundled alarm before repository fallback."""
+    bundle_sound = tmp_path / "bundle" / "data" / "alarm.mp3"
+    bundle_sound.parent.mkdir(parents=True)
+    bundle_sound.write_bytes(b"ID3")
+    fake_executable = tmp_path / "bundle" / "Estudai.exe"
+    fake_executable.write_bytes(b"")
+    monkeypatch.setattr("estudai.services.settings.sys.frozen", True, raising=False)
+    monkeypatch.setattr(
+        "estudai.services.settings.sys.executable", str(fake_executable)
+    )
+
+    assert get_default_notification_sound_path() == str(bundle_sound)
 
 
 def test_copy_notification_sound_file_accepts_supported_extensions(
@@ -96,6 +114,16 @@ def test_settings_page_only_persists_changes_after_save(app: QApplication) -> No
     assert persisted.flashcard_random_order_enabled is True
     assert persisted.question_display_duration_seconds == 5
     assert persisted.answer_display_duration_seconds == 11
+
+
+def test_settings_page_checkbox_keeps_native_indicator_styles(
+    app: QApplication,
+) -> None:
+    """Verify random-order checkbox avoids fragile indicator stylesheet overrides."""
+    page = SettingsPage()
+    stylesheet = page.flashcard_random_order_checkbox.styleSheet()
+
+    assert stylesheet == ""
 
 
 def test_settings_page_uploads_sound_and_plays_test(
