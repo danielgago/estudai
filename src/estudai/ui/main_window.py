@@ -52,7 +52,6 @@ from estudai.services.settings import (
 
 from .dialog.notebooklm_import_dialog import NotebookLMCsvImportDialog
 from .pages import ManagementPage, SettingsPage, TimerPage
-from .utils import build_checkbox_indicator_styles
 
 
 class MainWindow(QMainWindow):
@@ -364,7 +363,7 @@ class MainWindow(QMainWindow):
             "QListWidget::item:selected:!active {"
             " background-color: palette(highlight);"
             " color: palette(highlighted-text);"
-            "}" + build_checkbox_indicator_styles(("QListWidget",))
+            "}"
         )
 
     def _update_sidebar_width(self) -> None:

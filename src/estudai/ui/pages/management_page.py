@@ -23,10 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from estudai.services.csv_flashcards import Flashcard
-from estudai.ui.utils import (
-    build_checkbox_indicator_styles,
-    create_checkable_table_item,
-)
+from estudai.ui.utils import create_checkable_table_item
 
 
 class SelectAllHeaderView(QHeaderView):
@@ -109,6 +106,7 @@ class CenteredCheckboxDelegate(QStyledItemDelegate):
         item_option = QStyleOptionViewItem(option)
         self.initStyleOption(item_option, index)
         item_option.text = ""
+        item_option.features &= ~QStyleOptionViewItem.HasCheckIndicator
         style.drawControl(QStyle.CE_ItemViewItem, item_option, painter, option.widget)
 
         check_state = index.data(Qt.CheckStateRole)
@@ -213,9 +211,6 @@ class ManagementPage(QWidget):
 
         self.flashcards_table = QTableWidget(0, 3)
         self.flashcards_table.setHorizontalHeaderLabels(["", "Question", "Answer"])
-        self.flashcards_table.setStyleSheet(
-            build_checkbox_indicator_styles(("QTableWidget", "QHeaderView"))
-        )
         self.select_all_header = SelectAllHeaderView(
             Qt.Horizontal,
             self.flashcards_table,
