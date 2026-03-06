@@ -289,7 +289,9 @@ class MainWindow(QMainWindow):
         margin = icon_extent * 0.22
         for y_ratio in (0.30, 0.50, 0.70):
             y_pos = icon_extent * y_ratio
-            painter.drawLine(QPointF(margin, y_pos), QPointF(icon_extent - margin, y_pos))
+            painter.drawLine(
+                QPointF(margin, y_pos), QPointF(icon_extent - margin, y_pos)
+            )
         painter.end()
         return QIcon(pixmap)
 
