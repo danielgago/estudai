@@ -127,11 +127,6 @@ class SidebarCheckboxDelegate(QStyledItemDelegate):
             -self._indicator_margin,
             0,
         )
-        text_color_role = (
-            QPalette.HighlightedText
-            if item_option.state & QStyle.State_Selected
-            else QPalette.Text
-        )
         style.drawItemText(
             painter,
             text_rect,
@@ -139,7 +134,7 @@ class SidebarCheckboxDelegate(QStyledItemDelegate):
             item_option.palette,
             bool(item_option.state & QStyle.State_Enabled),
             item_text,
-            text_color_role,
+            QPalette.Text,
         )
 
     def editorEvent(self, event, model, option: QStyleOptionViewItem, index) -> bool:
