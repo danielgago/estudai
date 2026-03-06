@@ -354,7 +354,7 @@ class MainWindow(QMainWindow):
             "}"
             "QListWidget::item {"
             " margin: 0px;"
-            " padding: 4px 6px;"
+            " padding: 4px 6px 4px 0px;"
             "}"
             "QListWidget::item:selected {"
             " background-color: palette(highlight);"
