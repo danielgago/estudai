@@ -41,10 +41,13 @@ def test_main_starts_window_and_exits(monkeypatch) -> None:
 
 
 def test_get_app_icon_path_prefers_frozen_bundle(tmp_path: Path, monkeypatch) -> None:
-    """Verify icon lookup prefers bundled path for frozen builds."""
-    icon_path = tmp_path / "bundle" / "data" / "estudai.svg"
+    """Verify icon lookup prefers bundled ICO path for frozen builds."""
+    icon_path = tmp_path / "bundle" / "data" / "estudai.ico"
     icon_path.parent.mkdir(parents=True)
-    icon_path.write_text("<svg/>", encoding="utf-8")
+    icon_path.write_bytes(b"\x00\x00\x01\x00")
+    (tmp_path / "bundle" / "data" / "estudai.svg").write_text(
+        "<svg/>", encoding="utf-8"
+    )
     fake_executable = tmp_path / "bundle" / "Estudai.exe"
     fake_executable.write_bytes(b"")
 
