@@ -53,6 +53,16 @@ def test_timer_start_stop_reset_and_context() -> None:
     assert page.timer_display.text() == "25:00"
 
 
+def test_timer_page_formats_single_card_context_label() -> None:
+    """Verify timer context uses correct singular card label."""
+    _get_app()
+    page = TimerPage()
+
+    page.set_flashcard_context("chemistry", 1)
+
+    assert page.folder_context_label.text() == "Folder: chemistry (1 card)"
+
+
 def test_timer_update_stops_when_reaches_zero() -> None:
     """Verify timer update stops the timer when countdown reaches 00:00."""
     _get_app()

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QUrl, Signal
-from PySide6.QtGui import QColor, QFont, QPalette
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox,
     QFileDialog,
@@ -33,6 +33,7 @@ from estudai.services.settings import (
     load_app_settings,
     save_app_settings,
 )
+from estudai.ui.utils import set_muted_label_color
 
 
 class SettingsPage(QWidget):
@@ -73,7 +74,7 @@ class SettingsPage(QWidget):
             "Use Save to apply changes or Cancel to discard edits."
         )
         self.description_label.setWordWrap(True)
-        self._set_muted_label_color(self.description_label)
+        set_muted_label_color(self.description_label)
         layout.addWidget(self.description_label)
 
         timer_group = QGroupBox("Timer and Flashcard Settings")
@@ -118,7 +119,7 @@ class SettingsPage(QWidget):
         sound_layout = QVBoxLayout(sound_group)
         self.notification_sound_label = QLabel("Selected sound: None")
         self.notification_sound_label.setWordWrap(True)
-        self._set_muted_label_color(self.notification_sound_label)
+        set_muted_label_color(self.notification_sound_label)
         sound_layout.addWidget(self.notification_sound_label)
         sound_buttons_layout = QHBoxLayout()
         self.upload_sound_button = QPushButton("Upload Sound (.mp3/.wav)")
@@ -140,31 +141,9 @@ class SettingsPage(QWidget):
     def changeEvent(self, event: QEvent) -> None:  # noqa: N802
         """Refresh palette-driven colors when theme/palette changes."""
         if event.type() in (QEvent.PaletteChange, QEvent.ApplicationPaletteChange):
-            self._set_muted_label_color(self.description_label)
-            self._set_muted_label_color(self.notification_sound_label)
+            set_muted_label_color(self.description_label)
+            set_muted_label_color(self.notification_sound_label)
         super().changeEvent(event)
-
-    def _set_muted_label_color(self, label: QLabel) -> None:
-        """Apply a readable secondary-text color derived from the active palette."""
-        palette = label.palette()
-        muted_color = self._blend_colors(
-            palette.color(QPalette.WindowText),
-            palette.color(QPalette.Window),
-            overlay_ratio=0.35,
-        )
-        palette.setColor(QPalette.WindowText, muted_color)
-        label.setPalette(palette)
-
-    @staticmethod
-    def _blend_colors(base: QColor, overlay: QColor, overlay_ratio: float) -> QColor:
-        """Return a deterministic blend between base and overlay colors."""
-        clamped_ratio = max(0.0, min(1.0, overlay_ratio))
-        base_ratio = 1.0 - clamped_ratio
-        return QColor(
-            int((base.red() * base_ratio) + (overlay.red() * clamped_ratio)),
-            int((base.green() * base_ratio) + (overlay.green() * clamped_ratio)),
-            int((base.blue() * base_ratio) + (overlay.blue() * clamped_ratio)),
-        )
 
     def _connect_signals(self) -> None:
         """Connect widget signals."""

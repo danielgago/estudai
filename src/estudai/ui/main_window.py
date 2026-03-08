@@ -1,15 +1,11 @@
 """Main application window."""
 
-import math
 import random
-from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import (
     QEvent,
     QPoint,
-    QPointF,
-    QRect,
     QSize,
     QTimer,
     Qt,
@@ -19,12 +15,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import (
     QColor,
     QFont,
-    QIcon,
-    QMouseEvent,
-    QPainter,
     QPalette,
-    QPen,
-    QPixmap,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -42,10 +33,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QStackedWidget,
-    QStyle,
-    QStyleOptionButton,
-    QStyleOptionViewItem,
-    QStyledItemDelegate,
     QVBoxLayout,
     QWidget,
 )
@@ -72,117 +59,46 @@ from estudai.services.settings import (
     get_default_notification_sound_path,
     load_app_settings,
 )
+from estudai.ui.utils import (
+    NativeCheckboxDelegate,
+    blend_colors,
+    left_aligned_checkbox_rect,
+)
 
 from .dialog.notebooklm_import_dialog import NotebookLMCsvImportDialog
+from .flashcard_sequence import FlashcardSequenceController
+from .folder_context import (
+    CheckedFolderData,
+    build_folder_selection_context,
+    merge_imported_flashcard_indexes,
+    normalize_selected_indexes,
+)
+from .navigation_icons import (
+    build_menu_navigation_icon,
+    build_settings_navigation_icon,
+    load_navigation_icon,
+)
 from .pages import ManagementPage, SettingsPage, TimerPage
+from .sidebar_folders import SidebarFolderController
 
 
-class SidebarCheckboxDelegate(QStyledItemDelegate):
+class SidebarCheckboxDelegate(NativeCheckboxDelegate):
     """Delegate that paints native checkbox indicators for sidebar folder items."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         """Initialize the delegate."""
-        super().__init__(parent)
-        self._indicator_margin = 8
-        self._text_spacing = 8
-
-    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
-        """Paint list items with native checkbox indicators and aligned text."""
-        check_state = index.data(Qt.CheckStateRole)
-        if check_state is None:
-            super().paint(painter, option, index)
-            return
-
-        style = (
-            option.widget.style() if option.widget is not None else QApplication.style()
-        )
-        item_option = QStyleOptionViewItem(option)
-        self.initStyleOption(item_option, index)
-        item_text = item_option.text
-        item_option.text = ""
-        item_option.features &= ~QStyleOptionViewItem.HasCheckIndicator
-        style.drawControl(QStyle.CE_ItemViewItem, item_option, painter, option.widget)
-
-        checkbox_option = QStyleOptionButton()
-        checkbox_option.state = QStyle.State_Enabled
-        if item_option.state & QStyle.State_MouseOver:
-            checkbox_option.state |= QStyle.State_MouseOver
-        if Qt.CheckState(check_state) == Qt.Checked:
-            checkbox_option.state |= QStyle.State_On
-        else:
-            checkbox_option.state |= QStyle.State_Off
-        checkbox_option.rect = self._checkbox_rect(option)
-        style.drawPrimitive(
-            QStyle.PE_IndicatorCheckBox,
-            checkbox_option,
-            painter,
-            option.widget,
-        )
-
-        text_rect = option.rect.adjusted(
-            checkbox_option.rect.width()
-            + (self._indicator_margin * 2)
-            + self._text_spacing,
-            0,
-            -self._indicator_margin,
-            0,
-        )
-        style.drawItemText(
-            painter,
-            text_rect,
-            Qt.AlignVCenter | Qt.AlignLeft,
-            item_option.palette,
-            bool(item_option.state & QStyle.State_Enabled),
-            item_text,
-            QPalette.Text,
-        )
-
-    def editorEvent(self, event, model, option: QStyleOptionViewItem, index) -> bool:
-        """Toggle checkbox state when the checkbox indicator is clicked."""
-        flags = model.flags(index)
-        if not (flags & Qt.ItemIsUserCheckable and flags & Qt.ItemIsEnabled):
-            return False
-        if event.type() not in (
-            QEvent.MouseButtonRelease,
-            QEvent.MouseButtonPress,
-            QEvent.MouseButtonDblClick,
-        ):
-            return super().editorEvent(event, model, option, index)
-        if not isinstance(event, QMouseEvent) or event.button() != Qt.LeftButton:
-            return False
-        if event.type() == QEvent.MouseButtonPress:
-            return self._checkbox_rect(option).contains(event.position().toPoint())
-        if event.type() == QEvent.MouseButtonDblClick:
-            return True
-        if not self._checkbox_rect(option).contains(event.position().toPoint()):
-            return False
-        check_state = index.data(Qt.CheckStateRole)
-        if check_state is None:
-            return False
-        target_state = Qt.Unchecked
-        if Qt.CheckState(check_state) != Qt.Checked:
-            target_state = Qt.Checked
-        return model.setData(index, target_state, Qt.CheckStateRole)
-
-    def _checkbox_rect(self, option: QStyleOptionViewItem) -> QRect:
-        """Return checkbox rect anchored to the left with vertical centering."""
-        style = (
-            option.widget.style() if option.widget is not None else QApplication.style()
-        )
-        checkbox_option = QStyleOptionButton()
-        indicator_rect = style.subElementRect(
-            QStyle.SE_CheckBoxIndicator,
-            checkbox_option,
-            option.widget,
-        )
-        y_position = option.rect.y() + (
-            (option.rect.height() - indicator_rect.height()) // 2
-        )
-        return QRect(
-            option.rect.x() + self._indicator_margin,
-            y_position,
-            indicator_rect.width(),
-            indicator_rect.height(),
+        super().__init__(
+            parent,
+            checkbox_rect_resolver=lambda option, indicator_rect: (
+                left_aligned_checkbox_rect(
+                    option,
+                    indicator_rect,
+                    indicator_margin=8,
+                )
+            ),
+            draw_item_text=True,
+            indicator_margin=8,
+            text_spacing=8,
         )
 
 
@@ -192,7 +108,7 @@ class MainWindow(QMainWindow):
     show_flashcard_requested = Signal(object)
     FOLDER_NAME_ROLE = Qt.UserRole + 1
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.flashcards_by_folder: dict[str, list[Flashcard]] = {}
         self.persisted_folder_paths: dict[str, Path] = {}
@@ -202,20 +118,12 @@ class MainWindow(QMainWindow):
         self.current_folder_id: str | None = None
         self.current_folder_name = "No folders selected"
         self._editing_folder_id: str | None = None
-        self._renaming_folder_id: str | None = None
-        self._renaming_original_name: str | None = None
-        self._active_flashcard_sequence_id = 0
-        self._next_flashcard_index = 0
-        self._pending_flashcard_phase_callback: Callable[[], None] | None = None
-        self._flashcard_phase_remaining_ms = 0
-        self._flashcard_sequence_paused = False
         self._flashcard_sound_output: object | None = None
         self._flashcard_sound_player: object | None = None
-        self._flashcard_phase_timer = QTimer(self)
-        self._flashcard_phase_timer.setSingleShot(True)
-        self._flashcard_phase_timer.timeout.connect(
-            self._handle_flashcard_phase_timeout
-        )
+        flashcard_phase_timer = QTimer(self)
+        flashcard_phase_timer.setSingleShot(True)
+        flashcard_phase_timer.timeout.connect(self._handle_flashcard_phase_timeout)
+        self._flashcard_sequence = FlashcardSequenceController(flashcard_phase_timer)
         if QAudioOutput is not None and QMediaPlayer is not None:
             self._flashcard_sound_output = QAudioOutput(self)
             self._flashcard_sound_player = QMediaPlayer(self)
@@ -306,6 +214,10 @@ class MainWindow(QMainWindow):
         self.sidebar_folder_list.customContextMenuRequested.connect(
             self.open_sidebar_folder_menu
         )
+        self._sidebar_folders = SidebarFolderController(
+            self.sidebar_folder_list,
+            self.FOLDER_NAME_ROLE,
+        )
         sidebar_layout.addWidget(self.sidebar_folder_list)
 
         create_folder_button = QPushButton("Create Folder")
@@ -375,103 +287,34 @@ class MainWindow(QMainWindow):
 
     def _apply_navigation_button_icons(self) -> None:
         """Set cross-platform navigation icons with theme/native fallback."""
+        icon_color = self._navigation_icon_color()
         self.sidebar_toggle_button.setIcon(
-            self._load_navigation_icon(
+            load_navigation_icon(
                 theme_names=("open-menu-symbolic", "application-menu"),
-                fallback=self._build_menu_navigation_icon(
-                    self.sidebar_toggle_button.iconSize()
+                fallback=build_menu_navigation_icon(
+                    self.sidebar_toggle_button.iconSize(),
+                    icon_color,
                 ),
             )
         )
         self.settings_button.setIcon(
-            self._load_navigation_icon(
+            load_navigation_icon(
                 theme_names=("preferences-system", "settings-configure", "settings"),
-                fallback=self._build_settings_navigation_icon(
-                    self.settings_button.iconSize()
+                fallback=build_settings_navigation_icon(
+                    self.settings_button.iconSize(),
+                    icon_color,
                 ),
             )
         )
 
-    def _load_navigation_icon(
-        self,
-        theme_names: tuple[str, ...],
-        fallback: QIcon,
-    ) -> QIcon:
-        """Return a theme icon when available, else the provided fallback icon."""
-        for theme_name in theme_names:
-            theme_icon = QIcon.fromTheme(theme_name)
-            if not theme_icon.isNull():
-                return theme_icon
-        return fallback
-
     def _navigation_icon_color(self) -> QColor:
         """Return icon color with contrast against the current button background."""
-        return self.palette().color(QPalette.ButtonText)
-
-    def _build_menu_navigation_icon(self, icon_size: QSize) -> QIcon:
-        """Build a deterministic hamburger icon used when no themed icon exists."""
-        icon_extent = max(16, min(icon_size.width(), icon_size.height()))
-        pixmap = QPixmap(icon_extent, icon_extent)
-        pixmap.fill(Qt.transparent)
-
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        pen = QPen(self._navigation_icon_color())
-        pen.setCapStyle(Qt.RoundCap)
-        pen.setWidthF(max(1.6, icon_extent * 0.11))
-        painter.setPen(pen)
-
-        margin = icon_extent * 0.22
-        for y_ratio in (0.30, 0.50, 0.70):
-            y_pos = icon_extent * y_ratio
-            painter.drawLine(
-                QPointF(margin, y_pos), QPointF(icon_extent - margin, y_pos)
-            )
-        painter.end()
-        return QIcon(pixmap)
-
-    def _build_settings_navigation_icon(self, icon_size: QSize) -> QIcon:
-        """Build a deterministic cog icon used when no themed icon exists."""
-        icon_extent = max(16, min(icon_size.width(), icon_size.height()))
-        pixmap = QPixmap(icon_extent, icon_extent)
-        pixmap.fill(Qt.transparent)
-
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        pen = QPen(self._navigation_icon_color())
-        pen.setCapStyle(Qt.RoundCap)
-        pen.setWidthF(max(1.4, icon_extent * 0.10))
-        painter.setPen(pen)
-        painter.setBrush(Qt.NoBrush)
-
-        center = QPointF(icon_extent / 2.0, icon_extent / 2.0)
-        outer_radius = icon_extent * 0.34
-        inner_radius = icon_extent * 0.14
-        tooth_inner = outer_radius * 0.73
-
-        for angle_degrees in range(0, 360, 45):
-            angle_radians = math.radians(angle_degrees)
-            cos_angle = math.cos(angle_radians)
-            sin_angle = math.sin(angle_radians)
-            start_point = QPointF(
-                center.x() + (tooth_inner * cos_angle),
-                center.y() + (tooth_inner * sin_angle),
-            )
-            end_point = QPointF(
-                center.x() + (outer_radius * cos_angle),
-                center.y() + (outer_radius * sin_angle),
-            )
-            painter.drawLine(start_point, end_point)
-
-        painter.drawEllipse(center, outer_radius * 0.62, outer_radius * 0.62)
-        painter.drawEllipse(center, inner_radius, inner_radius)
-        painter.end()
-        return QIcon(pixmap)
+        return self.palette().buttonText().color()
 
     def _apply_sidebar_palette_styles(self) -> None:
         """Apply palette-aware sidebar frame and checkbox styles."""
         palette = self.sidebar.palette()
-        border_color = self._blend_colors(
+        border_color = blend_colors(
             palette.color(QPalette.Window),
             palette.color(QPalette.WindowText),
             overlay_ratio=0.28,
@@ -509,7 +352,7 @@ class MainWindow(QMainWindow):
         self.sidebar.move(anchor_point.x(), anchor_point.y())
         self.sidebar.raise_()
 
-    def switch_to_timer(self):
+    def switch_to_timer(self) -> None:
         """Switch to timer page."""
         self.stacked_widget.setCurrentWidget(self.timer_page)
         if not self.timer_page.is_running:
@@ -520,12 +363,20 @@ class MainWindow(QMainWindow):
         self.stacked_widget.setCurrentWidget(self.management_page)
         self.sidebar.setVisible(False)
 
-    def switch_to_settings(self):
+    def switch_to_settings(self) -> None:
         """Switch to settings page or back to timer when already there."""
         if self.stacked_widget.currentWidget() is self.settings_page:
             self.switch_to_timer()
             return
         self.stacked_widget.setCurrentWidget(self.settings_page)
+
+    def _refresh_sidebar_data(self, checked_ids: set[str]) -> None:
+        """Refresh sidebar items while preserving the provided checked ids."""
+        self.handle_management_data_changed(preferred_checked_ids=checked_ids)
+
+    def _show_warning_message(self, title: str, message: str) -> None:
+        """Show a warning dialog using the main window as parent."""
+        QMessageBox.warning(self, title, message)
 
     def handle_timer_running_changed(self, is_running: bool) -> None:
         """Hide editing/navigation controls while timer is active.
@@ -540,7 +391,7 @@ class MainWindow(QMainWindow):
             and self.timer_page.flashcard_answer_label.isHidden()
         ):
             self._cancel_flashcard_phase_timer()
-            self._flashcard_sequence_paused = False
+            self._flashcard_sequence.sequence_paused = False
 
     def handle_flashcard_pause_toggled(self, paused: bool) -> None:
         """Pause or resume flashcard phase timing.
@@ -553,29 +404,20 @@ class MainWindow(QMainWindow):
             and self.timer_page.flashcard_answer_label.isHidden()
         ):
             return
-        self._flashcard_sequence_paused = paused
-        if paused:
-            if self._flashcard_phase_timer.isActive():
-                self._flashcard_phase_remaining_ms = max(
-                    0, self._flashcard_phase_timer.remainingTime()
-                )
-                self._flashcard_phase_timer.stop()
-            self.timer_page.pause_flashcard_progress()
-            return
-        if self._pending_flashcard_phase_callback is None:
-            return
-        if self._flashcard_phase_remaining_ms <= 0:
-            self._handle_flashcard_phase_timeout()
-            return
-        self.timer_page.resume_flashcard_progress(self._flashcard_phase_remaining_ms)
-        self._flashcard_phase_timer.start(self._flashcard_phase_remaining_ms)
+        self._flashcard_sequence.handle_pause_toggle(
+            paused,
+            flashcard_visible=True,
+            pause_progress=self.timer_page.pause_flashcard_progress,
+            resume_progress=self.timer_page.resume_flashcard_progress,
+            on_timeout=self._handle_flashcard_phase_timeout,
+        )
 
     def handle_timer_stop_requested(self) -> None:
         """Reset flashcard ordering when user clicks the Stop button."""
         self._reset_flashcard_sequence_order()
 
     def _start_flashcard_phase_timer(
-        self, duration_milliseconds: int, callback: Callable[[], None]
+        self, duration_milliseconds: int, callback
     ) -> None:
         """Start single-shot phase timer used by flashcard question/answer flow.
 
@@ -583,36 +425,32 @@ class MainWindow(QMainWindow):
             duration_milliseconds: Delay before callback runs.
             callback: Action to run when delay completes.
         """
-        self._flashcard_phase_timer.stop()
-        self._pending_flashcard_phase_callback = callback
-        self._flashcard_phase_remaining_ms = max(0, int(duration_milliseconds))
-        if self._flashcard_phase_remaining_ms <= 0:
+        if not self._flashcard_sequence.start_phase_timer(
+            duration_milliseconds,
+            callback,
+        ):
             self._handle_flashcard_phase_timeout()
-            return
-        self._flashcard_phase_timer.start(self._flashcard_phase_remaining_ms)
 
     def _handle_flashcard_phase_timeout(self) -> None:
         """Run pending flashcard phase callback when phase timer finishes."""
-        callback = self._pending_flashcard_phase_callback
-        self._pending_flashcard_phase_callback = None
-        self._flashcard_phase_remaining_ms = 0
+        callback = self._flashcard_sequence.handle_phase_timeout()
         if callback is not None:
             callback()
 
     def _cancel_flashcard_phase_timer(self) -> None:
         """Stop and clear pending flashcard phase callbacks."""
-        self._flashcard_phase_timer.stop()
-        self._pending_flashcard_phase_callback = None
-        self._flashcard_phase_remaining_ms = 0
+        self._flashcard_sequence.cancel_phase_timer()
 
     def _reset_flashcard_sequence_order(self) -> None:
         """Reset sequential flashcard pointer to the first card."""
-        self._next_flashcard_index = 0
+        self._flashcard_sequence.reset_order()
 
     def handle_timer_cycle_completed(self) -> None:
         """Handle timer completion with probability-based flashcard triggering."""
         app_settings = load_app_settings()
-        if random.randint(1, 100) > app_settings.flashcard_probability_percent:
+        if self._should_skip_flashcard_cycle(
+            app_settings.flashcard_probability_percent
+        ):
             self.timer_page.restart_timer_cycle()
             return
         if not self.selected_folder_ids:
@@ -648,17 +486,16 @@ class MainWindow(QMainWindow):
         Returns:
             Flashcard | None: Selected flashcard if available.
         """
-        if not self.loaded_flashcards:
-            return None
-        if random_order:
-            return random.choice(self.loaded_flashcards)
-        flashcard = self.loaded_flashcards[
-            self._next_flashcard_index % len(self.loaded_flashcards)
-        ]
-        self._next_flashcard_index = (self._next_flashcard_index + 1) % len(
-            self.loaded_flashcards
+        return self._flashcard_sequence.next_flashcard(
+            self.loaded_flashcards,
+            random_order=random_order,
+            choice_func=random.choice,
         )
-        return flashcard
+
+    @staticmethod
+    def _should_skip_flashcard_cycle(probability_percent: int) -> bool:
+        """Return whether the current timer cycle should skip flashcards."""
+        return random.randint(1, 100) > probability_percent
 
     def _play_flashcard_notification_sound(self) -> None:
         """Play notification sound configured in settings when available."""
@@ -708,7 +545,7 @@ class MainWindow(QMainWindow):
         ):
             return
         self._cancel_flashcard_phase_timer()
-        self._flashcard_sequence_paused = False
+        self._flashcard_sequence.sequence_paused = False
         self.timer_page.clear_flashcard_display()
         self.timer_page.restart_timer_cycle()
 
@@ -722,9 +559,8 @@ class MainWindow(QMainWindow):
             return
         app_settings = load_app_settings()
         self._cancel_flashcard_phase_timer()
-        self._flashcard_sequence_paused = False
-        self._active_flashcard_sequence_id += 1
-        sequence_id = self._active_flashcard_sequence_id
+        self._flashcard_sequence.sequence_paused = False
+        sequence_id = self._flashcard_sequence.begin_sequence()
         self.switch_to_timer()
         self.set_navigation_visible(False)
         self.timer_page.show_flashcard_question(
@@ -741,7 +577,7 @@ class MainWindow(QMainWindow):
             ),
         )
 
-    def toggle_sidebar(self):
+    def toggle_sidebar(self) -> None:
         """Show or hide the left sidebar."""
         if self.sidebar.isHidden():
             self._position_sidebar()
@@ -828,7 +664,7 @@ class MainWindow(QMainWindow):
         Returns:
             bool: True when item represents a folder.
         """
-        return item is not None and item.data(Qt.UserRole) is not None
+        return self._sidebar_folders.is_folder_item(item)
 
     def _selected_folder_items(self) -> list[QListWidgetItem]:
         """Return selected list items that map to persisted folders.
@@ -836,16 +672,15 @@ class MainWindow(QMainWindow):
         Returns:
             list[QListWidgetItem]: Selected folder items.
         """
-        return [
-            item
-            for item in self.sidebar_folder_list.selectedItems()
-            if self._is_folder_item(item)
-        ]
+        return self._sidebar_folders.selected_folder_items()
+
+    def _iter_sidebar_folder_items(self):
+        """Yield sidebar items that map to persisted folders."""
+        yield from self._sidebar_folders.iter_folder_items()
 
     def _clear_rename_tracking(self) -> None:
         """Clear inline-rename tracking state."""
-        self._renaming_folder_id = None
-        self._renaming_original_name = None
+        self._sidebar_folders.clear_rename_tracking()
 
     def _get_checked_folder_ids(self) -> set[str]:
         """Return ids for currently checked folders.
@@ -853,52 +688,33 @@ class MainWindow(QMainWindow):
         Returns:
             set[str]: Checked folder ids.
         """
-        checked_ids: set[str] = set()
-        for index in range(self.sidebar_folder_list.count()):
-            item = self.sidebar_folder_list.item(index)
-            folder_id = item.data(Qt.UserRole)
-            if folder_id is None:
-                continue
-            if item.checkState() == Qt.Checked:
-                checked_ids.add(folder_id)
-        return checked_ids
+        return self._sidebar_folders.checked_folder_ids()
 
     def _refresh_loaded_flashcards(self) -> None:
         """Refresh selected flashcards from checked folders."""
-        checked_folder_ids: list[str] = []
-        checked_folder_names: list[str] = []
-        selected_flashcards: list[Flashcard] = []
-        for index in range(self.sidebar_folder_list.count()):
-            item = self.sidebar_folder_list.item(index)
+        checked_folders: list[CheckedFolderData] = []
+        for item in self._iter_sidebar_folder_items():
             folder_id = item.data(Qt.UserRole)
             if folder_id is None or item.checkState() != Qt.Checked:
                 continue
-            checked_folder_ids.append(folder_id)
-            checked_folder_names.append(self._folder_item_name(item))
             folder_flashcards = self.flashcards_by_folder.get(folder_id, [])
-            selected_indexes = self.selected_flashcard_indexes_by_folder.get(
-                folder_id,
-                set(range(len(folder_flashcards))),
-            )
-            selected_flashcards.extend(
-                flashcard
-                for flashcard_index, flashcard in enumerate(folder_flashcards)
-                if flashcard_index in selected_indexes
+            checked_folders.append(
+                CheckedFolderData(
+                    folder_id=folder_id,
+                    folder_name=self._folder_item_name(item),
+                    flashcards=folder_flashcards,
+                    selected_indexes=self.selected_flashcard_indexes_by_folder.get(
+                        folder_id,
+                        set(range(len(folder_flashcards))),
+                    ),
+                )
             )
 
-        self.selected_folder_ids = set(checked_folder_ids)
-        if not checked_folder_ids:
-            self.current_folder_id = None
-            self.current_folder_name = "No folders selected"
-            self.loaded_flashcards = []
-        elif len(checked_folder_ids) == 1:
-            self.current_folder_id = checked_folder_ids[0]
-            self.current_folder_name = checked_folder_names[0]
-            self.loaded_flashcards = selected_flashcards
-        else:
-            self.current_folder_id = None
-            self.current_folder_name = f"{len(checked_folder_ids)} folders selected"
-            self.loaded_flashcards = selected_flashcards
+        selection_context = build_folder_selection_context(checked_folders)
+        self.selected_folder_ids = selection_context.selected_folder_ids
+        self.current_folder_id = selection_context.current_folder_id
+        self.current_folder_name = selection_context.current_folder_name
+        self.loaded_flashcards = selection_context.loaded_flashcards
         self._reset_flashcard_sequence_order()
         self.timer_page.set_flashcard_context(
             self.current_folder_name,
@@ -934,33 +750,22 @@ class MainWindow(QMainWindow):
         Args:
             item: Updated folder list item.
         """
-        folder_id = item.data(Qt.UserRole)
-        if folder_id is None or folder_id != self._renaming_folder_id:
-            return
-
-        new_name = item.text()
-        if self._renaming_original_name == new_name:
-            return
-
-        checked_ids = self._get_checked_folder_ids()
-        self._clear_rename_tracking()
-        try:
-            rename_persisted_folder(folder_id, new_name)
-        except (KeyError, ValueError) as error:
-            QMessageBox.warning(self, "Rename folder", str(error))
-            self.handle_management_data_changed(preferred_checked_ids=checked_ids)
-            return
-        self.handle_management_data_changed(preferred_checked_ids=checked_ids)
+        self._sidebar_folders.handle_inline_rename(
+            item,
+            checked_ids=self._get_checked_folder_ids(),
+            rename_folder=rename_persisted_folder,
+            refresh_data=self._refresh_sidebar_data,
+            show_warning=self._show_warning_message,
+        )
 
     def handle_sidebar_editor_closed(self, *_: object) -> None:
         """Clear inline rename tracking when editor closes."""
-        if self._renaming_folder_id is not None:
-            self.handle_management_data_changed(
-                preferred_checked_ids=self._get_checked_folder_ids()
-            )
-        self._clear_rename_tracking()
+        self._sidebar_folders.handle_editor_closed(
+            checked_ids=self._get_checked_folder_ids(),
+            refresh_data=self._refresh_sidebar_data,
+        )
 
-    def handle_sidebar_folder_click(self, clicked_item: QListWidgetItem):
+    def handle_sidebar_folder_click(self, clicked_item: QListWidgetItem) -> None:
         """Handle folder clicks without forcing page navigation.
 
         Args:
@@ -989,13 +794,9 @@ class MainWindow(QMainWindow):
             position: Position where the menu is requested.
         """
         clicked_item = self.sidebar_folder_list.itemAt(position)
-        if not self._is_folder_item(clicked_item):
-            return
-
-        if not clicked_item.isSelected():
-            self.sidebar_folder_list.clearSelection()
-            clicked_item.setSelected(True)
-        selected_folder_items = self._selected_folder_items()
+        selected_folder_items = self._sidebar_folders.normalize_menu_selection(
+            clicked_item
+        )
         if not selected_folder_items:
             return
 
@@ -1019,14 +820,7 @@ class MainWindow(QMainWindow):
         Args:
             folder_item: Folder item selected from sidebar.
         """
-        folder_id = folder_item.data(Qt.UserRole)
-        if folder_id is None:
-            return
-        self._renaming_folder_id = folder_id
-        self._renaming_original_name = self._folder_item_name(folder_item)
-        folder_item.setText(self._renaming_original_name)
-        self.sidebar_folder_list.setCurrentItem(folder_item)
-        QTimer.singleShot(0, lambda: self.sidebar_folder_list.editItem(folder_item))
+        self._sidebar_folders.begin_rename(folder_item)
 
     def delete_sidebar_folders(self, folder_items: list[QListWidgetItem]) -> None:
         """Delete one or many folders from sidebar action.
@@ -1121,11 +915,12 @@ class MainWindow(QMainWindow):
             target_folder_id,
             set(range(len(existing_flashcards))),
         )
-        imported_indexes = set(
-            range(len(existing_flashcards), len(existing_flashcards) + len(valid_rows))
-        )
         self.selected_flashcard_indexes_by_folder[target_folder_id] = (
-            selected_indexes | imported_indexes
+            merge_imported_flashcard_indexes(
+                len(existing_flashcards),
+                len(valid_rows),
+                selected_indexes,
+            )
         )
         checked_ids = self._get_checked_folder_ids()
         checked_ids.add(target_folder_id)
@@ -1143,10 +938,9 @@ class MainWindow(QMainWindow):
                 )
                 return
         checked_items = [
-            self.sidebar_folder_list.item(index)
-            for index in range(self.sidebar_folder_list.count())
-            if self._is_folder_item(self.sidebar_folder_list.item(index))
-            and self.sidebar_folder_list.item(index).checkState() == Qt.Checked
+            item
+            for item in self._iter_sidebar_folder_items()
+            if item.checkState() == Qt.Checked
         ]
         if len(checked_items) == 1:
             folder_item = checked_items[0]
@@ -1283,60 +1077,30 @@ class MainWindow(QMainWindow):
         Returns:
             QListWidgetItem: Configured list item.
         """
-        folder_item = QListWidgetItem(
-            self._format_sidebar_folder_label(folder_name, flashcard_count)
+        return self._sidebar_folders.create_folder_item(
+            folder_id,
+            folder_name,
+            flashcard_count,
+            checked,
         )
-        folder_item.setData(Qt.UserRole, folder_id)
-        folder_item.setData(self.FOLDER_NAME_ROLE, folder_name)
-        folder_item.setFlags(
-            folder_item.flags()
-            | Qt.ItemIsUserCheckable
-            | Qt.ItemIsEnabled
-            | Qt.ItemIsSelectable
-            | Qt.ItemIsEditable
-        )
-        folder_item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
-        self._apply_sidebar_item_visual_state(folder_item)
-        return folder_item
 
     def _apply_sidebar_item_visual_state(self, item: QListWidgetItem) -> None:
         """Apply visual cues that keep checked folders easy to identify."""
-        if not self._is_folder_item(item):
-            return
-        is_checked = item.checkState() == Qt.Checked
-        item_font = item.font()
-        item_font.setBold(is_checked)
-        item.setFont(item_font)
-        item.setData(Qt.ForegroundRole, None)
-        item.setData(Qt.BackgroundRole, None)
-
-    @staticmethod
-    def _blend_colors(base: QColor, overlay: QColor, overlay_ratio: float) -> QColor:
-        """Return a deterministic blend between base and overlay colors."""
-        clamped_ratio = max(0.0, min(1.0, overlay_ratio))
-        base_ratio = 1.0 - clamped_ratio
-        return QColor(
-            int((base.red() * base_ratio) + (overlay.red() * clamped_ratio)),
-            int((base.green() * base_ratio) + (overlay.green() * clamped_ratio)),
-            int((base.blue() * base_ratio) + (overlay.blue() * clamped_ratio)),
-        )
+        self._sidebar_folders.apply_item_visual_state(item)
 
     def _refresh_sidebar_item_visual_states(self) -> None:
         """Recompute item visuals for current palette/theme values."""
-        for index in range(self.sidebar_folder_list.count()):
-            self._apply_sidebar_item_visual_state(self.sidebar_folder_list.item(index))
+        self._sidebar_folders.refresh_item_visual_states()
 
     def _folder_item_name(self, item: QListWidgetItem) -> str:
         """Return folder name without flashcard count suffix."""
-        folder_name = item.data(self.FOLDER_NAME_ROLE)
-        return folder_name if isinstance(folder_name, str) else item.text()
+        return self._sidebar_folders.folder_item_name(item)
 
     def _format_sidebar_folder_label(
         self, folder_name: str, flashcard_count: int
     ) -> str:
         """Build sidebar folder label with card count."""
-        card_word = "card" if flashcard_count == 1 else "cards"
-        return f"{folder_name} ({flashcard_count} {card_word})"
+        return self._sidebar_folders.format_folder_label(folder_name, flashcard_count)
 
     def handle_management_data_changed(
         self, preferred_checked_ids: set[str] | None = None
@@ -1362,19 +1126,12 @@ class MainWindow(QMainWindow):
                 load_flashcards_from_folder(stored_folder)
             )
             folder_flashcards = self.flashcards_by_folder[persisted_folder.id]
-            existing_indexes = self.selected_flashcard_indexes_by_folder.get(
-                persisted_folder.id
-            )
-            if existing_indexes is None:
-                self.selected_flashcard_indexes_by_folder[persisted_folder.id] = set(
-                    range(len(folder_flashcards))
+            self.selected_flashcard_indexes_by_folder[persisted_folder.id] = (
+                normalize_selected_indexes(
+                    self.selected_flashcard_indexes_by_folder.get(persisted_folder.id),
+                    len(folder_flashcards),
                 )
-            else:
-                self.selected_flashcard_indexes_by_folder[persisted_folder.id] = {
-                    flashcard_index
-                    for flashcard_index in existing_indexes
-                    if 0 <= flashcard_index < len(folder_flashcards)
-                }
+            )
             is_checked = (
                 True
                 if preferred_checked_ids is None
@@ -1402,7 +1159,7 @@ class MainWindow(QMainWindow):
         }
         self._refresh_loaded_flashcards()
 
-    def set_navigation_visible(self, visible: bool):
+    def set_navigation_visible(self, visible: bool) -> None:
         """Control navigation visibility for focused timer mode.
 
         Args:
@@ -1412,3 +1169,75 @@ class MainWindow(QMainWindow):
         self.settings_button.setVisible(visible)
         if not visible:
             self.sidebar.setVisible(False)
+
+    @property
+    def _renaming_folder_id(self) -> str | None:
+        """Compatibility proxy for sidebar inline rename id."""
+        return self._sidebar_folders.renaming_folder_id
+
+    @_renaming_folder_id.setter
+    def _renaming_folder_id(self, value: str | None) -> None:
+        self._sidebar_folders.renaming_folder_id = value
+
+    @property
+    def _renaming_original_name(self) -> str | None:
+        """Compatibility proxy for sidebar inline rename original name."""
+        return self._sidebar_folders.renaming_original_name
+
+    @_renaming_original_name.setter
+    def _renaming_original_name(self, value: str | None) -> None:
+        self._sidebar_folders.renaming_original_name = value
+
+    @property
+    def _active_flashcard_sequence_id(self) -> int:
+        """Compatibility proxy for flashcard sequence id."""
+        return self._flashcard_sequence.active_sequence_id
+
+    @_active_flashcard_sequence_id.setter
+    def _active_flashcard_sequence_id(self, value: int) -> None:
+        self._flashcard_sequence.active_sequence_id = value
+
+    @property
+    def _next_flashcard_index(self) -> int:
+        """Compatibility proxy for sequential flashcard index."""
+        return self._flashcard_sequence.next_flashcard_index
+
+    @_next_flashcard_index.setter
+    def _next_flashcard_index(self, value: int) -> None:
+        self._flashcard_sequence.next_flashcard_index = value
+
+    @property
+    def _pending_flashcard_phase_callback(self):
+        """Compatibility proxy for pending flashcard callback."""
+        return self._flashcard_sequence.pending_phase_callback
+
+    @_pending_flashcard_phase_callback.setter
+    def _pending_flashcard_phase_callback(self, callback) -> None:
+        self._flashcard_sequence.pending_phase_callback = callback
+
+    @property
+    def _flashcard_phase_remaining_ms(self) -> int:
+        """Compatibility proxy for remaining flashcard phase time."""
+        return self._flashcard_sequence.phase_remaining_ms
+
+    @_flashcard_phase_remaining_ms.setter
+    def _flashcard_phase_remaining_ms(self, value: int) -> None:
+        self._flashcard_sequence.phase_remaining_ms = value
+
+    @property
+    def _flashcard_sequence_paused(self) -> bool:
+        """Compatibility proxy for paused flashcard state."""
+        return self._flashcard_sequence.sequence_paused
+
+    @_flashcard_sequence_paused.setter
+    def _flashcard_sequence_paused(self, value: bool) -> None:
+        self._flashcard_sequence.sequence_paused = value
+
+    @property
+    def _flashcard_phase_timer(self):
+        """Compatibility proxy for the underlying phase timer."""
+        return self._flashcard_sequence.phase_timer
+
+    @_flashcard_phase_timer.setter
+    def _flashcard_phase_timer(self, value) -> None:
+        self._flashcard_sequence.phase_timer = value
