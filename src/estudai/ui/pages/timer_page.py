@@ -9,7 +9,7 @@ from PySide6.QtCore import (
     QTimer,
     Signal,
 )
-from PySide6.QtGui import QColor, QFont, QPalette
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -21,7 +21,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from estudai.ui.utils import render_inline_latex_html
+from estudai.ui.utils import (
+    format_card_count,
+    render_inline_latex_html,
+    set_muted_label_color,
+)
 
 
 class TimerPage(QWidget):
@@ -104,7 +108,7 @@ class TimerPage(QWidget):
         folder_context_font = QFont(self.folder_context_label.font())
         folder_context_font.setPointSize(14)
         self.folder_context_label.setFont(folder_context_font)
-        self._set_muted_label_color(self.folder_context_label)
+        set_muted_label_color(self.folder_context_label)
         layout.addWidget(self.folder_context_label)
 
         controls_layout = QHBoxLayout()
@@ -149,7 +153,7 @@ class TimerPage(QWidget):
     def changeEvent(self, event: QEvent) -> None:  # noqa: N802
         """Refresh palette-driven colors when theme/palette changes."""
         if event.type() in (QEvent.PaletteChange, QEvent.ApplicationPaletteChange):
-            self._set_muted_label_color(self.folder_context_label)
+            set_muted_label_color(self.folder_context_label)
             self._apply_palette_styles()
         super().changeEvent(event)
 
@@ -165,28 +169,6 @@ class TimerPage(QWidget):
             " border-radius: 3px;"
             " background: palette(highlight);"
             "}"
-        )
-
-    def _set_muted_label_color(self, label: QLabel) -> None:
-        """Apply a readable secondary-text color derived from the active palette."""
-        palette = label.palette()
-        muted_color = self._blend_colors(
-            palette.color(QPalette.WindowText),
-            palette.color(QPalette.Window),
-            overlay_ratio=0.35,
-        )
-        palette.setColor(QPalette.WindowText, muted_color)
-        label.setPalette(palette)
-
-    @staticmethod
-    def _blend_colors(base: QColor, overlay: QColor, overlay_ratio: float) -> QColor:
-        """Return a deterministic blend between base and overlay colors."""
-        clamped_ratio = max(0.0, min(1.0, overlay_ratio))
-        base_ratio = 1.0 - clamped_ratio
-        return QColor(
-            int((base.red() * base_ratio) + (overlay.red() * clamped_ratio)),
-            int((base.green() * base_ratio) + (overlay.green() * clamped_ratio)),
-            int((base.blue() * base_ratio) + (overlay.blue() * clamped_ratio)),
         )
 
     def start_timer(self):
@@ -316,7 +298,9 @@ class TimerPage(QWidget):
             folder_name: Selected folder display name.
             card_count: Number of loaded flashcards in scope.
         """
-        self.folder_context_label.setText(f"Folder: {folder_name} ({card_count} cards)")
+        self.folder_context_label.setText(
+            f"Folder: {folder_name} ({format_card_count(card_count)})"
+        )
 
     def set_timer_duration_seconds(self, duration_seconds: int) -> None:
         """Set the default timer duration used by reset and idle display.

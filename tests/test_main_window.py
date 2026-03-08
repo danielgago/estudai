@@ -339,7 +339,7 @@ def test_folder_copy_persists_after_source_deletion(
     assert len(second_window.loaded_flashcards) == 1
     assert (
         second_window.timer_page.folder_context_label.text()
-        == "Folder: chemistry (1 cards)"
+        == "Folder: chemistry (1 card)"
     )
 
 
@@ -819,6 +819,82 @@ def test_management_table_keeps_native_checkbox_indicator_styles(
     stylesheet = window.management_page.flashcards_table.styleSheet()
 
     assert stylesheet == ""
+
+
+def test_management_header_checkbox_only_toggles_on_indicator_click(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify header select-all ignores clicks outside the painted checkbox."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\nQ2?,A2.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+    window.handle_sidebar_folder_double_click(window.sidebar_folder_list.item(0))
+    table = window.management_page.flashcards_table
+    header = window.management_page.select_all_header
+    table.setColumnWidth(0, 60)
+    table.item(0, 0).setCheckState(Qt.Unchecked)
+    table.item(1, 0).setCheckState(Qt.Checked)
+
+    click_position = QPointF(52, header.height() / 2)
+    release_event = QMouseEvent(
+        QEvent.MouseButtonRelease,
+        click_position,
+        click_position,
+        click_position,
+        Qt.LeftButton,
+        Qt.LeftButton,
+        Qt.NoModifier,
+    )
+    header.mouseReleaseEvent(release_event)
+
+    assert table.item(0, 0).checkState() == Qt.Unchecked
+    assert table.item(1, 0).checkState() == Qt.Checked
+
+
+def test_management_checkbox_delegate_ignores_clicks_outside_indicator(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify table checkbox delegate only reacts to clicks on the indicator."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+    window.handle_sidebar_folder_double_click(window.sidebar_folder_list.item(0))
+    table = window.management_page.flashcards_table
+    model = table.model()
+    index = model.index(0, 0)
+    delegate = table.itemDelegateForColumn(0)
+    option = QStyleOptionViewItem()
+    option.widget = table
+    option.rect = QRect(0, 0, 60, 28)
+    click_position = QPointF(50, 14)
+
+    press_event = QMouseEvent(
+        QEvent.MouseButtonPress,
+        click_position,
+        click_position,
+        click_position,
+        Qt.LeftButton,
+        Qt.LeftButton,
+        Qt.NoModifier,
+    )
+    release_event = QMouseEvent(
+        QEvent.MouseButtonRelease,
+        click_position,
+        click_position,
+        click_position,
+        Qt.LeftButton,
+        Qt.LeftButton,
+        Qt.NoModifier,
+    )
+
+    assert table.item(0, 0).checkState() == Qt.Checked
+    assert delegate.editorEvent(press_event, model, option, index) is False
+    assert delegate.editorEvent(release_event, model, option, index) is False
+    assert table.item(0, 0).checkState() == Qt.Checked
 
 
 def test_management_right_click_delete_selected_rows(
