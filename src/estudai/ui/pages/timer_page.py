@@ -34,6 +34,8 @@ class TimerPage(QWidget):
     timer_running_changed = Signal(bool)
     timer_cycle_completed = Signal()
     flashcard_pause_toggled = Signal(bool)
+    flashcard_marked_correct = Signal()
+    flashcard_marked_wrong = Signal()
     stop_requested = Signal()
 
     def __init__(self, default_duration_seconds: int = 25 * 60):
@@ -44,6 +46,7 @@ class TimerPage(QWidget):
         self._flashcard_controls_active = False
         self._flashcard_paused = False
         self._flashcard_phase_animation: QPropertyAnimation | None = None
+        self._selected_flashcard_score: str | None = None
         self.init_ui()
 
     def init_ui(self):
@@ -111,6 +114,18 @@ class TimerPage(QWidget):
         set_muted_label_color(self.folder_context_label)
         layout.addWidget(self.folder_context_label)
 
+        self.session_progress_label = QLabel("")
+        self.session_progress_label.setAlignment(Qt.AlignCenter)
+        progress_font = QFont(self.session_progress_label.font())
+        progress_font.setPointSize(12)
+        progress_font.setWeight(QFont.DemiBold)
+        self.session_progress_label.setFont(progress_font)
+        set_muted_label_color(self.session_progress_label)
+        self.session_progress_label.setMinimumHeight(
+            self.session_progress_label.sizeHint().height()
+        )
+        layout.addWidget(self.session_progress_label)
+
         controls_layout = QHBoxLayout()
         controls_layout.setSpacing(10)
         controls_layout.addStretch(1)
@@ -137,6 +152,28 @@ class TimerPage(QWidget):
         controls_layout.addStretch(1)
         layout.addLayout(controls_layout)
 
+        flashcard_actions_layout = QHBoxLayout()
+        flashcard_actions_layout.setSpacing(10)
+        flashcard_actions_layout.addStretch(1)
+
+        self.wrong_button = QPushButton("Wrong")
+        self.wrong_button.setProperty("scoreAction", True)
+        self.wrong_button.setCheckable(True)
+        self.wrong_button.clicked.connect(self._handle_wrong_button_clicked)
+        self.wrong_button.setMinimumWidth(110)
+        self.wrong_button.setEnabled(False)
+        self.correct_button = QPushButton("Correct")
+        self.correct_button.setProperty("scoreAction", True)
+        self.correct_button.setCheckable(True)
+        self.correct_button.clicked.connect(self._handle_correct_button_clicked)
+        self.correct_button.setMinimumWidth(110)
+        self.correct_button.setEnabled(False)
+        flashcard_actions_layout.addWidget(self.correct_button)
+        flashcard_actions_layout.addWidget(self.wrong_button)
+
+        flashcard_actions_layout.addStretch(1)
+        layout.addLayout(flashcard_actions_layout)
+
         self.flashcard_progress_bar = QProgressBar()
         self.flashcard_progress_bar.setRange(0, 1000)
         self.flashcard_progress_bar.setValue(0)
@@ -154,6 +191,7 @@ class TimerPage(QWidget):
         """Refresh palette-driven colors when theme/palette changes."""
         if event.type() in (QEvent.PaletteChange, QEvent.ApplicationPaletteChange):
             set_muted_label_color(self.folder_context_label)
+            set_muted_label_color(self.session_progress_label)
             self._apply_palette_styles()
         super().changeEvent(event)
 
@@ -168,6 +206,11 @@ class TimerPage(QWidget):
             "QProgressBar::chunk {"
             " border-radius: 3px;"
             " background: palette(highlight);"
+            "}"
+            "QPushButton[scoreAction='true']:checked {"
+            " background: palette(highlight);"
+            " color: palette(highlighted-text);"
+            " border: 1px solid palette(highlight);"
             "}"
         )
 
@@ -259,7 +302,11 @@ class TimerPage(QWidget):
             answer: Flashcard answer text.
             display_duration_seconds: Duration answer stays visible.
         """
-        self.set_flashcard_controls_active(True)
+        self.set_flashcard_controls_active(
+            True,
+            pause_enabled=display_duration_seconds > 0,
+        )
+        self.set_flashcard_scoring_actions_enabled(True)
         self.flashcard_answer_label.setText(render_inline_latex_html(answer))
         self.flashcard_answer_label.setVisible(True)
         self._start_flashcard_progress(display_duration_seconds)
@@ -274,7 +321,12 @@ class TimerPage(QWidget):
             display_duration_seconds: Duration question stays visible.
         """
         self.content_stack.setCurrentIndex(1)
-        self.set_flashcard_controls_active(True)
+        self.clear_flashcard_score_selection()
+        self.set_flashcard_controls_active(
+            True,
+            pause_enabled=display_duration_seconds > 0,
+        )
+        self.set_flashcard_scoring_actions_enabled(False)
         self.flashcard_question_label.setVisible(True)
         self.flashcard_question_label.setText(render_inline_latex_html(question))
         self.flashcard_answer_label.setText("")
@@ -289,6 +341,8 @@ class TimerPage(QWidget):
         self.flashcard_answer_label.setVisible(False)
         self.content_stack.setCurrentIndex(0)
         self.set_flashcard_controls_active(False)
+        self.clear_flashcard_score_selection()
+        self.set_flashcard_scoring_actions_enabled(False)
         self._stop_flashcard_progress()
 
     def set_flashcard_context(self, folder_name: str, card_count: int) -> None:
@@ -313,17 +367,48 @@ class TimerPage(QWidget):
             self.time = QTime(0, 0, 0).addSecs(self._default_duration_seconds)
             self.timer_display.setText(self.time.toString("mm:ss"))
 
-    def set_flashcard_controls_active(self, active: bool) -> None:
+    def set_session_progress(
+        self,
+        *,
+        completed_count: int,
+        remaining_count: int,
+        wrong_pending_count: int,
+        total_count: int,
+    ) -> None:
+        """Update scored-session progress summary."""
+        if total_count <= 0:
+            self.session_progress_label.clear()
+            return
+        self.session_progress_label.setText(
+            "Session: "
+            f"{completed_count}/{total_count} completed | "
+            f"{remaining_count} remaining | "
+            f"{wrong_pending_count} pending review"
+        )
+
+    def clear_session_progress(self) -> None:
+        """Hide session progress outside an active study session."""
+        self.session_progress_label.clear()
+
+    def set_flashcard_controls_active(
+        self,
+        active: bool,
+        *,
+        pause_enabled: bool = True,
+    ) -> None:
         """Configure control buttons for flashcard phase interactions.
 
         Args:
             active: Whether flashcard controls should be active.
+            pause_enabled: Whether pause/resume should be available right now.
         """
         was_paused = self._flashcard_paused
         self._flashcard_controls_active = active
         if active:
             self.start_button.setEnabled(False)
-            self.pause_button.setEnabled(True)
+            self.pause_button.setEnabled(pause_enabled)
+            if not pause_enabled:
+                self._flashcard_paused = False
             self.stop_button.setEnabled(True)
             if not self._flashcard_paused:
                 self.pause_button.setText("Pause")
@@ -332,6 +417,39 @@ class TimerPage(QWidget):
         self.pause_button.setText("Pause")
         if was_paused:
             self.flashcard_pause_toggled.emit(False)
+
+    def set_flashcard_scoring_actions_enabled(self, enabled: bool) -> None:
+        """Enable or disable scored-session actions without moving the layout."""
+        self.correct_button.setEnabled(enabled)
+        self.wrong_button.setEnabled(enabled)
+
+    def selected_flashcard_score(self) -> str | None:
+        """Return the currently selected score action, if any."""
+        return self._selected_flashcard_score
+
+    def clear_flashcard_score_selection(self) -> None:
+        """Clear any pending score choice for the current flashcard."""
+        self._selected_flashcard_score = None
+        self.correct_button.setChecked(False)
+        self.wrong_button.setChecked(False)
+
+    def _handle_correct_button_clicked(self) -> None:
+        """Toggle Correct selection and keep the choices visually exclusive."""
+        self._selected_flashcard_score = (
+            "correct" if self.correct_button.isChecked() else None
+        )
+        if self.correct_button.isChecked():
+            self.wrong_button.setChecked(False)
+        self.flashcard_marked_correct.emit()
+
+    def _handle_wrong_button_clicked(self) -> None:
+        """Toggle Wrong selection and keep the choices visually exclusive."""
+        self._selected_flashcard_score = (
+            "wrong" if self.wrong_button.isChecked() else None
+        )
+        if self.wrong_button.isChecked():
+            self.correct_button.setChecked(False)
+        self.flashcard_marked_wrong.emit()
 
     def _start_flashcard_progress(self, duration_seconds: int) -> None:
         """Animate progress bar for flashcard phase durations.

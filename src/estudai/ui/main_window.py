@@ -80,6 +80,7 @@ from .navigation_icons import (
 )
 from .pages import ManagementPage, SettingsPage, TimerPage
 from .sidebar_folders import SidebarFolderController
+from .study_session import StudySessionController
 
 
 class SidebarCheckboxDelegate(NativeCheckboxDelegate):
@@ -118,6 +119,8 @@ class MainWindow(QMainWindow):
         self.current_folder_id: str | None = None
         self.current_folder_name = "No folders selected"
         self._editing_folder_id: str | None = None
+        self._study_session = StudySessionController()
+        self._pending_flashcard_score: str | None = None
         self._flashcard_sound_output: object | None = None
         self._flashcard_sound_player: object | None = None
         flashcard_phase_timer = QTimer(self)
@@ -153,6 +156,12 @@ class MainWindow(QMainWindow):
         self.timer_page.timer_cycle_completed.connect(self.handle_timer_cycle_completed)
         self.timer_page.flashcard_pause_toggled.connect(
             self.handle_flashcard_pause_toggled
+        )
+        self.timer_page.flashcard_marked_correct.connect(
+            self.handle_flashcard_marked_correct
+        )
+        self.timer_page.flashcard_marked_wrong.connect(
+            self.handle_flashcard_marked_wrong
         )
         self.timer_page.stop_requested.connect(self.handle_timer_stop_requested)
         self.show_flashcard_requested.connect(self.show_flashcard_popup)
@@ -384,6 +393,10 @@ class MainWindow(QMainWindow):
         Args:
             is_running: Whether timer is currently running.
         """
+        if is_running and not self._study_session.active:
+            if not self._start_study_session():
+                self.timer_page.stop_timer()
+                return
         self.set_navigation_visible(not is_running)
         if (
             not is_running
@@ -413,8 +426,8 @@ class MainWindow(QMainWindow):
         )
 
     def handle_timer_stop_requested(self) -> None:
-        """Reset flashcard ordering when user clicks the Stop button."""
-        self._reset_flashcard_sequence_order()
+        """Abort the current study session when user clicks Stop."""
+        self._reset_study_session_state()
 
     def _start_flashcard_phase_timer(
         self, duration_milliseconds: int, callback
@@ -446,39 +459,18 @@ class MainWindow(QMainWindow):
         self._flashcard_sequence.reset_order()
 
     def handle_timer_cycle_completed(self) -> None:
-        """Handle timer completion with probability-based flashcard triggering."""
+        """Advance the current study session when a timer cycle finishes."""
         app_settings = load_app_settings()
-        if self._should_skip_flashcard_cycle(
-            app_settings.flashcard_probability_percent
-        ):
-            self.timer_page.restart_timer_cycle()
-            return
-        if not self.selected_folder_ids:
-            QMessageBox.warning(
-                self,
-                "Timer",
-                "No folders selected. Select at least one folder to show flashcards.",
-            )
-            self.timer_page.restart_timer_cycle()
-            return
-        if not self.loaded_flashcards:
-            QMessageBox.warning(
-                self,
-                "Timer",
-                "No flashcards are available in selected folders. Timer restarted.",
-            )
-            self.timer_page.restart_timer_cycle()
-            return
         flashcard = self._next_flashcard_for_display(
             random_order=app_settings.flashcard_random_order_enabled
         )
         if flashcard is None:
-            self.timer_page.restart_timer_cycle()
+            self._complete_study_session()
             return
         self.show_flashcard_requested.emit(flashcard)
 
     def _next_flashcard_for_display(self, *, random_order: bool) -> Flashcard | None:
-        """Return next flashcard for current cycle and advance when sequential.
+        """Return the next active flashcard for the current study session.
 
         Args:
             random_order: Whether to pick a random flashcard.
@@ -486,16 +478,62 @@ class MainWindow(QMainWindow):
         Returns:
             Flashcard | None: Selected flashcard if available.
         """
-        return self._flashcard_sequence.next_flashcard(
-            self.loaded_flashcards,
+        flashcard_index = self._flashcard_sequence.next_flashcard_index_for_session(
+            self._study_session.active_flashcard_indexes(),
+            len(self._study_session.flashcards),
             random_order=random_order,
             choice_func=random.choice,
         )
+        return self._study_session.set_current_flashcard(flashcard_index)
 
-    @staticmethod
-    def _should_skip_flashcard_cycle(probability_percent: int) -> bool:
-        """Return whether the current timer cycle should skip flashcards."""
-        return random.randint(1, 100) > probability_percent
+    def _start_study_session(self) -> bool:
+        """Create a runtime-only study session for the current flashcard scope."""
+        if not self.selected_folder_ids:
+            QMessageBox.warning(
+                self,
+                "Timer",
+                "No folders selected. Select at least one folder to start a study session.",
+            )
+            return False
+        if not self.loaded_flashcards:
+            QMessageBox.warning(
+                self,
+                "Timer",
+                "No flashcards are available in selected folders. Study session not started.",
+            )
+            return False
+        self._cancel_flashcard_phase_timer()
+        self._flashcard_sequence.sequence_paused = False
+        self._reset_flashcard_sequence_order()
+        self._pending_flashcard_score = None
+        if not self._study_session.start(self.loaded_flashcards):
+            return False
+        self._update_study_session_progress()
+        return True
+
+    def _update_study_session_progress(self) -> None:
+        """Refresh visible study progress for the timer page."""
+        progress = self._study_session.progress()
+        self.timer_page.set_session_progress(
+            completed_count=progress.completed_count,
+            remaining_count=progress.remaining_count,
+            wrong_pending_count=progress.wrong_pending_count,
+            total_count=progress.total_count,
+        )
+
+    def _reset_study_session_state(self) -> None:
+        """Clear all runtime-only study session state."""
+        self._cancel_flashcard_phase_timer()
+        self._flashcard_sequence.sequence_paused = False
+        self._reset_flashcard_sequence_order()
+        self._study_session.reset()
+        self._pending_flashcard_score = None
+        self.timer_page.clear_session_progress()
+
+    def _complete_study_session(self) -> None:
+        """Stop the timer UI after the active session is fully completed."""
+        self._reset_study_session_state()
+        self.timer_page.stop_timer()
 
     def _play_flashcard_notification_sound(self) -> None:
         """Play notification sound configured in settings when available."""
@@ -530,11 +568,11 @@ class MainWindow(QMainWindow):
         self._play_flashcard_notification_sound()
         self._start_flashcard_phase_timer(
             answer_display_duration_seconds * 1000,
-            lambda: self._finish_flashcard_sequence(sequence_id),
+            lambda: self._finish_flashcard_answer_phase(sequence_id),
         )
 
-    def _finish_flashcard_sequence(self, sequence_id: int) -> None:
-        """Clear flashcard content and restart timer after answer phase."""
+    def _finish_flashcard_answer_phase(self, sequence_id: int) -> None:
+        """Apply the queued answer choice only after the answer timer finishes."""
         if (
             sequence_id != self._active_flashcard_sequence_id
             or self.timer_page.is_running
@@ -544,10 +582,11 @@ class MainWindow(QMainWindow):
             )
         ):
             return
-        self._cancel_flashcard_phase_timer()
-        self._flashcard_sequence.sequence_paused = False
-        self.timer_page.clear_flashcard_display()
-        self.timer_page.restart_timer_cycle()
+        if self._pending_flashcard_score == "correct":
+            self._study_session.mark_current_correct()
+        elif self._pending_flashcard_score == "wrong":
+            self._study_session.mark_current_wrong()
+        self._advance_after_flashcard_score()
 
     def show_flashcard_popup(self, flashcard: object) -> None:
         """Show flashcard question/answer inside timer page.
@@ -560,6 +599,7 @@ class MainWindow(QMainWindow):
         app_settings = load_app_settings()
         self._cancel_flashcard_phase_timer()
         self._flashcard_sequence.sequence_paused = False
+        self._pending_flashcard_score = None
         sequence_id = self._flashcard_sequence.begin_sequence()
         self.switch_to_timer()
         self.set_navigation_visible(False)
@@ -576,6 +616,30 @@ class MainWindow(QMainWindow):
                 app_settings.answer_display_duration_seconds,
             ),
         )
+
+    def _advance_after_flashcard_score(self) -> None:
+        """Continue or finish the session after scoring the current flashcard."""
+        self._cancel_flashcard_phase_timer()
+        self._flashcard_sequence.sequence_paused = False
+        self._pending_flashcard_score = None
+        self._update_study_session_progress()
+        if self._study_session.is_complete():
+            self._complete_study_session()
+            return
+        self.timer_page.clear_flashcard_display()
+        self.timer_page.restart_timer_cycle()
+
+    def handle_flashcard_marked_correct(self) -> None:
+        """Queue the selected Correct state until answer timeout."""
+        if self._study_session.current_flashcard() is None:
+            return
+        self._pending_flashcard_score = self.timer_page.selected_flashcard_score()
+
+    def handle_flashcard_marked_wrong(self) -> None:
+        """Queue the selected Wrong state until answer timeout."""
+        if self._study_session.current_flashcard() is None:
+            return
+        self._pending_flashcard_score = self.timer_page.selected_flashcard_score()
 
     def toggle_sidebar(self) -> None:
         """Show or hide the left sidebar."""
@@ -720,6 +784,8 @@ class MainWindow(QMainWindow):
             self.current_folder_name,
             len(self.loaded_flashcards),
         )
+        if not self._study_session.active:
+            self.timer_page.clear_session_progress()
 
     def handle_sidebar_item_changed(self, item: QListWidgetItem) -> None:
         """Handle sidebar item updates (checkbox and inline rename).

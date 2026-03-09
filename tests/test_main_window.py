@@ -393,9 +393,15 @@ def test_sidebar_folder_context_actions_rename_and_delete(
     assert list_persisted_folders() == []
 
 
-def test_start_timer_hides_navigation_until_stopped(app: QApplication) -> None:
+def test_start_timer_hides_navigation_until_stopped(
+    app: QApplication, tmp_path: Path
+) -> None:
     """Verify navigation controls hide during timer execution."""
     window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
     window.toggle_sidebar()
 
     window.timer_page.start_timer()
@@ -407,7 +413,7 @@ def test_start_timer_hides_navigation_until_stopped(app: QApplication) -> None:
     assert window.sidebar_toggle_button.isHidden()
     assert window.settings_button.isHidden()
 
-    window.timer_page.stop_timer()
+    window.timer_page.stop_button.click()
     assert not window.sidebar_toggle_button.isHidden()
     assert not window.settings_button.isHidden()
 
@@ -422,147 +428,143 @@ def test_settings_save_returns_to_timer_page(app: QApplication) -> None:
     assert window.stacked_widget.currentWidget() is window.timer_page
 
 
-def test_timer_completion_without_trigger_restarts_cycle(
+def test_start_timer_without_selected_folders_warns_and_stops(
     app: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Verify completion restarts timer when probability roll does not trigger."""
-    window = MainWindow()
-    monkeypatch.setattr("estudai.ui.main_window.random.randint", lambda *_args: 100)
-
-    window.handle_timer_cycle_completed()
-
-    assert window.timer_page.is_running is True
-    assert window.timer_page.timer_display.text() == "25:00"
-    window.timer_page.stop_timer()
-
-
-def test_timer_completion_with_trigger_and_no_folder_warns_and_restarts(
-    app: QApplication, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Verify triggered completion warns and restarts when no folder is selected."""
+    """Verify starting without checked flashcards keeps the app in a safe idle state."""
     window = MainWindow()
     warnings: list[str] = []
-    monkeypatch.setattr("estudai.ui.main_window.random.randint", lambda *_args: 1)
     monkeypatch.setattr(
         "estudai.ui.main_window.QMessageBox.warning",
         lambda *_args: warnings.append("warning"),
     )
 
-    window.handle_timer_cycle_completed()
+    window.timer_page.start_timer()
 
-    assert warnings
-    assert window.timer_page.is_running is True
-    window.timer_page.stop_timer()
+    assert warnings == ["warning"]
+    assert window.timer_page.is_running is False
+    assert window._study_session.active is False
+    assert window.timer_page.session_progress_label.text() == ""
 
 
-def test_timer_completion_with_trigger_and_no_flashcards_warns_and_restarts(
-    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_start_timer_with_selected_flashcards_starts_study_session(
+    app: QApplication, tmp_path: Path
 ) -> None:
-    """Verify triggered completion warns and restarts when selected folders are empty."""
+    """Verify pressing Start initializes one scored study session snapshot."""
     window = MainWindow()
-    empty_folder = tmp_path / "empty"
-    empty_folder.mkdir()
-    (empty_folder / "cards.csv").write_text("", encoding="utf-8")
-    assert window.add_folder(empty_folder) is True
-    warnings: list[str] = []
-    monkeypatch.setattr("estudai.ui.main_window.random.randint", lambda *_args: 1)
-    monkeypatch.setattr(
-        "estudai.ui.main_window.QMessageBox.warning",
-        lambda *_args: warnings.append("warning"),
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\nQ2?,A2.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+
+    window.timer_page.start_timer()
+
+    assert window._study_session.active is True
+    assert window.timer_page.session_progress_label.text() == (
+        "Session: 0/2 completed | 2 remaining | 0 pending review"
     )
-
-    window.handle_timer_cycle_completed()
-
-    assert warnings
-    assert window.timer_page.is_running is True
-    window.timer_page.stop_timer()
+    window.timer_page.stop_button.click()
 
 
-def test_timer_completion_with_trigger_emits_flashcard_event(
+def test_scored_session_marks_wrong_then_correct_until_complete(
     app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Verify triggered completion emits show-flashcard event."""
-    shown_flashcards: list[str] = []
+    """Verify answer selections apply only when the answer timer finishes."""
+    callbacks: list[object] = []
     monkeypatch.setattr(
-        "estudai.ui.main_window.MainWindow.show_flashcard_popup",
-        lambda self, flashcard: shown_flashcards.append(flashcard.question),
+        "estudai.ui.main_window.load_app_settings",
+        lambda: AppSettings(
+            timer_duration_seconds=1500,
+            flashcard_probability_percent=30,
+            flashcard_random_order_enabled=False,
+            question_display_duration_seconds=2,
+            answer_display_duration_seconds=3,
+        ),
     )
     window = MainWindow()
     biology_folder = tmp_path / "biology"
     biology_folder.mkdir()
-    (biology_folder / "cards.csv").write_text(
-        "DNA?,Genetic material.\n", encoding="utf-8"
-    )
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\nQ2?,A2.\n", encoding="utf-8")
     assert window.add_folder(biology_folder) is True
-    emitted_flashcards: list[object] = []
-    warnings: list[str] = []
-    window.show_flashcard_requested.connect(
-        lambda flashcard: emitted_flashcards.append(flashcard)
-    )
-    monkeypatch.setattr("estudai.ui.main_window.random.randint", lambda *_args: 1)
     monkeypatch.setattr(
-        "estudai.ui.main_window.QMessageBox.warning",
-        lambda *_args: warnings.append("warning"),
+        window,
+        "_start_flashcard_phase_timer",
+        lambda _delay, callback: callbacks.append(callback),
     )
+    window.timer_page.start_timer()
 
+    window.timer_page.is_running = False
     window.handle_timer_cycle_completed()
-
-    assert not warnings
-    assert len(emitted_flashcards) == 1
-    assert emitted_flashcards[0].question == "DNA?"
-    assert shown_flashcards == ["DNA?"]
-
-
-def test_timer_completion_uses_sequential_order_and_skips_consumption_on_miss(
-    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Verify sequential order advances only when probability check triggers."""
-    shown_flashcards: list[str] = []
-    monkeypatch.setattr(
-        "estudai.ui.main_window.MainWindow.show_flashcard_popup",
-        lambda self, flashcard: shown_flashcards.append(flashcard.question),
+    assert window.timer_page.flashcard_question_label.text() == "Q1?"
+    assert len(callbacks) == 1
+    callbacks.pop(0)()
+    assert window.timer_page.flashcard_answer_label.text() == "A1."
+    assert window._study_session.current_flashcard_index == 0
+    window.timer_page.wrong_button.click()
+    assert window._pending_flashcard_score == "wrong"
+    assert window._study_session.card_states[0].value == "pending"
+    callbacks.pop(0)()
+    assert window._study_session.card_states[0].value == "wrong_pending"
+    assert window.timer_page.session_progress_label.text() == (
+        "Session: 0/2 completed | 2 remaining | 1 pending review"
     )
+    assert window.timer_page.is_running is True
+
+    window.timer_page.is_running = False
+    window.handle_timer_cycle_completed()
+    assert window.timer_page.flashcard_question_label.text() == "Q2?"
+    assert len(callbacks) == 1
+    callbacks.pop(0)()
+    assert window.timer_page.flashcard_answer_label.text() == "A2."
+    assert window._study_session.current_flashcard_index == 1
+    window.timer_page.correct_button.click()
+    assert window._pending_flashcard_score == "correct"
+    assert window._study_session.card_states[1].value == "pending"
+    callbacks.pop(0)()
+    assert window._study_session.card_states[1].value == "completed"
+    assert window.timer_page.session_progress_label.text() == (
+        "Session: 1/2 completed | 1 remaining | 1 pending review"
+    )
+    assert window.timer_page.is_running is True
+
+    window.timer_page.is_running = False
+    window.handle_timer_cycle_completed()
+    assert window.timer_page.flashcard_question_label.text() == "Q1?"
+    callbacks.pop(0)()
+    assert window.timer_page.flashcard_answer_label.text() == "A1."
+    window.timer_page.correct_button.click()
+    callbacks.pop(0)()
+
+    assert window._study_session.active is False
+    assert window.timer_page.is_running is False
+    assert window.timer_page.flashcard_question_label.isHidden()
+    assert window.timer_page.session_progress_label.text() == ""
+
+
+def test_stop_button_resets_runtime_study_session_state(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify Stop clears session progress and order instead of leaving runtime state behind."""
     window = MainWindow()
     biology_folder = tmp_path / "biology"
     biology_folder.mkdir()
-    (biology_folder / "cards.csv").write_text(
-        "Q1?,A1.\nQ2?,A2.\n",
-        encoding="utf-8",
-    )
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\nQ2?,A2.\n", encoding="utf-8")
     assert window.add_folder(biology_folder) is True
-    rolls = iter([100, 1, 1])
-    monkeypatch.setattr(
-        "estudai.ui.main_window.random.randint", lambda *_args: next(rolls)
-    )
-
-    window.handle_timer_cycle_completed()
-    assert shown_flashcards == []
-    assert window._next_flashcard_index == 0
-
-    window.handle_timer_cycle_completed()
-    window.handle_timer_cycle_completed()
-
-    assert shown_flashcards == ["Q1?", "Q2?"]
-    assert window._next_flashcard_index == 0
-
-
-def test_stop_button_resets_sequential_flashcard_order(
-    app: QApplication,
-) -> None:
-    """Verify user stop action resets sequential flashcard pointer."""
-    window = MainWindow()
+    window.timer_page.start_timer()
     window._next_flashcard_index = 2
-    window.timer_page.set_flashcard_controls_active(True)
 
     window.timer_page.stop_button.click()
 
+    assert window._study_session.active is False
     assert window._next_flashcard_index == 0
+    assert window.timer_page.session_progress_label.text() == ""
+    assert window.timer_page.start_button.isEnabled()
 
 
 def test_timer_completion_uses_random_choice_when_setting_enabled(
     app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Verify random-order setting uses random selection path."""
+    """Verify session selection uses the random-order path when configured."""
     shown_flashcards: list[str] = []
     monkeypatch.setattr(
         "estudai.ui.main_window.MainWindow.show_flashcard_popup",
@@ -572,13 +574,12 @@ def test_timer_completion_uses_random_choice_when_setting_enabled(
         "estudai.ui.main_window.load_app_settings",
         lambda: AppSettings(
             timer_duration_seconds=1500,
-            flashcard_probability_percent=100,
+            flashcard_probability_percent=30,
             flashcard_random_order_enabled=True,
             question_display_duration_seconds=2,
             answer_display_duration_seconds=3,
         ),
     )
-    monkeypatch.setattr("estudai.ui.main_window.random.randint", lambda *_args: 1)
     monkeypatch.setattr(
         "estudai.ui.main_window.random.choice", lambda flashcards: flashcards[-1]
     )
@@ -590,11 +591,13 @@ def test_timer_completion_uses_random_choice_when_setting_enabled(
         encoding="utf-8",
     )
     assert window.add_folder(biology_folder) is True
+    window.timer_page.start_timer()
+    window.timer_page.is_running = False
 
     window.handle_timer_cycle_completed()
 
     assert shown_flashcards == ["Q2?"]
-    assert window._next_flashcard_index == 0
+    assert window._study_session.current_flashcard_index == 1
 
 
 def test_flashcard_sequence_plays_sound_for_question_and_answer(
@@ -659,15 +662,69 @@ def test_flashcard_sequence_plays_sound_for_question_and_answer(
     assert plays == ["play", "play"]
     assert len(callbacks) == 1
 
+    window.timer_page.correct_button.click()
+    assert window.timer_page.correct_button.isChecked()
+    assert restart_calls == []
     callbacks.pop(0)()
     assert restart_calls == ["restart"]
+
+
+def test_unanswered_flashcard_returns_after_other_cards(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify unanswered cards stay pending and move behind later cards."""
+    callbacks: list[object] = []
+    monkeypatch.setattr(
+        "estudai.ui.main_window.load_app_settings",
+        lambda: AppSettings(
+            timer_duration_seconds=1500,
+            flashcard_probability_percent=30,
+            flashcard_random_order_enabled=False,
+            question_display_duration_seconds=2,
+            answer_display_duration_seconds=3,
+        ),
+    )
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\nQ2?,A2.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+    monkeypatch.setattr(
+        window,
+        "_start_flashcard_phase_timer",
+        lambda _delay, callback: callbacks.append(callback),
+    )
+    window.timer_page.start_timer()
+
+    window.timer_page.is_running = False
+    window.handle_timer_cycle_completed()
+    callbacks.pop(0)()
+    assert window.timer_page.flashcard_answer_label.text() == "A1."
+    callbacks.pop(0)()
+    assert window._study_session.card_states[0].value == "pending"
+    assert window.timer_page.is_running is True
+
+    window.timer_page.is_running = False
+    window.handle_timer_cycle_completed()
+    assert window.timer_page.flashcard_question_label.text() == "Q2?"
 
 
 def test_flashcard_pause_handler_stops_and_resumes_phase_timer(
     app: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Verify flashcard pause toggles stop and resume on phase timer."""
+    """Verify pause/resume preserves live session state during a flashcard phase."""
     window = MainWindow()
+    window._study_session.start(
+        [
+            Flashcard(
+                question="Q?",
+                answer="A.",
+                source_file=Path("cards.csv"),
+                source_line=1,
+            )
+        ]
+    )
+    window._study_session.set_current_flashcard(0)
     window.timer_page.show_flashcard_question("Q?", display_duration_seconds=5)
     window._pending_flashcard_phase_callback = lambda: None
 
@@ -697,9 +754,11 @@ def test_flashcard_pause_handler_stops_and_resumes_phase_timer(
     window.handle_flashcard_pause_toggled(True)
     assert fake_timer.stopped is True
     assert window._flashcard_phase_remaining_ms == 1500
+    assert window._study_session.current_flashcard_index == 0
 
     window.handle_flashcard_pause_toggled(False)
     assert fake_timer.started_with == 1500
+    assert window._study_session.card_states[0].value == "pending"
 
 
 def test_create_folder_from_prompt(
@@ -1005,9 +1064,15 @@ def test_sidebar_click_does_not_leave_management_page(
     assert window.stacked_widget.currentWidget() is window.management_page
 
 
-def test_spacebar_shortcut_starts_and_pauses_timer(app: QApplication) -> None:
+def test_spacebar_shortcut_starts_and_pauses_timer(
+    app: QApplication, tmp_path: Path
+) -> None:
     """Verify spacebar starts timer when stopped and pauses when running."""
     window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
     start_event = QKeyEvent(QEvent.KeyPress, Qt.Key_Space, Qt.NoModifier)
     pause_event = QKeyEvent(QEvent.KeyPress, Qt.Key_Space, Qt.NoModifier)
     resume_event = QKeyEvent(QEvent.KeyPress, Qt.Key_Space, Qt.NoModifier)
@@ -1020,7 +1085,7 @@ def test_spacebar_shortcut_starts_and_pauses_timer(app: QApplication) -> None:
 
     window.keyPressEvent(resume_event)
     assert window.timer_page.is_running is True
-    window.timer_page.stop_timer()
+    window.timer_page.stop_button.click()
 
 
 def test_management_save_validates_non_empty_fields(

@@ -43,6 +43,29 @@ class FlashcardSequenceController:
         self.next_flashcard_index = (self.next_flashcard_index + 1) % len(flashcards)
         return flashcard
 
+    def next_flashcard_index_for_session(
+        self,
+        active_indexes: list[int],
+        total_flashcards: int,
+        *,
+        random_order: bool,
+        choice_func: Callable[[list[int]], int],
+    ) -> int | None:
+        """Return the next active flashcard index for the current session."""
+        if not active_indexes or total_flashcards <= 0:
+            return None
+        if random_order:
+            return choice_func(active_indexes)
+        active_index_set = set(active_indexes)
+        start_index = self.next_flashcard_index % total_flashcards
+        for offset in range(total_flashcards):
+            flashcard_index = (start_index + offset) % total_flashcards
+            if flashcard_index not in active_index_set:
+                continue
+            self.next_flashcard_index = (flashcard_index + 1) % total_flashcards
+            return flashcard_index
+        return None
+
     def begin_sequence(self) -> int:
         """Start a new flashcard sequence and return its id."""
         self.active_sequence_id += 1

@@ -47,6 +47,15 @@ def test_timer_start_stop_reset_and_context() -> None:
 
     page.set_flashcard_context("biology", 4)
     assert page.folder_context_label.text() == "Folder: biology (4 cards)"
+    page.set_session_progress(
+        completed_count=1,
+        remaining_count=3,
+        wrong_pending_count=1,
+        total_count=4,
+    )
+    assert page.session_progress_label.text() == (
+        "Session: 1/4 completed | 3 remaining | 1 pending review"
+    )
 
     page.time = QTime(0, 10, 0)
     page.reset_timer()
@@ -89,15 +98,23 @@ def test_flashcard_display_hides_timer_and_reveals_answer() -> None:
     assert not page.flashcard_question_label.isHidden()
     assert page.flashcard_question_label.text() == "What is DNA?"
     assert page.flashcard_answer_label.isHidden()
+    assert not page.correct_button.isHidden()
+    assert not page.wrong_button.isHidden()
+    assert not page.correct_button.isEnabled()
+    assert not page.wrong_button.isEnabled()
 
     page.show_flashcard_answer("Genetic material.")
     assert not page.flashcard_answer_label.isHidden()
     assert page.flashcard_answer_label.text() == "Genetic material."
+    assert page.correct_button.isEnabled()
+    assert page.wrong_button.isEnabled()
 
     page.clear_flashcard_display()
     assert not page.timer_display.isHidden()
     assert page.flashcard_question_label.isHidden()
     assert page.flashcard_answer_label.isHidden()
+    assert not page.correct_button.isEnabled()
+    assert not page.wrong_button.isEnabled()
 
 
 def test_flashcard_progress_bar_updates_per_phase() -> None:
@@ -145,6 +162,45 @@ def test_flashcard_phase_keeps_pause_and_stop_enabled() -> None:
     page.pause_timer()
     assert page.pause_button.text() == "Pause"
     assert pause_events == [True, False]
+
+
+def test_flashcard_score_buttons_stay_anchored_and_in_order() -> None:
+    """Verify score controls keep a stable left-to-right layout."""
+    _get_app()
+    page = TimerPage()
+    actions_layout = page.layout().itemAt(4).layout()
+
+    assert not page.correct_button.isHidden()
+    assert not page.wrong_button.isHidden()
+    assert actions_layout.itemAt(1).widget() is page.correct_button
+    assert actions_layout.itemAt(2).widget() is page.wrong_button
+
+
+def test_flashcard_score_buttons_emit_actions() -> None:
+    """Verify answer actions emit explicit events and keep a visual selection cue."""
+    _get_app()
+    page = TimerPage()
+    events: list[str] = []
+    page.flashcard_marked_correct.connect(lambda: events.append("correct"))
+    page.flashcard_marked_wrong.connect(lambda: events.append("wrong"))
+
+    page.show_flashcard_answer("A.")
+    page.correct_button.click()
+    assert page.selected_flashcard_score() == "correct"
+    assert page.correct_button.isChecked()
+    assert not page.wrong_button.isChecked()
+
+    page.wrong_button.click()
+    assert page.selected_flashcard_score() == "wrong"
+    assert page.wrong_button.isChecked()
+    assert not page.correct_button.isChecked()
+
+    page.wrong_button.click()
+    assert page.selected_flashcard_score() is None
+    assert not page.correct_button.isChecked()
+    assert not page.wrong_button.isChecked()
+
+    assert events == ["correct", "wrong", "wrong"]
 
 
 def test_flashcard_text_formats_inline_latex() -> None:
