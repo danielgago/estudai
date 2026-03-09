@@ -88,6 +88,27 @@ def test_timer_update_stops_when_reaches_zero() -> None:
     assert completions == [True]
 
 
+def test_zero_second_timer_uses_ready_idle_text_and_immediate_cycle() -> None:
+    """Verify 0-second mode skips countdown and returns to Ready? when idle."""
+    _get_app()
+    page = TimerPage(default_duration_seconds=0)
+    completions: list[bool] = []
+    page.timer_cycle_completed.connect(lambda: completions.append(True))
+
+    assert page.timer_display.text() == "Ready?"
+
+    page.start_timer()
+
+    assert page.timer_display.text() == "Ready?"
+    assert page.is_running is False
+    assert not page.pause_button.isEnabled()
+    assert not page.stop_button.isEnabled()
+    assert completions == [True]
+
+    page.stop_timer()
+    assert page.timer_display.text() == "Ready?"
+
+
 def test_flashcard_display_hides_timer_and_reveals_answer() -> None:
     """Verify flashcard question/answer rendering inside timer page."""
     _get_app()

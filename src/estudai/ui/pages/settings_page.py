@@ -84,7 +84,7 @@ class SettingsPage(QWidget):
         timer_form = QFormLayout(timer_group)
 
         self.timer_duration_spinbox = QSpinBox()
-        self.timer_duration_spinbox.setRange(1, 99 * 3600)
+        self.timer_duration_spinbox.setRange(0, 99 * 3600)
         self.timer_duration_spinbox.setSuffix(" s")
         timer_form.addRow("Timer duration:", self.timer_duration_spinbox)
 
@@ -351,7 +351,7 @@ class SettingsPage(QWidget):
             (
                 self.timer_duration_spinbox,
                 "Timer duration",
-                "1 and 356400 seconds",
+                "0 and 356400 seconds",
             ),
             (
                 self.flashcard_probability_spinbox,

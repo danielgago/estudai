@@ -41,8 +41,8 @@ class TimerPage(QWidget):
 
     def __init__(self, default_duration_seconds: int = 25 * 60):
         super().__init__()
-        self._default_duration_seconds = max(1, int(default_duration_seconds))
-        self.time = QTime(0, 0, 0).addSecs(self._default_duration_seconds)
+        self._default_duration_seconds = max(0, int(default_duration_seconds))
+        self.time = self._default_time()
         self.is_running = False
         self._flashcard_controls_active = False
         self._flashcard_paused = False
@@ -71,7 +71,7 @@ class TimerPage(QWidget):
         timer_layout.setContentsMargins(0, 0, 0, 0)
         timer_layout.setSpacing(0)
         timer_layout.addStretch(1)
-        self.timer_display = QLabel(self.time.toString("mm:ss"))
+        self.timer_display = QLabel(self._idle_timer_display_text())
         timer_font = QFont(self.timer_display.font())
         timer_font.setPointSize(74)
         timer_font.setWeight(QFont.ExtraBold)
@@ -292,16 +292,29 @@ class TimerPage(QWidget):
         """Start the timer."""
         if not self.is_running:
             self.clear_flashcard_display()
-            if self.time.second() == 0 and self.time.minute() == 0:
-                self.time = QTime(0, 0, 0).addSecs(self._default_duration_seconds)
+            if not self._has_countdown_duration():
+                self.time = self._default_time()
+            elif self._is_time_depleted():
+                self.time = self._default_time()
                 self.timer_display.setText(self.time.toString("mm:ss"))
             self.is_running = True
-            self.timer.start(1000)
             self.start_button.setEnabled(False)
             self.pause_button.setText("Pause")
             self.pause_button.setEnabled(True)
             self.stop_button.setEnabled(True)
             self.timer_running_changed.emit(True)
+            if not self.is_running:
+                return
+            if not self._has_countdown_duration():
+                self.is_running = False
+                self.start_button.setEnabled(True)
+                self.pause_button.setEnabled(False)
+                self.stop_button.setEnabled(False)
+                self.timer_display.setText(self._idle_timer_display_text())
+                self.timer_running_changed.emit(False)
+                self.timer_cycle_completed.emit()
+                return
+            self.timer.start(1000)
 
     def pause_timer(self):
         """Pause the timer without resetting remaining time."""
@@ -327,8 +340,8 @@ class TimerPage(QWidget):
             self.is_running = False
             self.timer.stop()
         self.clear_flashcard_display()
-        self.time = QTime(0, 0, 0).addSecs(self._default_duration_seconds)
-        self.timer_display.setText(self.time.toString("mm:ss"))
+        self.time = self._default_time()
+        self.timer_display.setText(self._idle_timer_display_text())
         self.start_button.setEnabled(True)
         self.pause_button.setText("Pause")
         self.pause_button.setEnabled(False)
@@ -347,8 +360,8 @@ class TimerPage(QWidget):
     def restart_timer_cycle(self) -> None:
         """Reset the timer and immediately start a new countdown cycle."""
         self.clear_flashcard_display()
-        self.time = QTime(0, 0, 0).addSecs(self._default_duration_seconds)
-        self.timer_display.setText(self.time.toString("mm:ss"))
+        self.time = self._default_time()
+        self.timer_display.setText(self._idle_timer_display_text())
         self.start_timer()
 
     def update_timer(self):
@@ -358,7 +371,7 @@ class TimerPage(QWidget):
         self.time = self.time.addSecs(-1)
         self.timer_display.setText(self.time.toString("mm:ss"))
 
-        if self.time.second() == 0 and self.time.minute() == 0:
+        if self._is_time_depleted():
             self.timer.stop()
             self.is_running = False
             self.start_button.setEnabled(True)
@@ -439,10 +452,28 @@ class TimerPage(QWidget):
         Args:
             duration_seconds: New default countdown duration in seconds.
         """
-        self._default_duration_seconds = max(1, int(duration_seconds))
+        self._default_duration_seconds = max(0, int(duration_seconds))
         if not self.is_running:
-            self.time = QTime(0, 0, 0).addSecs(self._default_duration_seconds)
-            self.timer_display.setText(self.time.toString("mm:ss"))
+            self.time = self._default_time()
+            self.timer_display.setText(self._idle_timer_display_text())
+
+    def _default_time(self) -> QTime:
+        """Return the idle/default countdown time object."""
+        return QTime(0, 0, 0).addSecs(self._default_duration_seconds)
+
+    def _has_countdown_duration(self) -> bool:
+        """Return whether the timer should run a countdown before flashcards."""
+        return self._default_duration_seconds > 0
+
+    def _idle_timer_display_text(self) -> str:
+        """Return the idle timer label for the current mode."""
+        if not self._has_countdown_duration():
+            return "Ready?"
+        return self.time.toString("mm:ss")
+
+    def _is_time_depleted(self) -> bool:
+        """Return whether the countdown has reached zero."""
+        return self.time.minute() == 0 and self.time.second() == 0
 
     def set_session_progress(
         self,

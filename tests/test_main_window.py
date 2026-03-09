@@ -470,6 +470,47 @@ def test_start_timer_with_selected_flashcards_starts_study_session(
     window.timer_page.stop_button.click()
 
 
+def test_zero_second_timer_starts_flashcards_immediately_and_resets_to_ready(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify instant mode skips countdown and restores Ready? after stopping."""
+    callbacks: list[object] = []
+    monkeypatch.setattr(
+        "estudai.ui.main_window.load_app_settings",
+        lambda: AppSettings(
+            timer_duration_seconds=0,
+            flashcard_probability_percent=30,
+            flashcard_random_order_enabled=False,
+            question_display_duration_seconds=2,
+            answer_display_duration_seconds=3,
+        ),
+    )
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+    monkeypatch.setattr(
+        window,
+        "_start_flashcard_phase_timer",
+        lambda _delay, callback: callbacks.append(callback),
+    )
+
+    assert window.timer_page.timer_display.text() == "Ready?"
+
+    window.timer_page.start_timer()
+
+    assert window._study_session.active is True
+    assert window.timer_page.is_running is False
+    assert window.timer_page.flashcard_question_label.text() == "Q1?"
+    assert len(callbacks) == 1
+
+    window.timer_page.stop_button.click()
+
+    assert window._study_session.active is False
+    assert window.timer_page.timer_display.text() == "Ready?"
+
+
 def test_scored_session_marks_wrong_then_correct_until_complete(
     app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

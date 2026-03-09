@@ -189,7 +189,7 @@ def load_app_settings() -> AppSettings:
                 AppSettings.timer_duration_seconds,
             ),
             default=AppSettings.timer_duration_seconds,
-            minimum=1,
+            minimum=0,
             maximum=99 * 3600,
         ),
         flashcard_probability_percent=_normalize_int(
@@ -267,7 +267,7 @@ def save_app_settings(settings: AppSettings) -> None:
         _normalize_int(
             settings.timer_duration_seconds,
             default=AppSettings.timer_duration_seconds,
-            minimum=1,
+            minimum=0,
             maximum=99 * 3600,
         ),
     )

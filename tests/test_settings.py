@@ -75,6 +75,15 @@ def test_settings_persist_wrong_answer_reinsert_after_zero() -> None:
     assert restored.wrong_answer_reinsert_after_count == 0
 
 
+def test_settings_persist_zero_second_timer_value() -> None:
+    """Verify timer settings accept and restore an instant-study duration."""
+    save_app_settings(AppSettings(timer_duration_seconds=0))
+
+    restored = load_app_settings()
+
+    assert restored.timer_duration_seconds == 0
+
+
 def test_get_default_notification_sound_path_prefers_frozen_bundle(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -159,6 +168,18 @@ def test_settings_page_checkbox_keeps_native_indicator_styles(
     stylesheet = page.flashcard_random_order_checkbox.styleSheet()
 
     assert stylesheet == ""
+
+
+def test_settings_page_reopens_with_zero_second_timer_value(
+    app: QApplication,
+) -> None:
+    """Verify the settings form preserves a saved 0-second timer value."""
+    save_app_settings(AppSettings(timer_duration_seconds=0))
+
+    page = SettingsPage()
+
+    assert page.timer_duration_spinbox.minimum() == 0
+    assert page.timer_duration_spinbox.value() == 0
 
 
 def test_settings_page_enables_after_x_only_for_matching_mode(
