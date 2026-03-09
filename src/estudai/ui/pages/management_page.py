@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import dataclass
 
-from PySide6.QtCore import QEvent, QPoint, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, QItemSelectionModel, Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -19,7 +20,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from estudai.services.csv_flashcards import Flashcard, normalize_flashcard_fields
+from estudai.services.csv_flashcards import (
+    Flashcard,
+    flashcard_question_sort_key,
+    normalize_flashcard_fields,
+)
 from estudai.ui.utils import (
     NativeCheckboxDelegate,
     NativeCheckboxHeaderView,
@@ -28,6 +33,16 @@ from estudai.ui.utils import (
     format_card_count,
     set_muted_label_color,
 )
+
+
+@dataclass(frozen=True)
+class FlashcardTableRowState:
+    """Editable flashcard row state including selection and checked status."""
+
+    question: str
+    answer: str
+    checked: bool
+    selected: bool
 
 
 class ManagementPage(QWidget):
@@ -59,6 +74,15 @@ class ManagementPage(QWidget):
         layout.addWidget(self.folder_context_label)
 
         table_actions_layout = QHBoxLayout()
+        self.move_up_button = QPushButton("Move Up")
+        self.move_up_button.clicked.connect(self.move_selected_rows_up)
+        table_actions_layout.addWidget(self.move_up_button)
+        self.move_down_button = QPushButton("Move Down")
+        self.move_down_button.clicked.connect(self.move_selected_rows_down)
+        table_actions_layout.addWidget(self.move_down_button)
+        self.sort_flashcards_button = QPushButton("Sort by Question A-Z")
+        self.sort_flashcards_button.clicked.connect(self.sort_flashcards_by_question)
+        table_actions_layout.addWidget(self.sort_flashcards_button)
         table_actions_layout.addStretch()
         self.add_flashcard_button = QPushButton("+")
         self.add_flashcard_button.setFixedSize(34, 34)
@@ -86,6 +110,9 @@ class ManagementPage(QWidget):
         self.flashcards_table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.flashcards_table.customContextMenuRequested.connect(
             self.open_flashcards_table_menu
+        )
+        self.flashcards_table.itemSelectionChanged.connect(
+            self._update_row_action_buttons
         )
         self.select_all_header.toggle_requested.connect(self._toggle_header_selection)
         self.flashcards_table.itemChanged.connect(self.handle_table_item_changed)
@@ -148,6 +175,7 @@ class ManagementPage(QWidget):
             )
         self.flashcards_table.blockSignals(False)
         self._sync_select_all_header()
+        self._update_row_action_buttons()
 
     def _insert_row(
         self,
@@ -177,6 +205,7 @@ class ManagementPage(QWidget):
         self.flashcards_table.setCurrentCell(row_index, 1)
         self.flashcards_table.editItem(self.flashcards_table.item(row_index, 1))
         self._sync_select_all_header()
+        self._update_row_action_buttons()
 
     def open_flashcards_table_menu(self, position: QPoint) -> None:
         """Open right-click table menu for selected flashcard rows.
@@ -283,6 +312,103 @@ class ManagementPage(QWidget):
         for row_index in sorted(set(row_indexes), reverse=True):
             self.flashcards_table.removeRow(row_index)
         self._sync_select_all_header()
+        self._update_row_action_buttons()
+
+    def move_selected_rows_up(self) -> None:
+        """Move the current selected flashcard rows one step upward."""
+        rows = self._collect_table_row_states()
+        moved = False
+        for row_index in range(1, len(rows)):
+            if rows[row_index].selected and not rows[row_index - 1].selected:
+                rows[row_index - 1], rows[row_index] = (
+                    rows[row_index],
+                    rows[row_index - 1],
+                )
+                moved = True
+        if moved:
+            self._set_table_row_states(rows)
+
+    def move_selected_rows_down(self) -> None:
+        """Move the current selected flashcard rows one step downward."""
+        rows = self._collect_table_row_states()
+        moved = False
+        for row_index in range(len(rows) - 2, -1, -1):
+            if rows[row_index].selected and not rows[row_index + 1].selected:
+                rows[row_index], rows[row_index + 1] = (
+                    rows[row_index + 1],
+                    rows[row_index],
+                )
+                moved = True
+        if moved:
+            self._set_table_row_states(rows)
+
+    def sort_flashcards_by_question(self) -> None:
+        """Sort all flashcards alphabetically by normalized question text."""
+        rows = self._collect_table_row_states()
+        sorted_rows = sorted(
+            rows,
+            key=lambda row: flashcard_question_sort_key(row.question, row.answer),
+        )
+        if sorted_rows != rows:
+            self._set_table_row_states(sorted_rows)
+
+    def _collect_table_row_states(self) -> list[FlashcardTableRowState]:
+        """Return current table rows including checked and selected state."""
+        selected_rows = set(self.selected_table_rows())
+        rows: list[FlashcardTableRowState] = []
+        for row_index in range(self.flashcards_table.rowCount()):
+            question_item = self.flashcards_table.item(row_index, 1)
+            answer_item = self.flashcards_table.item(row_index, 2)
+            selection_item = self.flashcards_table.item(row_index, 0)
+            rows.append(
+                FlashcardTableRowState(
+                    question="" if question_item is None else question_item.text(),
+                    answer="" if answer_item is None else answer_item.text(),
+                    checked=(
+                        selection_item is not None
+                        and selection_item.checkState() == Qt.Checked
+                    ),
+                    selected=row_index in selected_rows,
+                )
+            )
+        return rows
+
+    def _set_table_row_states(self, rows: list[FlashcardTableRowState]) -> None:
+        """Replace the table content while preserving row selection state."""
+        self.flashcards_table.blockSignals(True)
+        self.flashcards_table.setRowCount(0)
+        for row_index, row in enumerate(rows):
+            self._insert_row(
+                row_index,
+                row.question,
+                row.answer,
+                checked=row.checked,
+            )
+        selection_model = self.flashcards_table.selectionModel()
+        if selection_model is not None:
+            selection_model.clearSelection()
+            model = self.flashcards_table.model()
+            for row_index, row in enumerate(rows):
+                if not row.selected:
+                    continue
+                selection_model.select(
+                    model.index(row_index, 0),
+                    QItemSelectionModel.Select | QItemSelectionModel.Rows,
+                )
+        self.flashcards_table.blockSignals(False)
+        self._sync_select_all_header()
+        self._update_row_action_buttons()
+
+    def _update_row_action_buttons(self) -> None:
+        """Enable reorder actions only when the current selection can move."""
+        row_count = self.flashcards_table.rowCount()
+        selected_rows = self.selected_table_rows()
+        has_selection = bool(selected_rows)
+        self.move_up_button.setEnabled(has_selection and min(selected_rows) > 0)
+        self.move_down_button.setEnabled(
+            has_selection and max(selected_rows) < row_count - 1
+        )
+        self.sort_flashcards_button.setEnabled(row_count > 1)
 
     def collect_flashcards_for_save(self) -> tuple[list[tuple[str, str]], set[int]]:
         """Collect and validate table content before save.
