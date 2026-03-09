@@ -2,7 +2,7 @@
 
 import os
 
-from PySide6.QtCore import QTime
+from PySide6.QtCore import QTime, Qt
 from PySide6.QtWidgets import QApplication
 
 from estudai.ui.pages.timer_page import TimerPage
@@ -188,10 +188,33 @@ def test_flashcard_phase_keeps_pause_and_stop_enabled() -> None:
     page.pause_timer()
     assert page.pause_button.text() == "Resume"
     assert pause_events == [True]
+    assert not page.flashcard_pause_actions_container.isHidden()
+    assert page.edit_flashcard_button.isEnabled()
+    assert page.delete_flashcard_button.isEnabled()
 
     page.pause_timer()
     assert page.pause_button.text() == "Pause"
     assert pause_events == [True, False]
+    assert page.flashcard_pause_actions_container.isHidden()
+
+
+def test_prepare_next_timer_cycle_paused_keeps_session_resume_available() -> None:
+    """Verify deleting a paused card can leave the overall session paused safely."""
+    _get_app()
+    page = TimerPage()
+
+    page.show_flashcard_question("Question?", display_duration_seconds=5)
+    page.pause_timer()
+    page.prepare_next_timer_cycle_paused()
+
+    assert page.timer_display.text() == "25:00"
+    assert page.is_running is False
+    assert not page.start_button.isEnabled()
+    assert page.pause_button.isEnabled()
+    assert page.pause_button.text() == "Resume"
+    assert page.stop_button.isEnabled()
+    assert page.flashcard_question_label.isHidden()
+    assert page.flashcard_answer_label.isHidden()
 
 
 def test_flashcard_score_buttons_stay_anchored_and_in_order() -> None:
@@ -203,6 +226,17 @@ def test_flashcard_score_buttons_stay_anchored_and_in_order() -> None:
     assert page.flashcard_actions_container.isHidden()
     assert actions_layout.itemAt(1).widget() is page.correct_button
     assert actions_layout.itemAt(2).widget() is page.wrong_button
+
+
+def test_paused_flashcard_actions_are_positioned_above_question() -> None:
+    """Verify paused edit/delete actions stay in the top-right flashcard header area."""
+    _get_app()
+    page = TimerPage()
+    flashcard_layout = page.content_stack.widget(1).layout()
+
+    assert flashcard_layout.itemAt(0).widget() is page.flashcard_pause_actions_container
+    assert flashcard_layout.itemAt(2).widget() is page.flashcard_question_label
+    assert flashcard_layout.itemAt(0).alignment() == (Qt.AlignTop | Qt.AlignRight)
 
 
 def test_flashcard_score_buttons_emit_actions() -> None:

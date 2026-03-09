@@ -37,6 +37,8 @@ class TimerPage(QWidget):
     flashcard_pause_toggled = Signal(bool)
     flashcard_marked_correct = Signal()
     flashcard_marked_wrong = Signal()
+    flashcard_edit_requested = Signal()
+    flashcard_delete_requested = Signal()
     stop_requested = Signal()
 
     def __init__(self, default_duration_seconds: int = 25 * 60):
@@ -85,30 +87,6 @@ class TimerPage(QWidget):
         flashcard_layout = QVBoxLayout(flashcard_view)
         flashcard_layout.setContentsMargins(0, 0, 0, 0)
         flashcard_layout.setSpacing(14)
-        flashcard_layout.addStretch(1)
-        self.flashcard_question_label = QLabel("")
-        self.flashcard_question_label.setAlignment(Qt.AlignCenter)
-        self.flashcard_question_label.setWordWrap(True)
-        self.flashcard_question_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        question_font = QFont(self.flashcard_question_label.font())
-        question_font.setPointSize(40)
-        question_font.setWeight(QFont.ExtraBold)
-        self.flashcard_question_label.setFont(question_font)
-        self.flashcard_question_label.setVisible(False)
-        flashcard_layout.addWidget(self.flashcard_question_label)
-
-        self.flashcard_answer_label = QLabel("")
-        self.flashcard_answer_label.setAlignment(Qt.AlignCenter)
-        self.flashcard_answer_label.setWordWrap(True)
-        self.flashcard_answer_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        answer_font = QFont(self.flashcard_answer_label.font())
-        answer_font.setPointSize(34)
-        answer_font.setWeight(QFont.DemiBold)
-        self.flashcard_answer_label.setFont(answer_font)
-        self.flashcard_answer_label.setVisible(False)
-        flashcard_layout.addWidget(self.flashcard_answer_label)
-        flashcard_layout.addStretch(1)
-
         self.flashcard_actions_container = QWidget()
         actions_size_policy = self.flashcard_actions_container.sizePolicy()
         actions_size_policy.setRetainSizeWhenHidden(True)
@@ -137,6 +115,62 @@ class TimerPage(QWidget):
         flashcard_actions_layout.addWidget(self.wrong_button)
         flashcard_actions_layout.addStretch(1)
         self.flashcard_actions_container.setVisible(False)
+
+        self.flashcard_pause_actions_container = QWidget()
+        pause_actions_size_policy = self.flashcard_pause_actions_container.sizePolicy()
+        pause_actions_size_policy.setRetainSizeWhenHidden(True)
+        self.flashcard_pause_actions_container.setSizePolicy(pause_actions_size_policy)
+        flashcard_pause_actions_layout = QHBoxLayout(
+            self.flashcard_pause_actions_container
+        )
+        flashcard_pause_actions_layout.setContentsMargins(0, 0, 0, 0)
+        flashcard_pause_actions_layout.setSpacing(10)
+        flashcard_pause_actions_layout.addStretch(1)
+        self.edit_flashcard_button = QPushButton("Edit")
+        self.edit_flashcard_button.setToolTip("Edit current flashcard")
+        self.edit_flashcard_button.clicked.connect(self.flashcard_edit_requested.emit)
+        self.edit_flashcard_button.setMinimumWidth(110)
+        self.edit_flashcard_button.setEnabled(False)
+        flashcard_pause_actions_layout.addWidget(self.edit_flashcard_button)
+        self.delete_flashcard_button = QPushButton("Delete")
+        self.delete_flashcard_button.setToolTip("Delete current flashcard")
+        self.delete_flashcard_button.clicked.connect(
+            self.flashcard_delete_requested.emit
+        )
+        self.delete_flashcard_button.setMinimumWidth(110)
+        self.delete_flashcard_button.setEnabled(False)
+        flashcard_pause_actions_layout.addWidget(self.delete_flashcard_button)
+        flashcard_pause_actions_layout.addStretch(1)
+        self.flashcard_pause_actions_container.setVisible(False)
+        flashcard_layout.addWidget(self.flashcard_pause_actions_container)
+
+        flashcard_layout.setAlignment(
+            self.flashcard_pause_actions_container,
+            Qt.AlignTop | Qt.AlignRight,
+        )
+        flashcard_layout.addStretch(1)
+        self.flashcard_question_label = QLabel("")
+        self.flashcard_question_label.setAlignment(Qt.AlignCenter)
+        self.flashcard_question_label.setWordWrap(True)
+        self.flashcard_question_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        question_font = QFont(self.flashcard_question_label.font())
+        question_font.setPointSize(40)
+        question_font.setWeight(QFont.ExtraBold)
+        self.flashcard_question_label.setFont(question_font)
+        self.flashcard_question_label.setVisible(False)
+        flashcard_layout.addWidget(self.flashcard_question_label)
+
+        self.flashcard_answer_label = QLabel("")
+        self.flashcard_answer_label.setAlignment(Qt.AlignCenter)
+        self.flashcard_answer_label.setWordWrap(True)
+        self.flashcard_answer_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        answer_font = QFont(self.flashcard_answer_label.font())
+        answer_font.setPointSize(34)
+        answer_font.setWeight(QFont.DemiBold)
+        self.flashcard_answer_label.setFont(answer_font)
+        self.flashcard_answer_label.setVisible(False)
+        flashcard_layout.addWidget(self.flashcard_answer_label)
+        flashcard_layout.addStretch(1)
         flashcard_layout.addWidget(self.flashcard_actions_container)
 
         self.content_stack.addWidget(flashcard_view)
@@ -329,6 +363,7 @@ class TimerPage(QWidget):
         if self._flashcard_controls_active:
             self._flashcard_paused = not self._flashcard_paused
             self.pause_button.setText("Resume" if self._flashcard_paused else "Pause")
+            self._update_flashcard_pause_actions()
             self.flashcard_pause_toggled.emit(self._flashcard_paused)
             return
         if self.pause_button.text() == "Resume" and self.stop_button.isEnabled():
@@ -363,6 +398,17 @@ class TimerPage(QWidget):
         self.time = self._default_time()
         self.timer_display.setText(self._idle_timer_display_text())
         self.start_timer()
+
+    def prepare_next_timer_cycle_paused(self) -> None:
+        """Reset the timer display while keeping the active session paused."""
+        self.clear_flashcard_display()
+        self.time = self._default_time()
+        self.timer_display.setText(self._idle_timer_display_text())
+        self.is_running = False
+        self.start_button.setEnabled(False)
+        self.pause_button.setText("Resume")
+        self.pause_button.setEnabled(True)
+        self.stop_button.setEnabled(True)
 
     def update_timer(self):
         """Update timer display."""
@@ -434,6 +480,13 @@ class TimerPage(QWidget):
         self.set_flashcard_scoring_actions_visible(False)
         self.set_flashcard_scoring_actions_enabled(False)
         self._stop_flashcard_progress()
+
+    def update_displayed_flashcard(self, question: str, answer: str) -> None:
+        """Refresh the currently shown flashcard text in place."""
+        if not self.flashcard_question_label.isHidden():
+            self.flashcard_question_label.setText(render_inline_latex_html(question))
+        if not self.flashcard_answer_label.isHidden():
+            self.flashcard_answer_label.setText(render_inline_latex_html(answer))
 
     def set_flashcard_context(self, folder_name: str, card_count: int) -> None:
         """Update selected folder summary shown on the timer page.
@@ -531,9 +584,11 @@ class TimerPage(QWidget):
             self.stop_button.setEnabled(True)
             if not self._flashcard_paused:
                 self.pause_button.setText("Pause")
+            self._update_flashcard_pause_actions()
             return
         self._flashcard_paused = False
         self.pause_button.setText("Pause")
+        self._update_flashcard_pause_actions()
         if was_paused:
             self.flashcard_pause_toggled.emit(False)
 
@@ -545,6 +600,13 @@ class TimerPage(QWidget):
     def set_flashcard_scoring_actions_visible(self, visible: bool) -> None:
         """Show or hide score actions while preserving their layout footprint."""
         self.flashcard_actions_container.setVisible(visible)
+
+    def _update_flashcard_pause_actions(self) -> None:
+        """Refresh paused-session actions for the current flashcard visibility state."""
+        visible = self._flashcard_controls_active and self._flashcard_paused
+        self.flashcard_pause_actions_container.setVisible(visible)
+        self.edit_flashcard_button.setEnabled(visible)
+        self.delete_flashcard_button.setEnabled(visible)
 
     def is_flashcard_progress_active(self) -> bool:
         """Return whether the flashcard progress bar is visually active."""

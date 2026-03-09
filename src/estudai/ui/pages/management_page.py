@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from estudai.services.csv_flashcards import Flashcard
+from estudai.services.csv_flashcards import Flashcard, normalize_flashcard_fields
 from estudai.ui.utils import (
     NativeCheckboxDelegate,
     NativeCheckboxHeaderView,
@@ -299,12 +299,17 @@ class ManagementPage(QWidget):
             question_item = self.flashcards_table.item(row_index, 1)
             answer_item = self.flashcards_table.item(row_index, 2)
             selection_item = self.flashcards_table.item(row_index, 0)
-            question = "" if question_item is None else question_item.text().strip()
-            answer = "" if answer_item is None else answer_item.text().strip()
-            if not question or not answer:
-                msg = f"Row {row_index + 1}: Question and Answer cannot be empty."
+            question = "" if question_item is None else question_item.text()
+            answer = "" if answer_item is None else answer_item.text()
+            try:
+                normalized_question, normalized_answer = normalize_flashcard_fields(
+                    question,
+                    answer,
+                )
+            except ValueError as error:
+                msg = f"Row {row_index + 1}: {error}"
                 raise ValueError(msg)
-            rows.append((question, answer))
+            rows.append((normalized_question, normalized_answer))
             if selection_item is not None and selection_item.checkState() == Qt.Checked:
                 selected_indexes.add(row_index)
         return rows, selected_indexes

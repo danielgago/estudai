@@ -107,6 +107,14 @@ def _validate_flashcard_field(value: str, field_name: str) -> str:
     return normalized_value
 
 
+def normalize_flashcard_fields(question: str, answer: str) -> tuple[str, str]:
+    """Validate and normalize one flashcard question/answer pair."""
+    return (
+        _validate_flashcard_field(question, "Question"),
+        _validate_flashcard_field(answer, "Answer"),
+    )
+
+
 def _write_flashcards_to_csv(
     csv_path: Path,
     flashcard_rows: list[tuple[str, str]],
@@ -162,8 +170,10 @@ def add_flashcard_to_folder(
     Returns:
         list[Flashcard]: Updated flashcards.
     """
-    normalized_question = _validate_flashcard_field(question, "Question")
-    normalized_answer = _validate_flashcard_field(answer, "Answer")
+    normalized_question, normalized_answer = normalize_flashcard_fields(
+        question,
+        answer,
+    )
     flashcards = _load_or_bootstrap_managed_flashcards(folder_path)
     flashcard_rows = _flashcards_to_rows(flashcards)
     flashcard_rows.append((normalized_question, normalized_answer))
@@ -192,8 +202,10 @@ def update_flashcard_in_folder(
     Raises:
         IndexError: If index is out of bounds.
     """
-    normalized_question = _validate_flashcard_field(question, "Question")
-    normalized_answer = _validate_flashcard_field(answer, "Answer")
+    normalized_question, normalized_answer = normalize_flashcard_fields(
+        question,
+        answer,
+    )
     flashcards = _load_or_bootstrap_managed_flashcards(folder_path)
     if flashcard_index < 0 or flashcard_index >= len(flashcards):
         msg = f"Flashcard index out of range: {flashcard_index}"
@@ -255,10 +267,7 @@ def replace_flashcards_in_folder(
         list[Flashcard]: Updated flashcards from managed CSV.
     """
     normalized_rows = [
-        (
-            _validate_flashcard_field(question, "Question"),
-            _validate_flashcard_field(answer, "Answer"),
-        )
+        normalize_flashcard_fields(question, answer)
         for question, answer in flashcard_rows
     ]
     managed_csv = get_managed_csv_path(folder_path)

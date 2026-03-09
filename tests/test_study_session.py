@@ -167,3 +167,66 @@ def test_random_order_builds_predictable_initial_queue_and_keeps_wrong_card_acti
 
     assert session.queued_flashcard_indexes() == [1, 2, 0]
     assert session.next_flashcard().question == "Q1?"
+
+
+def test_replace_current_flashcard_updates_future_retries() -> None:
+    """Verify editing the active flashcard updates the session payload in place."""
+    session = _start_session(1)
+    original = session.next_flashcard()
+    assert original is not None
+
+    updated = Flashcard(
+        question="Updated question?",
+        answer="Updated answer.",
+        source_file=Path("_estudai_flashcards.csv"),
+        source_line=1,
+    )
+
+    assert session.replace_current_flashcard(updated) is True
+    assert session.current_flashcard() == updated
+
+    assert session.apply_current_score("wrong") is True
+    retried = session.next_flashcard()
+
+    assert retried == updated
+
+
+def test_remove_current_flashcard_reindexes_remaining_queue() -> None:
+    """Verify deleting the active flashcard removes it without orphaning queue state."""
+    session = _start_session(3)
+
+    assert session.next_flashcard().question == "Q0?"
+    assert session.remove_current_flashcard() is True
+    assert session.current_flashcard() is None
+    assert session.queued_flashcard_indexes() == [0, 1]
+
+    next_flashcard = session.next_flashcard()
+    assert next_flashcard is not None
+    assert next_flashcard.question == "Q1?"
+
+
+def test_replace_flashcards_updates_matching_session_cards() -> None:
+    """Verify session metadata can be refreshed after one folder is persisted."""
+    session = _start_session(3)
+
+    replacements = {
+        session.flashcards[1]: Flashcard(
+            question="Q1?",
+            answer="A1.",
+            source_file=Path("_estudai_flashcards.csv"),
+            source_line=1,
+        ),
+        session.flashcards[2]: Flashcard(
+            question="Q2?",
+            answer="A2.",
+            source_file=Path("_estudai_flashcards.csv"),
+            source_line=2,
+        ),
+    }
+
+    session.replace_flashcards(replacements)
+
+    assert session.flashcards[0].source_file == Path("cards.csv")
+    assert session.flashcards[1].source_file == Path("_estudai_flashcards.csv")
+    assert session.flashcards[1].source_line == 1
+    assert session.flashcards[2].source_line == 2
