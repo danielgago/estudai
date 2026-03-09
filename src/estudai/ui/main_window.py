@@ -1,6 +1,7 @@
 """Main application window."""
 
 import random
+from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import (
@@ -45,8 +46,10 @@ except ImportError:  # pragma: no cover - depends on system multimedia libraries
 
 from estudai.services.csv_flashcards import (
     Flashcard,
+    delete_flashcards_from_folder,
     load_flashcards_from_folder,
     replace_flashcards_in_folder,
+    update_flashcard_in_folder,
 )
 from estudai.services.folder_storage import (
     create_managed_folder,
@@ -65,7 +68,7 @@ from estudai.ui.utils import (
     left_aligned_checkbox_rect,
 )
 
-from .dialog.notebooklm_import_dialog import NotebookLMCsvImportDialog
+from .dialog import FlashcardEditDialog, NotebookLMCsvImportDialog
 from .flashcard_sequence import FlashcardSequenceController
 from .folder_context import (
     CheckedFolderData,
@@ -103,6 +106,17 @@ class SidebarCheckboxDelegate(NativeCheckboxDelegate):
         )
 
 
+@dataclass(frozen=True)
+class CurrentFlashcardLocation:
+    """Location metadata for the active flashcard across UI and storage."""
+
+    session_flashcard_index: int
+    folder_id: str
+    folder_flashcard_index: int
+    folder_path: Path
+    flashcard: Flashcard
+
+
 class MainWindow(QMainWindow):
     """Main application window with page navigation."""
 
@@ -121,6 +135,7 @@ class MainWindow(QMainWindow):
         self._editing_folder_id: str | None = None
         self._study_session = StudySessionController()
         self._pending_flashcard_score: str | None = None
+        self._visible_flashcard: Flashcard | None = None
         self._flashcard_sound_output: object | None = None
         self._flashcard_sound_player: object | None = None
         flashcard_phase_timer = QTimer(self)
@@ -162,6 +177,12 @@ class MainWindow(QMainWindow):
         )
         self.timer_page.flashcard_marked_wrong.connect(
             self.handle_flashcard_marked_wrong
+        )
+        self.timer_page.flashcard_edit_requested.connect(
+            self.handle_flashcard_edit_requested
+        )
+        self.timer_page.flashcard_delete_requested.connect(
+            self.handle_flashcard_delete_requested
         )
         self.timer_page.stop_requested.connect(self.handle_timer_stop_requested)
         self.show_flashcard_requested.connect(self.show_flashcard_popup)
@@ -524,12 +545,100 @@ class MainWindow(QMainWindow):
         self._reset_flashcard_sequence_order()
         self._study_session.reset()
         self._pending_flashcard_score = None
+        self._visible_flashcard = None
         self.timer_page.clear_session_progress()
 
     def _complete_study_session(self) -> None:
         """Stop the timer UI after the active session is fully completed."""
         self._reset_study_session_state()
         self.timer_page.stop_timer()
+
+    def _resolve_current_flashcard_location(self) -> CurrentFlashcardLocation | None:
+        """Return folder/storage metadata for the flashcard active in the session."""
+        current_flashcard = self._study_session.current_flashcard()
+        session_flashcard_index = self._study_session.current_flashcard_index
+        if current_flashcard is None or session_flashcard_index is None:
+            return None
+
+        for folder_id, folder_flashcards in self.flashcards_by_folder.items():
+            try:
+                folder_flashcard_index = folder_flashcards.index(current_flashcard)
+            except ValueError:
+                continue
+            folder_path = self.persisted_folder_paths.get(folder_id)
+            if folder_path is None:
+                continue
+            return CurrentFlashcardLocation(
+                session_flashcard_index=session_flashcard_index,
+                folder_id=folder_id,
+                folder_flashcard_index=folder_flashcard_index,
+                folder_path=folder_path,
+                flashcard=current_flashcard,
+            )
+        return None
+
+    def _selected_indexes_after_deletion(
+        self,
+        folder_id: str,
+        deleted_flashcard_index: int,
+    ) -> set[int]:
+        """Return selected indexes after removing one flashcard from a folder."""
+        existing_indexes = self.selected_flashcard_indexes_by_folder.get(
+            folder_id, set()
+        )
+        return {
+            (
+                flashcard_index - 1
+                if flashcard_index > deleted_flashcard_index
+                else flashcard_index
+            )
+            for flashcard_index in existing_indexes
+            if flashcard_index != deleted_flashcard_index
+        }
+
+    def _refresh_flashcard_data_after_mutation(
+        self,
+        folder_id: str,
+        *,
+        selected_indexes: set[int] | None = None,
+    ) -> None:
+        """Reload persisted flashcard data after one folder mutation."""
+        checked_ids = self._get_checked_folder_ids()
+        if selected_indexes is not None:
+            self.selected_flashcard_indexes_by_folder[folder_id] = selected_indexes
+            if selected_indexes:
+                checked_ids.add(folder_id)
+            else:
+                checked_ids.discard(folder_id)
+        self.handle_management_data_changed(preferred_checked_ids=checked_ids)
+
+    def _sync_session_flashcards_for_folder(
+        self,
+        previous_folder_flashcards: list[Flashcard],
+        updated_folder_flashcards: list[Flashcard],
+        *,
+        removed_flashcard_index: int | None = None,
+    ) -> None:
+        """Refresh remaining in-session cards for one mutated folder."""
+        replacements: dict[Flashcard, Flashcard] = {}
+        for flashcard_index, previous_flashcard in enumerate(
+            previous_folder_flashcards
+        ):
+            if (
+                removed_flashcard_index is not None
+                and flashcard_index == removed_flashcard_index
+            ):
+                continue
+            updated_index = flashcard_index
+            if (
+                removed_flashcard_index is not None
+                and flashcard_index > removed_flashcard_index
+            ):
+                updated_index -= 1
+            if not (0 <= updated_index < len(updated_folder_flashcards)):
+                continue
+            replacements[previous_flashcard] = updated_folder_flashcards[updated_index]
+        self._study_session.replace_flashcards(replacements)
 
     def _play_flashcard_notification_sound(self) -> None:
         """Play notification sound configured in settings when available."""
@@ -546,6 +655,23 @@ class MainWindow(QMainWindow):
             return
         self._flashcard_sound_player.setSource(QUrl.fromLocalFile(str(sound_path)))
         self._flashcard_sound_player.play()
+
+    def _show_current_flashcard_answer(
+        self,
+        sequence_id: int,
+        answer_display_duration_seconds: int,
+    ) -> None:
+        """Show the current session flashcard answer using live session data."""
+        current_flashcard = self._study_session.current_flashcard()
+        if current_flashcard is None:
+            current_flashcard = self._visible_flashcard
+        if current_flashcard is None:
+            return
+        self._show_flashcard_answer(
+            sequence_id,
+            current_flashcard.answer,
+            answer_display_duration_seconds,
+        )
 
     def _show_flashcard_answer(
         self,
@@ -593,6 +719,7 @@ class MainWindow(QMainWindow):
         self._cancel_flashcard_phase_timer()
         self._flashcard_sequence.sequence_paused = False
         self._pending_flashcard_score = None
+        self._visible_flashcard = flashcard
         sequence_id = self._flashcard_sequence.begin_sequence()
         self.switch_to_timer()
         self.set_navigation_visible(False)
@@ -603,9 +730,8 @@ class MainWindow(QMainWindow):
         self._play_flashcard_notification_sound()
         self._start_flashcard_phase_timer(
             app_settings.question_display_duration_seconds * 1000,
-            lambda: self._show_flashcard_answer(
+            lambda: self._show_current_flashcard_answer(
                 sequence_id,
-                flashcard.answer,
                 app_settings.answer_display_duration_seconds,
             ),
         )
@@ -615,6 +741,7 @@ class MainWindow(QMainWindow):
         self._cancel_flashcard_phase_timer()
         self._flashcard_sequence.sequence_paused = False
         self._pending_flashcard_score = None
+        self._visible_flashcard = None
         self._update_study_session_progress()
         if self._study_session.is_complete():
             self._complete_study_session()
@@ -633,6 +760,127 @@ class MainWindow(QMainWindow):
         if self._study_session.current_flashcard() is None:
             return
         self._pending_flashcard_score = self.timer_page.selected_flashcard_score()
+
+    def handle_flashcard_edit_requested(self) -> None:
+        """Edit the paused flashcard and update the active session immediately."""
+        location = self._resolve_current_flashcard_location()
+        if location is None:
+            QMessageBox.warning(
+                self,
+                "Edit flashcard",
+                "The current flashcard is unavailable. Refresh and try again.",
+            )
+            return
+
+        dialog = FlashcardEditDialog(
+            location.flashcard.question,
+            location.flashcard.answer,
+            self,
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        previous_folder_flashcards = list(
+            self.flashcards_by_folder.get(location.folder_id, [])
+        )
+        try:
+            updated_flashcards = update_flashcard_in_folder(
+                location.folder_path,
+                location.folder_flashcard_index,
+                dialog.question_text(),
+                dialog.answer_text(),
+            )
+        except (IndexError, ValueError) as error:
+            QMessageBox.warning(self, "Edit flashcard", str(error))
+            self._refresh_flashcard_data_after_mutation(location.folder_id)
+            return
+
+        updated_flashcard = updated_flashcards[location.folder_flashcard_index]
+        if not self._study_session.replace_current_flashcard(updated_flashcard):
+            QMessageBox.warning(
+                self,
+                "Edit flashcard",
+                "The current study session is no longer active.",
+            )
+            return
+        self._sync_session_flashcards_for_folder(
+            previous_folder_flashcards,
+            updated_flashcards,
+        )
+        self._refresh_flashcard_data_after_mutation(location.folder_id)
+        self._visible_flashcard = updated_flashcard
+        self.timer_page.update_displayed_flashcard(
+            updated_flashcard.question,
+            updated_flashcard.answer,
+        )
+
+    def handle_flashcard_delete_requested(self) -> None:
+        """Delete the paused flashcard and remove it from the active session."""
+        location = self._resolve_current_flashcard_location()
+        if location is None:
+            QMessageBox.warning(
+                self,
+                "Delete flashcard",
+                "The current flashcard is unavailable. Refresh and try again.",
+            )
+            return
+
+        confirmation = QMessageBox.question(
+            self,
+            "Delete flashcard",
+            "Delete the current flashcard?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirmation != QMessageBox.Yes:
+            return
+
+        previous_folder_flashcards = list(
+            self.flashcards_by_folder.get(location.folder_id, [])
+        )
+        try:
+            updated_flashcards = delete_flashcards_from_folder(
+                location.folder_path,
+                [location.folder_flashcard_index],
+            )
+        except IndexError as error:
+            QMessageBox.warning(self, "Delete flashcard", str(error))
+            self._refresh_flashcard_data_after_mutation(location.folder_id)
+            return
+
+        selected_indexes = self._selected_indexes_after_deletion(
+            location.folder_id,
+            location.folder_flashcard_index,
+        )
+        self._cancel_flashcard_phase_timer()
+        self._flashcard_sequence.sequence_paused = False
+        self._pending_flashcard_score = None
+        self._visible_flashcard = None
+        if not self._study_session.remove_current_flashcard():
+            QMessageBox.warning(
+                self,
+                "Delete flashcard",
+                "The current study session is no longer active.",
+            )
+            self._refresh_flashcard_data_after_mutation(
+                location.folder_id,
+                selected_indexes=selected_indexes,
+            )
+            return
+        self._sync_session_flashcards_for_folder(
+            previous_folder_flashcards,
+            updated_flashcards,
+            removed_flashcard_index=location.folder_flashcard_index,
+        )
+        self._refresh_flashcard_data_after_mutation(
+            location.folder_id,
+            selected_indexes=selected_indexes,
+        )
+        self._update_study_session_progress()
+        if self._study_session.progress().remaining_count <= 0:
+            self._complete_study_session()
+            return
+        self.timer_page.prepare_next_timer_cycle_paused()
 
     def toggle_sidebar(self) -> None:
         """Show or hide the left sidebar."""

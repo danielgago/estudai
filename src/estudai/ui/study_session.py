@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
-
 from estudai.services.csv_flashcards import Flashcard
 from estudai.services.settings import (
     WrongAnswerCompletionMode,
@@ -122,6 +121,46 @@ class StudySessionController:
         if self.current_flashcard_index is None:
             return None
         return self.flashcards[self.current_flashcard_index]
+
+    def replace_current_flashcard(self, flashcard: Flashcard) -> bool:
+        """Replace the active flashcard payload without changing queue state."""
+        if self.current_flashcard_index is None:
+            return False
+        if not (0 <= self.current_flashcard_index < len(self.flashcards)):
+            self.current_flashcard_index = None
+            return False
+        self.flashcards[self.current_flashcard_index] = flashcard
+        return True
+
+    def remove_current_flashcard(self) -> bool:
+        """Remove the active flashcard and normalize all queued indexes."""
+        if self.current_flashcard_index is None:
+            return False
+
+        flashcard_index = self.current_flashcard_index
+        if not (0 <= flashcard_index < len(self.flashcards)):
+            self.current_flashcard_index = None
+            return False
+
+        self.flashcards.pop(flashcard_index)
+        self.card_states.pop(flashcard_index)
+        self.card_counters.pop(flashcard_index)
+        self._upcoming_indexes = [
+            queued_index - 1 if queued_index > flashcard_index else queued_index
+            for queued_index in self._upcoming_indexes
+            if queued_index != flashcard_index
+        ]
+        self.current_flashcard_index = None
+        self.active = bool(self.flashcards)
+        return True
+
+    def replace_flashcards(self, replacements: dict[Flashcard, Flashcard]) -> None:
+        """Replace one or many session flashcards while preserving runtime state."""
+        if not replacements:
+            return
+        self.flashcards = [
+            replacements.get(flashcard, flashcard) for flashcard in self.flashcards
+        ]
 
     def active_flashcard_indexes(self) -> list[int]:
         """Return indexes still in play for the current session."""
