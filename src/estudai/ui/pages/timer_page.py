@@ -9,7 +9,7 @@ from PySide6.QtCore import (
     QTimer,
     Signal,
 )
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QColor, QFont, QPalette
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from estudai.ui.utils import (
+    blend_colors,
     format_card_count,
     render_inline_latex_html,
     set_muted_label_color,
@@ -46,7 +47,11 @@ class TimerPage(QWidget):
         self._flashcard_controls_active = False
         self._flashcard_paused = False
         self._flashcard_phase_animation: QPropertyAnimation | None = None
+        self._flashcard_progress_active = False
         self._selected_flashcard_score: str | None = None
+        self._folder_name: str = "No folders selected"
+        self._card_count: int = 0
+        self._session_progress_text: str = ""
         self.init_ui()
 
     def init_ui(self):
@@ -103,28 +108,49 @@ class TimerPage(QWidget):
         self.flashcard_answer_label.setVisible(False)
         flashcard_layout.addWidget(self.flashcard_answer_label)
         flashcard_layout.addStretch(1)
+
+        self.flashcard_actions_container = QWidget()
+        actions_size_policy = self.flashcard_actions_container.sizePolicy()
+        actions_size_policy.setRetainSizeWhenHidden(True)
+        self.flashcard_actions_container.setSizePolicy(actions_size_policy)
+        flashcard_actions_layout = QHBoxLayout(self.flashcard_actions_container)
+        flashcard_actions_layout.setContentsMargins(0, 0, 0, 0)
+        flashcard_actions_layout.setSpacing(14)
+        flashcard_actions_layout.addStretch(1)
+        self.correct_button = QPushButton("✓")
+        self.correct_button.setToolTip("Mark correct")
+        self.correct_button.setProperty("scoreAction", "correct")
+        self.correct_button.setCheckable(True)
+        self.correct_button.clicked.connect(self._handle_correct_button_clicked)
+        self.correct_button.setMinimumWidth(84)
+        self.correct_button.setFixedHeight(44)
+        self.correct_button.setEnabled(False)
+        self.wrong_button = QPushButton("✕")
+        self.wrong_button.setToolTip("Mark wrong")
+        self.wrong_button.setProperty("scoreAction", "wrong")
+        self.wrong_button.setCheckable(True)
+        self.wrong_button.clicked.connect(self._handle_wrong_button_clicked)
+        self.wrong_button.setMinimumWidth(84)
+        self.wrong_button.setFixedHeight(44)
+        self.wrong_button.setEnabled(False)
+        flashcard_actions_layout.addWidget(self.correct_button)
+        flashcard_actions_layout.addWidget(self.wrong_button)
+        flashcard_actions_layout.addStretch(1)
+        self.flashcard_actions_container.setVisible(False)
+        flashcard_layout.addWidget(self.flashcard_actions_container)
+
         self.content_stack.addWidget(flashcard_view)
         layout.addWidget(self.content_stack)
 
-        self.folder_context_label = QLabel("Folder: No folders selected (0 cards)")
+        self.folder_context_label = QLabel(
+            f"Folder: {self._folder_name} ({format_card_count(self._card_count)})"
+        )
         self.folder_context_label.setAlignment(Qt.AlignCenter)
         folder_context_font = QFont(self.folder_context_label.font())
         folder_context_font.setPointSize(14)
         self.folder_context_label.setFont(folder_context_font)
         set_muted_label_color(self.folder_context_label)
         layout.addWidget(self.folder_context_label)
-
-        self.session_progress_label = QLabel("")
-        self.session_progress_label.setAlignment(Qt.AlignCenter)
-        progress_font = QFont(self.session_progress_label.font())
-        progress_font.setPointSize(12)
-        progress_font.setWeight(QFont.DemiBold)
-        self.session_progress_label.setFont(progress_font)
-        set_muted_label_color(self.session_progress_label)
-        self.session_progress_label.setMinimumHeight(
-            self.session_progress_label.sizeHint().height()
-        )
-        layout.addWidget(self.session_progress_label)
 
         controls_layout = QHBoxLayout()
         controls_layout.setSpacing(10)
@@ -152,34 +178,12 @@ class TimerPage(QWidget):
         controls_layout.addStretch(1)
         layout.addLayout(controls_layout)
 
-        flashcard_actions_layout = QHBoxLayout()
-        flashcard_actions_layout.setSpacing(10)
-        flashcard_actions_layout.addStretch(1)
-
-        self.wrong_button = QPushButton("Wrong")
-        self.wrong_button.setProperty("scoreAction", True)
-        self.wrong_button.setCheckable(True)
-        self.wrong_button.clicked.connect(self._handle_wrong_button_clicked)
-        self.wrong_button.setMinimumWidth(110)
-        self.wrong_button.setEnabled(False)
-        self.correct_button = QPushButton("Correct")
-        self.correct_button.setProperty("scoreAction", True)
-        self.correct_button.setCheckable(True)
-        self.correct_button.clicked.connect(self._handle_correct_button_clicked)
-        self.correct_button.setMinimumWidth(110)
-        self.correct_button.setEnabled(False)
-        flashcard_actions_layout.addWidget(self.correct_button)
-        flashcard_actions_layout.addWidget(self.wrong_button)
-
-        flashcard_actions_layout.addStretch(1)
-        layout.addLayout(flashcard_actions_layout)
-
         self.flashcard_progress_bar = QProgressBar()
         self.flashcard_progress_bar.setRange(0, 1000)
         self.flashcard_progress_bar.setValue(0)
         self.flashcard_progress_bar.setTextVisible(False)
         self.flashcard_progress_bar.setFixedHeight(6)
-        self.flashcard_progress_bar.setVisible(False)
+        self.flashcard_progress_bar.setProperty("flashcardProgressActive", False)
         layout.addWidget(self.flashcard_progress_bar)
 
         self._apply_palette_styles()
@@ -191,28 +195,96 @@ class TimerPage(QWidget):
         """Refresh palette-driven colors when theme/palette changes."""
         if event.type() in (QEvent.PaletteChange, QEvent.ApplicationPaletteChange):
             set_muted_label_color(self.folder_context_label)
-            set_muted_label_color(self.session_progress_label)
             self._apply_palette_styles()
         super().changeEvent(event)
 
     def _apply_palette_styles(self) -> None:
         """Apply palette-aware styles for non-native progress visuals."""
-        self.setStyleSheet(
+        palette = self.palette()
+        active_track = blend_colors(
+            palette.color(QPalette.Window),
+            palette.color(QPalette.AlternateBase),
+            overlay_ratio=0.65,
+        ).name(QColor.HexRgb)
+        active_fill = palette.color(QPalette.Highlight).name(QColor.HexRgb)
+        self.flashcard_progress_bar.setStyleSheet(
             "QProgressBar {"
             " border: none;"
             " border-radius: 3px;"
-            " background: palette(alternate-base);"
+            " background: transparent;"
             "}"
             "QProgressBar::chunk {"
             " border-radius: 3px;"
-            " background: palette(highlight);"
+            " background: transparent;"
             "}"
-            "QPushButton[scoreAction='true']:checked {"
-            " background: palette(highlight);"
-            " color: palette(highlighted-text);"
-            " border: 1px solid palette(highlight);"
+            "QProgressBar[flashcardProgressActive='true'] {"
+            f" background: {active_track};"
+            "}"
+            "QProgressBar[flashcardProgressActive='true']::chunk {"
+            f" background: {active_fill};"
             "}"
         )
+        self._apply_score_button_styles()
+
+    def _apply_score_button_styles(self) -> None:
+        """Apply palette-aware styling for the correct and wrong buttons."""
+        palette = self.palette()
+        button_color = palette.color(QPalette.Button)
+        text_color = palette.color(QPalette.ButtonText)
+        window_color = palette.color(QPalette.Window)
+        disabled_text_color = palette.color(QPalette.Disabled, QPalette.ButtonText)
+        score_colors = (
+            (self.correct_button, QColor(76, 175, 80)),
+            (self.wrong_button, QColor(229, 83, 75)),
+        )
+        for button, accent_color in score_colors:
+            fill_color = blend_colors(button_color, accent_color, overlay_ratio=0.22)
+            hover_color = blend_colors(button_color, accent_color, overlay_ratio=0.34)
+            checked_fill_color = blend_colors(
+                button_color,
+                accent_color,
+                overlay_ratio=0.72,
+            )
+            border_color = blend_colors(button_color, accent_color, overlay_ratio=0.62)
+            checked_border_color = blend_colors(
+                checked_fill_color,
+                accent_color,
+                overlay_ratio=0.55,
+            )
+            text_tint = blend_colors(text_color, accent_color, overlay_ratio=0.48)
+            checked_text_color = QColor("black")
+            if checked_fill_color.lightness() < 150:
+                checked_text_color = QColor("white")
+            disabled_fill_color = blend_colors(button_color, window_color, overlay_ratio=0.55)
+            disabled_border_color = blend_colors(
+                disabled_fill_color,
+                window_color,
+                overlay_ratio=0.4,
+            )
+            button.setStyleSheet(
+                "QPushButton {"
+                f" background-color: {fill_color.name(QColor.HexRgb)};"
+                f" color: {text_tint.name(QColor.HexRgb)};"
+                f" border: 1px solid {border_color.name(QColor.HexRgb)};"
+                " border-radius: 14px;"
+                " padding: 6px 18px;"
+                " font-size: 20px;"
+                " font-weight: 700;"
+                "}"
+                "QPushButton:hover:!disabled {"
+                f" background-color: {hover_color.name(QColor.HexRgb)};"
+                "}"
+                "QPushButton:pressed:!disabled, QPushButton:checked {"
+                f" background-color: {checked_fill_color.name(QColor.HexRgb)};"
+                f" color: {checked_text_color.name(QColor.HexRgb)};"
+                f" border: 2px solid {checked_border_color.name(QColor.HexRgb)};"
+                "}"
+                "QPushButton:disabled {"
+                f" background-color: {disabled_fill_color.name(QColor.HexRgb)};"
+                f" color: {disabled_text_color.name(QColor.HexRgb)};"
+                f" border: 1px solid {disabled_border_color.name(QColor.HexRgb)};"
+                "}"
+            )
 
     def start_timer(self):
         """Start the timer."""
@@ -306,6 +378,7 @@ class TimerPage(QWidget):
             True,
             pause_enabled=display_duration_seconds > 0,
         )
+        self.set_flashcard_scoring_actions_visible(True)
         self.set_flashcard_scoring_actions_enabled(True)
         self.flashcard_answer_label.setText(render_inline_latex_html(answer))
         self.flashcard_answer_label.setVisible(True)
@@ -326,6 +399,7 @@ class TimerPage(QWidget):
             True,
             pause_enabled=display_duration_seconds > 0,
         )
+        self.set_flashcard_scoring_actions_visible(False)
         self.set_flashcard_scoring_actions_enabled(False)
         self.flashcard_question_label.setVisible(True)
         self.flashcard_question_label.setText(render_inline_latex_html(question))
@@ -342,6 +416,7 @@ class TimerPage(QWidget):
         self.content_stack.setCurrentIndex(0)
         self.set_flashcard_controls_active(False)
         self.clear_flashcard_score_selection()
+        self.set_flashcard_scoring_actions_visible(False)
         self.set_flashcard_scoring_actions_enabled(False)
         self._stop_flashcard_progress()
 
@@ -352,9 +427,9 @@ class TimerPage(QWidget):
             folder_name: Selected folder display name.
             card_count: Number of loaded flashcards in scope.
         """
-        self.folder_context_label.setText(
-            f"Folder: {folder_name} ({format_card_count(card_count)})"
-        )
+        self._folder_name = folder_name
+        self._card_count = card_count
+        self._recompose_folder_label()
 
     def set_timer_duration_seconds(self, duration_seconds: int) -> None:
         """Set the default timer duration used by reset and idle display.
@@ -377,18 +452,29 @@ class TimerPage(QWidget):
     ) -> None:
         """Update scored-session progress summary."""
         if total_count <= 0:
-            self.session_progress_label.clear()
-            return
-        self.session_progress_label.setText(
-            "Session: "
-            f"{completed_count}/{total_count} completed | "
-            f"{remaining_count} remaining | "
-            f"{wrong_pending_count} pending review"
-        )
+            self._session_progress_text = ""
+        else:
+            self._session_progress_text = (
+                "Session: "
+                f"{completed_count}/{total_count} completed | "
+                f"{remaining_count} remaining | "
+                f"{wrong_pending_count} pending review"
+            )
+        self._recompose_folder_label()
 
     def clear_session_progress(self) -> None:
         """Hide session progress outside an active study session."""
-        self.session_progress_label.clear()
+        self._session_progress_text = ""
+        self._recompose_folder_label()
+
+    def _recompose_folder_label(self) -> None:
+        """Rebuild folder context label from stored folder and session state."""
+        if self._session_progress_text:
+            self.folder_context_label.setText(self._session_progress_text)
+        else:
+            self.folder_context_label.setText(
+                f"Folder: {self._folder_name} ({format_card_count(self._card_count)})"
+            )
 
     def set_flashcard_controls_active(
         self,
@@ -422,6 +508,14 @@ class TimerPage(QWidget):
         """Enable or disable scored-session actions without moving the layout."""
         self.correct_button.setEnabled(enabled)
         self.wrong_button.setEnabled(enabled)
+
+    def set_flashcard_scoring_actions_visible(self, visible: bool) -> None:
+        """Show or hide score actions while preserving their layout footprint."""
+        self.flashcard_actions_container.setVisible(visible)
+
+    def is_flashcard_progress_active(self) -> bool:
+        """Return whether the flashcard progress bar is visually active."""
+        return self._flashcard_progress_active
 
     def selected_flashcard_score(self) -> str | None:
         """Return the currently selected score action, if any."""
@@ -460,8 +554,8 @@ class TimerPage(QWidget):
         self._stop_flashcard_progress()
         if duration_seconds <= 0:
             return
+        self._set_flashcard_progress_active(True)
         self.flashcard_progress_bar.setValue(0)
-        self.flashcard_progress_bar.setVisible(True)
         self._animate_flashcard_progress(0, duration_seconds * 1000)
 
     def pause_flashcard_progress(self) -> None:
@@ -475,7 +569,7 @@ class TimerPage(QWidget):
         Args:
             remaining_milliseconds: Remaining phase duration.
         """
-        if not self.flashcard_progress_bar.isVisible() or remaining_milliseconds <= 0:
+        if not self._flashcard_progress_active or remaining_milliseconds <= 0:
             return
         self._animate_flashcard_progress(
             self.flashcard_progress_bar.value(), remaining_milliseconds
@@ -510,4 +604,12 @@ class TimerPage(QWidget):
             self._flashcard_phase_animation.deleteLater()
             self._flashcard_phase_animation = None
         self.flashcard_progress_bar.setValue(0)
-        self.flashcard_progress_bar.setVisible(False)
+        self._set_flashcard_progress_active(False)
+
+    def _set_flashcard_progress_active(self, active: bool) -> None:
+        """Toggle the flashcard progress bar between active and invisible states."""
+        self._flashcard_progress_active = active
+        self.flashcard_progress_bar.setProperty("flashcardProgressActive", active)
+        self.flashcard_progress_bar.style().unpolish(self.flashcard_progress_bar)
+        self.flashcard_progress_bar.style().polish(self.flashcard_progress_bar)
+        self.flashcard_progress_bar.update()

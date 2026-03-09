@@ -444,7 +444,7 @@ def test_start_timer_without_selected_folders_warns_and_stops(
     assert warnings == ["warning"]
     assert window.timer_page.is_running is False
     assert window._study_session.active is False
-    assert window.timer_page.session_progress_label.text() == ""
+    assert "completed" not in window.timer_page.folder_context_label.text()
 
 
 def test_start_timer_with_selected_flashcards_starts_study_session(
@@ -460,8 +460,8 @@ def test_start_timer_with_selected_flashcards_starts_study_session(
     window.timer_page.start_timer()
 
     assert window._study_session.active is True
-    assert window.timer_page.session_progress_label.text() == (
-        "Session: 0/2 completed | 2 remaining | 0 pending review"
+    assert "0/2 completed | 2 remaining | 0 pending review" in (
+        window.timer_page.folder_context_label.text()
     )
     window.timer_page.stop_button.click()
 
@@ -505,8 +505,8 @@ def test_scored_session_marks_wrong_then_correct_until_complete(
     assert window._study_session.card_states[0].value == "pending"
     callbacks.pop(0)()
     assert window._study_session.card_states[0].value == "wrong_pending"
-    assert window.timer_page.session_progress_label.text() == (
-        "Session: 0/2 completed | 2 remaining | 1 pending review"
+    assert "0/2 completed | 2 remaining | 1 pending review" in (
+        window.timer_page.folder_context_label.text()
     )
     assert window.timer_page.is_running is True
 
@@ -522,8 +522,8 @@ def test_scored_session_marks_wrong_then_correct_until_complete(
     assert window._study_session.card_states[1].value == "pending"
     callbacks.pop(0)()
     assert window._study_session.card_states[1].value == "completed"
-    assert window.timer_page.session_progress_label.text() == (
-        "Session: 1/2 completed | 1 remaining | 1 pending review"
+    assert "1/2 completed | 1 remaining | 1 pending review" in (
+        window.timer_page.folder_context_label.text()
     )
     assert window.timer_page.is_running is True
 
@@ -538,7 +538,7 @@ def test_scored_session_marks_wrong_then_correct_until_complete(
     assert window._study_session.active is False
     assert window.timer_page.is_running is False
     assert window.timer_page.flashcard_question_label.isHidden()
-    assert window.timer_page.session_progress_label.text() == ""
+    assert "completed" not in window.timer_page.folder_context_label.text()
 
 
 def test_stop_button_resets_runtime_study_session_state(
@@ -557,7 +557,7 @@ def test_stop_button_resets_runtime_study_session_state(
 
     assert window._study_session.active is False
     assert window._next_flashcard_index == 0
-    assert window.timer_page.session_progress_label.text() == ""
+    assert "completed" not in window.timer_page.folder_context_label.text()
     assert window.timer_page.start_button.isEnabled()
 
 

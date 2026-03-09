@@ -53,7 +53,7 @@ def test_timer_start_stop_reset_and_context() -> None:
         wrong_pending_count=1,
         total_count=4,
     )
-    assert page.session_progress_label.text() == (
+    assert page.folder_context_label.text() == (
         "Session: 1/4 completed | 3 remaining | 1 pending review"
     )
 
@@ -98,14 +98,16 @@ def test_flashcard_display_hides_timer_and_reveals_answer() -> None:
     assert not page.flashcard_question_label.isHidden()
     assert page.flashcard_question_label.text() == "What is DNA?"
     assert page.flashcard_answer_label.isHidden()
-    assert not page.correct_button.isHidden()
-    assert not page.wrong_button.isHidden()
+    assert page.flashcard_actions_container.isHidden()
+    assert not page.correct_button.isVisible()
+    assert not page.wrong_button.isVisible()
     assert not page.correct_button.isEnabled()
     assert not page.wrong_button.isEnabled()
 
     page.show_flashcard_answer("Genetic material.")
     assert not page.flashcard_answer_label.isHidden()
     assert page.flashcard_answer_label.text() == "Genetic material."
+    assert not page.flashcard_actions_container.isHidden()
     assert page.correct_button.isEnabled()
     assert page.wrong_button.isEnabled()
 
@@ -113,23 +115,30 @@ def test_flashcard_display_hides_timer_and_reveals_answer() -> None:
     assert not page.timer_display.isHidden()
     assert page.flashcard_question_label.isHidden()
     assert page.flashcard_answer_label.isHidden()
+    assert page.flashcard_actions_container.isHidden()
+    assert not page.correct_button.isVisible()
+    assert not page.wrong_button.isVisible()
     assert not page.correct_button.isEnabled()
     assert not page.wrong_button.isEnabled()
 
 
 def test_flashcard_progress_bar_updates_per_phase() -> None:
-    """Verify flashcard progress bar appears for question/answer phases."""
+    """Verify flashcard progress bar keeps its space and activates per phase."""
     _get_app()
     page = TimerPage()
 
-    page.show_flashcard_question("What is ATP?", display_duration_seconds=2)
     assert not page.flashcard_progress_bar.isHidden()
+    assert page.is_flashcard_progress_active() is False
+
+    page.show_flashcard_question("What is ATP?", display_duration_seconds=2)
+    assert page.is_flashcard_progress_active() is True
 
     page.show_flashcard_answer("Cellular energy molecule.", display_duration_seconds=3)
-    assert not page.flashcard_progress_bar.isHidden()
+    assert page.is_flashcard_progress_active() is True
 
     page.clear_flashcard_display()
-    assert page.flashcard_progress_bar.isHidden()
+    assert not page.flashcard_progress_bar.isHidden()
+    assert page.is_flashcard_progress_active() is False
 
 
 def test_timer_page_has_no_title_and_no_reset_button() -> None:
@@ -168,10 +177,9 @@ def test_flashcard_score_buttons_stay_anchored_and_in_order() -> None:
     """Verify score controls keep a stable left-to-right layout."""
     _get_app()
     page = TimerPage()
-    actions_layout = page.layout().itemAt(4).layout()
+    actions_layout = page.flashcard_actions_container.layout()
 
-    assert not page.correct_button.isHidden()
-    assert not page.wrong_button.isHidden()
+    assert page.flashcard_actions_container.isHidden()
     assert actions_layout.itemAt(1).widget() is page.correct_button
     assert actions_layout.itemAt(2).widget() is page.wrong_button
 
@@ -201,6 +209,18 @@ def test_flashcard_score_buttons_emit_actions() -> None:
     assert not page.wrong_button.isChecked()
 
     assert events == ["correct", "wrong", "wrong"]
+
+
+def test_flashcard_score_buttons_define_distinct_checked_and_disabled_styles() -> None:
+    """Verify score buttons style checked and disabled states distinctly."""
+    _get_app()
+    page = TimerPage()
+
+    stylesheet = page.correct_button.styleSheet()
+
+    assert "QPushButton:disabled" in stylesheet
+    assert "QPushButton:pressed:!disabled, QPushButton:checked" in stylesheet
+    assert "border: 2px solid" in stylesheet
 
 
 def test_flashcard_text_formats_inline_latex() -> None:
