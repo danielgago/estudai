@@ -5,6 +5,7 @@ from __future__ import annotations
 import shutil
 import sys
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 
 from PySide6.QtCore import QSettings
@@ -19,7 +20,26 @@ SETTINGS_KEY_FLASHCARD_RANDOM_ORDER_ENABLED = "flashcard/random_order_enabled"
 SETTINGS_KEY_QUESTION_DURATION_SECONDS = "flashcard/question_duration_seconds"
 SETTINGS_KEY_ANSWER_DURATION_SECONDS = "flashcard/answer_duration_seconds"
 SETTINGS_KEY_NOTIFICATION_SOUND_PATH = "flashcard/notification_sound_path"
+SETTINGS_KEY_WRONG_ANSWER_COMPLETION_MODE = "flashcard/wrong_answer_completion_mode"
+SETTINGS_KEY_WRONG_ANSWER_REINSERTION_MODE = "flashcard/wrong_answer_reinsertion_mode"
+SETTINGS_KEY_WRONG_ANSWER_REINSERT_AFTER_COUNT = (
+    "flashcard/wrong_answer_reinsert_after_count"
+)
 ALLOWED_SOUND_EXTENSIONS = {".mp3", ".wav"}
+
+
+class WrongAnswerCompletionMode(StrEnum):
+    """Completion rule for cards answered wrong during a session."""
+
+    UNTIL_CORRECT_ONCE = "until_correct_once"
+    UNTIL_CORRECT_MORE_THAN_WRONG = "until_correct_more_than_wrong"
+
+
+class WrongAnswerReinsertionMode(StrEnum):
+    """Queue placement rule for cards that remain active after scoring."""
+
+    AFTER_X_FLASHCARDS = "after_x_flashcards"
+    PUSH_TO_END = "push_to_end"
 
 
 @dataclass(frozen=True)
@@ -32,6 +52,13 @@ class AppSettings:
     question_display_duration_seconds: int = 8
     answer_display_duration_seconds: int = 8
     notification_sound_path: str = ""
+    wrong_answer_completion_mode: WrongAnswerCompletionMode = (
+        WrongAnswerCompletionMode.UNTIL_CORRECT_ONCE
+    )
+    wrong_answer_reinsertion_mode: WrongAnswerReinsertionMode = (
+        WrongAnswerReinsertionMode.PUSH_TO_END
+    )
+    wrong_answer_reinsert_after_count: int = 3
 
 
 def get_default_notification_sound_path() -> str:
@@ -124,6 +151,24 @@ def _normalize_bool(raw_value: object, *, default: bool) -> bool:
     return default
 
 
+def _normalize_enum[EnumType: StrEnum](
+    raw_value: object,
+    *,
+    enum_type: type[EnumType],
+    default: EnumType,
+) -> EnumType:
+    """Normalize a persisted enum-like value into the declared enum type."""
+    if isinstance(raw_value, enum_type):
+        return raw_value
+    if isinstance(raw_value, str):
+        normalized = raw_value.strip()
+        try:
+            return enum_type(normalized)
+        except ValueError:
+            return default
+    return default
+
+
 def load_app_settings() -> AppSettings:
     """Load current app settings from QSettings.
 
@@ -182,6 +227,31 @@ def load_app_settings() -> AppSettings:
             maximum=3600,
         ),
         notification_sound_path=notification_sound_path,
+        wrong_answer_completion_mode=_normalize_enum(
+            qsettings.value(
+                SETTINGS_KEY_WRONG_ANSWER_COMPLETION_MODE,
+                AppSettings.wrong_answer_completion_mode.value,
+            ),
+            enum_type=WrongAnswerCompletionMode,
+            default=AppSettings.wrong_answer_completion_mode,
+        ),
+        wrong_answer_reinsertion_mode=_normalize_enum(
+            qsettings.value(
+                SETTINGS_KEY_WRONG_ANSWER_REINSERTION_MODE,
+                AppSettings.wrong_answer_reinsertion_mode.value,
+            ),
+            enum_type=WrongAnswerReinsertionMode,
+            default=AppSettings.wrong_answer_reinsertion_mode,
+        ),
+        wrong_answer_reinsert_after_count=_normalize_int(
+            qsettings.value(
+                SETTINGS_KEY_WRONG_ANSWER_REINSERT_AFTER_COUNT,
+                AppSettings.wrong_answer_reinsert_after_count,
+            ),
+            default=AppSettings.wrong_answer_reinsert_after_count,
+            minimum=0,
+            maximum=999,
+        ),
     )
 
 
@@ -235,6 +305,31 @@ def save_app_settings(settings: AppSettings) -> None:
     qsettings.setValue(
         SETTINGS_KEY_NOTIFICATION_SOUND_PATH,
         settings.notification_sound_path.strip(),
+    )
+    qsettings.setValue(
+        SETTINGS_KEY_WRONG_ANSWER_COMPLETION_MODE,
+        _normalize_enum(
+            settings.wrong_answer_completion_mode,
+            enum_type=WrongAnswerCompletionMode,
+            default=AppSettings.wrong_answer_completion_mode,
+        ).value,
+    )
+    qsettings.setValue(
+        SETTINGS_KEY_WRONG_ANSWER_REINSERTION_MODE,
+        _normalize_enum(
+            settings.wrong_answer_reinsertion_mode,
+            enum_type=WrongAnswerReinsertionMode,
+            default=AppSettings.wrong_answer_reinsertion_mode,
+        ).value,
+    )
+    qsettings.setValue(
+        SETTINGS_KEY_WRONG_ANSWER_REINSERT_AFTER_COUNT,
+        _normalize_int(
+            settings.wrong_answer_reinsert_after_count,
+            default=AppSettings.wrong_answer_reinsert_after_count,
+            minimum=0,
+            maximum=999,
+        ),
     )
     qsettings.sync()
 

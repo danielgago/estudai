@@ -7,6 +7,7 @@ from pathlib import Path
 from PySide6.QtCore import QEvent, QUrl, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
+    QComboBox,
     QCheckBox,
     QFileDialog,
     QFormLayout,
@@ -28,6 +29,8 @@ except ImportError:  # pragma: no cover - depends on system multimedia libraries
 
 from estudai.services.settings import (
     AppSettings,
+    WrongAnswerCompletionMode,
+    WrongAnswerReinsertionMode,
     copy_notification_sound_file,
     get_default_notification_sound_path,
     load_app_settings,
@@ -115,6 +118,45 @@ class SettingsPage(QWidget):
         )
         layout.addWidget(timer_group)
 
+        retry_group = QGroupBox("Wrong-Answer Retry Rules")
+        retry_form = QFormLayout(retry_group)
+
+        self.wrong_answer_completion_mode_combo = QComboBox()
+        self.wrong_answer_completion_mode_combo.addItem(
+            "Retry until correct once",
+            WrongAnswerCompletionMode.UNTIL_CORRECT_ONCE.value,
+        )
+        self.wrong_answer_completion_mode_combo.addItem(
+            "Retry until correct more times than wrong",
+            WrongAnswerCompletionMode.UNTIL_CORRECT_MORE_THAN_WRONG.value,
+        )
+        retry_form.addRow(
+            "Completion rule:",
+            self.wrong_answer_completion_mode_combo,
+        )
+
+        self.wrong_answer_reinsertion_mode_combo = QComboBox()
+        self.wrong_answer_reinsertion_mode_combo.addItem(
+            "After X flashcards",
+            WrongAnswerReinsertionMode.AFTER_X_FLASHCARDS.value,
+        )
+        self.wrong_answer_reinsertion_mode_combo.addItem(
+            "Push to end of queue",
+            WrongAnswerReinsertionMode.PUSH_TO_END.value,
+        )
+        retry_form.addRow(
+            "Reinsert wrong cards:",
+            self.wrong_answer_reinsertion_mode_combo,
+        )
+
+        self.wrong_answer_reinsert_after_spinbox = QSpinBox()
+        self.wrong_answer_reinsert_after_spinbox.setRange(0, 999)
+        retry_form.addRow(
+            "After X value:",
+            self.wrong_answer_reinsert_after_spinbox,
+        )
+        layout.addWidget(retry_group)
+
         sound_group = QGroupBox("Notification Sound")
         sound_layout = QVBoxLayout(sound_group)
         self.notification_sound_label = QLabel("Selected sound: None")
@@ -151,6 +193,9 @@ class SettingsPage(QWidget):
         self.test_sound_button.clicked.connect(self._handle_test_sound_clicked)
         self.cancel_button.clicked.connect(self._handle_cancel_clicked)
         self.save_button.clicked.connect(self._handle_save_clicked)
+        self.wrong_answer_reinsertion_mode_combo.currentIndexChanged.connect(
+            self._update_wrong_answer_reinsert_after_enabled_state
+        )
 
     def _load_persisted_settings(self) -> None:
         """Load persisted settings into controls."""
@@ -167,7 +212,25 @@ class SettingsPage(QWidget):
         )
         self.answer_duration_spinbox.setValue(settings.answer_display_duration_seconds)
         self._notification_sound_path = settings.notification_sound_path
+        self._set_combo_value(
+            self.wrong_answer_completion_mode_combo,
+            settings.wrong_answer_completion_mode.value,
+        )
+        self._set_combo_value(
+            self.wrong_answer_reinsertion_mode_combo,
+            settings.wrong_answer_reinsertion_mode.value,
+        )
+        self.wrong_answer_reinsert_after_spinbox.setValue(
+            settings.wrong_answer_reinsert_after_count
+        )
+        self._update_wrong_answer_reinsert_after_enabled_state()
         self._update_sound_summary()
+
+    def _set_combo_value(self, combo_box: QComboBox, value: str) -> None:
+        """Select the combo-box item with the provided data value."""
+        index = combo_box.findData(value)
+        if index >= 0:
+            combo_box.setCurrentIndex(index)
 
     def _collect_settings(self) -> AppSettings:
         """Read current form values into a typed payload.
@@ -182,10 +245,21 @@ class SettingsPage(QWidget):
             question_display_duration_seconds=self.question_duration_spinbox.value(),
             answer_display_duration_seconds=self.answer_duration_spinbox.value(),
             notification_sound_path=self._notification_sound_path,
+            wrong_answer_completion_mode=WrongAnswerCompletionMode(
+                self.wrong_answer_completion_mode_combo.currentData()
+            ),
+            wrong_answer_reinsertion_mode=WrongAnswerReinsertionMode(
+                self.wrong_answer_reinsertion_mode_combo.currentData()
+            ),
+            wrong_answer_reinsert_after_count=self.wrong_answer_reinsert_after_spinbox.value(),
         )
 
     def _persist_settings(self) -> None:
         """Save current form values into QSettings."""
+        validation_message = self._validate_settings_form()
+        if validation_message is not None:
+            QMessageBox.warning(self, "Invalid settings", validation_message)
+            return
         settings = self._collect_settings()
         save_app_settings(settings)
         self.timer_duration_seconds_changed.emit(settings.timer_duration_seconds)
@@ -263,3 +337,52 @@ class SettingsPage(QWidget):
             return
         self._sound_player.setSource(QUrl.fromLocalFile(str(sound_path)))
         self._sound_player.play()
+
+    def _update_wrong_answer_reinsert_after_enabled_state(self) -> None:
+        """Enable X only when the matching reinsertion mode is selected."""
+        reinsertion_mode = self.wrong_answer_reinsertion_mode_combo.currentData()
+        self.wrong_answer_reinsert_after_spinbox.setEnabled(
+            reinsertion_mode == WrongAnswerReinsertionMode.AFTER_X_FLASHCARDS.value
+        )
+
+    def _validate_settings_form(self) -> str | None:
+        """Return a validation message when the form contains invalid raw input."""
+        spinboxes = [
+            (
+                self.timer_duration_spinbox,
+                "Timer duration",
+                "1 and 356400 seconds",
+            ),
+            (
+                self.flashcard_probability_spinbox,
+                "Probability of showing flashcard",
+                "0 and 100 percent",
+            ),
+            (
+                self.question_duration_spinbox,
+                "Question display duration",
+                "1 and 3600 seconds",
+            ),
+            (
+                self.answer_duration_spinbox,
+                "Answer display duration",
+                "1 and 3600 seconds",
+            ),
+        ]
+        if self.wrong_answer_reinsert_after_spinbox.isEnabled():
+            spinboxes.append(
+                (
+                    self.wrong_answer_reinsert_after_spinbox,
+                    "After X value",
+                    "0 and 999 flashcards",
+                )
+            )
+
+        for spinbox, label, expected_range in spinboxes:
+            line_edit = spinbox.lineEdit()
+            if line_edit is None:
+                continue
+            if not line_edit.hasAcceptableInput():
+                return f"{label} must be between {expected_range}."
+
+        return None

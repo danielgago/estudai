@@ -460,31 +460,19 @@ class MainWindow(QMainWindow):
 
     def handle_timer_cycle_completed(self) -> None:
         """Advance the current study session when a timer cycle finishes."""
-        app_settings = load_app_settings()
-        flashcard = self._next_flashcard_for_display(
-            random_order=app_settings.flashcard_random_order_enabled
-        )
+        flashcard = self._next_flashcard_for_display()
         if flashcard is None:
             self._complete_study_session()
             return
         self.show_flashcard_requested.emit(flashcard)
 
-    def _next_flashcard_for_display(self, *, random_order: bool) -> Flashcard | None:
+    def _next_flashcard_for_display(self) -> Flashcard | None:
         """Return the next active flashcard for the current study session.
-
-        Args:
-            random_order: Whether to pick a random flashcard.
 
         Returns:
             Flashcard | None: Selected flashcard if available.
         """
-        flashcard_index = self._flashcard_sequence.next_flashcard_index_for_session(
-            self._study_session.active_flashcard_indexes(),
-            len(self._study_session.flashcards),
-            random_order=random_order,
-            choice_func=random.choice,
-        )
-        return self._study_session.set_current_flashcard(flashcard_index)
+        return self._study_session.next_flashcard()
 
     def _start_study_session(self) -> bool:
         """Create a runtime-only study session for the current flashcard scope."""
@@ -506,7 +494,15 @@ class MainWindow(QMainWindow):
         self._flashcard_sequence.sequence_paused = False
         self._reset_flashcard_sequence_order()
         self._pending_flashcard_score = None
-        if not self._study_session.start(self.loaded_flashcards):
+        app_settings = load_app_settings()
+        if not self._study_session.start(
+            self.loaded_flashcards,
+            wrong_answer_completion_mode=app_settings.wrong_answer_completion_mode,
+            wrong_answer_reinsertion_mode=app_settings.wrong_answer_reinsertion_mode,
+            wrong_answer_reinsert_after_count=app_settings.wrong_answer_reinsert_after_count,
+            random_order=app_settings.flashcard_random_order_enabled,
+            choice_func=random.choice,
+        ):
             return False
         self._update_study_session_progress()
         return True
@@ -582,10 +578,7 @@ class MainWindow(QMainWindow):
             )
         ):
             return
-        if self._pending_flashcard_score == "correct":
-            self._study_session.mark_current_correct()
-        elif self._pending_flashcard_score == "wrong":
-            self._study_session.mark_current_wrong()
+        self._study_session.apply_current_score(self._pending_flashcard_score)
         self._advance_after_flashcard_score()
 
     def show_flashcard_popup(self, flashcard: object) -> None:
