@@ -202,6 +202,37 @@ def rename_persisted_folder(folder_id: str, new_name: str) -> PersistedFolder:
     return renamed_folder
 
 
+def move_persisted_folder(folder_id: str, new_index: int) -> list[PersistedFolder]:
+    """Move one persisted folder entry to a new list position.
+
+    Args:
+        folder_id: Persisted folder identifier.
+        new_index: Zero-based target position.
+
+    Returns:
+        list[PersistedFolder]: Updated folder ordering.
+
+    Raises:
+        KeyError: If the folder id does not exist.
+        IndexError: If the target index is out of bounds.
+    """
+    persisted_folders = list_persisted_folders()
+    if new_index < 0 or new_index >= len(persisted_folders):
+        msg = f"Folder index out of range: {new_index}"
+        raise IndexError(msg)
+
+    for current_index, folder in enumerate(persisted_folders):
+        if folder.id != folder_id:
+            continue
+        moved_folder = persisted_folders.pop(current_index)
+        persisted_folders.insert(new_index, moved_folder)
+        save_persisted_folders(persisted_folders)
+        return persisted_folders
+
+    msg = f"Folder not found: {folder_id}"
+    raise KeyError(msg)
+
+
 def delete_persisted_folder(folder_id: str) -> bool:
     """Delete one persisted folder and its managed directory.
 

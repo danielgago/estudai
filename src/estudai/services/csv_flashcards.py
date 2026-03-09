@@ -115,6 +115,33 @@ def normalize_flashcard_fields(question: str, answer: str) -> tuple[str, str]:
     )
 
 
+def normalize_flashcard_sort_text(value: str) -> str:
+    """Normalize text used for deterministic flashcard ordering."""
+    return " ".join(value.strip().split()).casefold()
+
+
+def flashcard_question_sort_key(
+    question: str, answer: str
+) -> tuple[str, str, str, str]:
+    """Return a deterministic sort key for one flashcard row."""
+    return (
+        normalize_flashcard_sort_text(question),
+        normalize_flashcard_sort_text(answer),
+        question,
+        answer,
+    )
+
+
+def sort_flashcard_rows_by_question(
+    flashcard_rows: list[tuple[str, str]],
+) -> list[tuple[str, str]]:
+    """Return flashcard rows sorted alphabetically by normalized question text."""
+    return sorted(
+        flashcard_rows,
+        key=lambda row: flashcard_question_sort_key(row[0], row[1]),
+    )
+
+
 def _write_flashcards_to_csv(
     csv_path: Path,
     flashcard_rows: list[tuple[str, str]],

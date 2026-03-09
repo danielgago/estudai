@@ -10,6 +10,7 @@ from estudai.services.csv_flashcards import (
     delete_flashcards_from_folder,
     load_flashcards_from_folder,
     replace_flashcards_in_folder,
+    sort_flashcard_rows_by_question,
     update_flashcard_in_folder,
 )
 from estudai.services.folder_storage import (
@@ -17,6 +18,7 @@ from estudai.services.folder_storage import (
     delete_persisted_folder,
     get_registry_path,
     list_persisted_folders,
+    move_persisted_folder,
     rename_persisted_folder,
 )
 
@@ -101,6 +103,45 @@ def test_replace_flashcards_persists_and_validates() -> None:
     assert len(flashcards) == 2
     assert loaded_flashcards[0].question == "Who discovered Brazil?"
     assert loaded_flashcards[1].answer == "1500."
+
+
+def test_sort_flashcard_rows_by_question_uses_normalized_question_text() -> None:
+    """Verify alphabetical flashcard sort is deterministic and normalized."""
+    sorted_rows = sort_flashcard_rows_by_question(
+        [
+            (" beta", "b"),
+            ("Alpha", "z"),
+            ("alpha", "a"),
+            ("Gamma", "c"),
+        ]
+    )
+
+    assert sorted_rows == [
+        ("alpha", "a"),
+        ("Alpha", "z"),
+        (" beta", "b"),
+        ("Gamma", "c"),
+    ]
+
+
+def test_move_persisted_folder_reorders_registry_entries() -> None:
+    """Verify folder reorder persists in the registry list order."""
+    create_managed_folder("Biology")
+    create_managed_folder("Chemistry")
+    physics = create_managed_folder("Physics")
+
+    reordered = move_persisted_folder(physics.id, 0)
+
+    assert [folder.name for folder in reordered] == [
+        "Physics",
+        "Biology",
+        "Chemistry",
+    ]
+    assert [folder.name for folder in list_persisted_folders()] == [
+        "Physics",
+        "Biology",
+        "Chemistry",
+    ]
 
 
 def test_list_persisted_folders_handles_corrupt_registry_json() -> None:

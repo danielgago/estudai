@@ -56,6 +56,7 @@ from estudai.services.folder_storage import (
     delete_persisted_folder,
     import_folder,
     list_persisted_folders,
+    move_persisted_folder,
     rename_persisted_folder,
 )
 from estudai.services.settings import (
@@ -237,6 +238,9 @@ class MainWindow(QMainWindow):
         self.sidebar_folder_list.itemDoubleClicked.connect(
             self.handle_sidebar_folder_double_click
         )
+        self.sidebar_folder_list.itemSelectionChanged.connect(
+            self._update_sidebar_reorder_buttons
+        )
         self.sidebar_folder_list.itemDelegate().closeEditor.connect(
             self.handle_sidebar_editor_closed
         )
@@ -249,6 +253,17 @@ class MainWindow(QMainWindow):
             self.FOLDER_NAME_ROLE,
         )
         sidebar_layout.addWidget(self.sidebar_folder_list)
+
+        reorder_button_layout = QHBoxLayout()
+        self.move_folder_up_button = QPushButton("Move Up")
+        self.move_folder_up_button.clicked.connect(self.move_selected_sidebar_folder_up)
+        reorder_button_layout.addWidget(self.move_folder_up_button)
+        self.move_folder_down_button = QPushButton("Move Down")
+        self.move_folder_down_button.clicked.connect(
+            self.move_selected_sidebar_folder_down
+        )
+        reorder_button_layout.addWidget(self.move_folder_down_button)
+        sidebar_layout.addLayout(reorder_button_layout)
 
         create_folder_button = QPushButton("Create Folder")
         create_folder_button.clicked.connect(self.prompt_and_create_folder)
@@ -265,6 +280,7 @@ class MainWindow(QMainWindow):
         sidebar_layout.addWidget(import_folder_button)
         sidebar_layout.addStretch()
         self._apply_sidebar_palette_styles()
+        self._update_sidebar_reorder_buttons()
         self.sidebar.raise_()
 
     def _build_content_area(self, root_layout: QHBoxLayout) -> None:
@@ -1157,6 +1173,39 @@ class MainWindow(QMainWindow):
             delete_persisted_folder(folder_id)
         self.handle_management_data_changed(preferred_checked_ids=checked_ids)
 
+    def move_selected_sidebar_folder_up(self) -> None:
+        """Move the selected sidebar folder one position upward."""
+        self._move_selected_sidebar_folder(-1)
+
+    def move_selected_sidebar_folder_down(self) -> None:
+        """Move the selected sidebar folder one position downward."""
+        self._move_selected_sidebar_folder(1)
+
+    def _move_selected_sidebar_folder(self, offset: int) -> None:
+        """Persist moving the selected sidebar folder by one position."""
+        selected_items = self._selected_folder_items()
+        if len(selected_items) != 1:
+            return
+        folder_item = selected_items[0]
+        folder_id = folder_item.data(Qt.UserRole)
+        if folder_id is None:
+            return
+        current_row = self.sidebar_folder_list.row(folder_item)
+        target_row = current_row + offset
+        if not (0 <= target_row < self.sidebar_folder_list.count()):
+            return
+        checked_ids = self._get_checked_folder_ids()
+        try:
+            move_persisted_folder(folder_id, target_row)
+        except (KeyError, IndexError) as error:
+            QMessageBox.warning(self, "Move folder", str(error))
+            self.handle_management_data_changed(preferred_checked_ids=checked_ids)
+            return
+        self.handle_management_data_changed(
+            preferred_checked_ids=checked_ids,
+            preferred_current_folder_id=folder_id,
+        )
+
     def prompt_and_add_folder(self) -> None:
         """Prompt the user for a folder and load CSV flashcards from it."""
         selected_path = QFileDialog.getExistingDirectory(
@@ -1410,16 +1459,20 @@ class MainWindow(QMainWindow):
         return self._sidebar_folders.format_folder_label(folder_name, flashcard_count)
 
     def handle_management_data_changed(
-        self, preferred_checked_ids: set[str] | None = None
+        self,
+        preferred_checked_ids: set[str] | None = None,
+        preferred_current_folder_id: str | None = None,
     ) -> None:
         """Reload sidebar and current context after folder data changes.
 
         Args:
             preferred_checked_ids: Folder ids that should remain checked.
+            preferred_current_folder_id: Folder id that should remain selected.
         """
         self.flashcards_by_folder = {}
         self.persisted_folder_paths = {}
         remaining_folder_ids: set[str] = set()
+        preferred_current_row: int | None = None
         self.sidebar_folder_list.blockSignals(True)
         self.sidebar_folder_list.clear()
 
@@ -1451,13 +1504,17 @@ class MainWindow(QMainWindow):
                 checked=is_checked,
             )
             self.sidebar_folder_list.addItem(folder_item)
+            if persisted_folder.id == preferred_current_folder_id:
+                preferred_current_row = self.sidebar_folder_list.count() - 1
 
         if self.sidebar_folder_list.count() == 0:
             empty_item = QListWidgetItem("No saved folders yet.")
             empty_item.setFlags(Qt.NoItemFlags)
             self.sidebar_folder_list.addItem(empty_item)
         else:
-            self.sidebar_folder_list.setCurrentRow(0)
+            self.sidebar_folder_list.setCurrentRow(
+                0 if preferred_current_row is None else preferred_current_row
+            )
         self.sidebar_folder_list.blockSignals(False)
         self.selected_flashcard_indexes_by_folder = {
             folder_id: indexes
@@ -1465,6 +1522,19 @@ class MainWindow(QMainWindow):
             if folder_id in remaining_folder_ids
         }
         self._refresh_loaded_flashcards()
+        self._update_sidebar_reorder_buttons()
+
+    def _update_sidebar_reorder_buttons(self) -> None:
+        """Enable sidebar reorder buttons when a single folder can move."""
+        selected_items = self._selected_folder_items()
+        if len(selected_items) != 1:
+            self.move_folder_up_button.setEnabled(False)
+            self.move_folder_down_button.setEnabled(False)
+            return
+        current_row = self.sidebar_folder_list.row(selected_items[0])
+        last_row = self.sidebar_folder_list.count() - 1
+        self.move_folder_up_button.setEnabled(current_row > 0)
+        self.move_folder_down_button.setEnabled(current_row < last_row)
 
     def set_navigation_visible(self, visible: bool) -> None:
         """Control navigation visibility for focused timer mode.

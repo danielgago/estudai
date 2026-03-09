@@ -182,16 +182,27 @@ def test_sidebar_clicking_outside_closes_when_open(app: QApplication) -> None:
 
 
 def test_sidebar_button_order_is_welcoming(app: QApplication) -> None:
-    """Verify sidebar action order follows create -> NotebookLM -> import folder."""
+    """Verify sidebar keeps reorder controls above create/import actions."""
     window = MainWindow()
     sidebar_layout = window.sidebar.layout()
-    button_texts = [
+    reorder_layout = sidebar_layout.itemAt(2).layout()
+    assert reorder_layout is not None
+    reorder_button_texts = [
+        reorder_layout.itemAt(index).widget().text()
+        for index in range(reorder_layout.count())
+        if isinstance(reorder_layout.itemAt(index).widget(), QPushButton)
+    ]
+    action_button_texts = [
         sidebar_layout.itemAt(index).widget().text()
         for index in range(sidebar_layout.count())
         if isinstance(sidebar_layout.itemAt(index).widget(), QPushButton)
     ]
 
-    assert button_texts == [
+    assert reorder_button_texts == [
+        "Move Up",
+        "Move Down",
+    ]
+    assert action_button_texts == [
         "Create Folder",
         "Import NotebookLM CSV",
         "Import Existing Folder",
@@ -395,6 +406,113 @@ def test_sidebar_folder_context_actions_rename_and_delete(
     )
     window.delete_sidebar_folders([renamed_item])
     assert list_persisted_folders() == []
+
+
+def test_management_sort_persists_flashcard_order_and_selected_cards(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify A-Z sorting persists and keeps the same cards selected."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text(
+        "beta?,B.\ngamma?,G.\nAlpha?,A.\n",
+        encoding="utf-8",
+    )
+    assert window.add_folder(biology_folder) is True
+    folder_item = window.sidebar_folder_list.item(0)
+    folder_id = folder_item.data(Qt.UserRole)
+    assert isinstance(folder_id, str)
+
+    window.open_management_for_folder(folder_id, "biology")
+    window.management_page.flashcards_table.item(1, 0).setCheckState(Qt.Unchecked)
+    window.management_page.sort_flashcards_by_question()
+    window.save_management_changes()
+
+    assert [card.question for card in window.flashcards_by_folder[folder_id]] == [
+        "Alpha?",
+        "beta?",
+        "gamma?",
+    ]
+    assert [card.question for card in window.loaded_flashcards] == [
+        "Alpha?",
+        "beta?",
+    ]
+
+    reloaded_window = MainWindow()
+    reloaded_folder_id = next(iter(reloaded_window.flashcards_by_folder))
+    assert [
+        card.question
+        for card in reloaded_window.flashcards_by_folder[reloaded_folder_id]
+    ] == [
+        "Alpha?",
+        "beta?",
+        "gamma?",
+    ]
+
+
+def test_management_reorder_keeps_checked_state_with_flashcard(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify manual flashcard moves keep the checked cards attached to the rows."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text(
+        "First?,A.\nSecond?,B.\nThird?,C.\n",
+        encoding="utf-8",
+    )
+    assert window.add_folder(biology_folder) is True
+    folder_item = window.sidebar_folder_list.item(0)
+    folder_id = folder_item.data(Qt.UserRole)
+    assert isinstance(folder_id, str)
+
+    window.open_management_for_folder(folder_id, "biology")
+    window.management_page.flashcards_table.item(1, 0).setCheckState(Qt.Unchecked)
+    window.management_page.flashcards_table.selectRow(2)
+    window.management_page.move_selected_rows_up()
+    window.save_management_changes()
+
+    assert [card.question for card in window.flashcards_by_folder[folder_id]] == [
+        "First?",
+        "Third?",
+        "Second?",
+    ]
+    assert [card.question for card in window.loaded_flashcards] == [
+        "First?",
+        "Third?",
+    ]
+
+
+def test_sidebar_folder_reorder_persists_and_preserves_checked_ids(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify sidebar folder moves persist and keep folder selection intact."""
+    window = MainWindow()
+    for name in ("biology", "chemistry", "physics"):
+        folder = tmp_path / name
+        folder.mkdir()
+        (folder / "cards.csv").write_text(f"{name}?,A.\n", encoding="utf-8")
+        assert window.add_folder(folder) is True
+
+    chemistry_item = window.sidebar_folder_list.item(1)
+    window.sidebar_folder_list.clearSelection()
+    chemistry_item.setSelected(True)
+    window.sidebar_folder_list.setCurrentItem(chemistry_item)
+
+    window.move_selected_sidebar_folder_up()
+
+    assert [
+        window.sidebar_folder_list.item(index).data(window.FOLDER_NAME_ROLE)
+        for index in range(window.sidebar_folder_list.count())
+    ] == ["chemistry", "biology", "physics"]
+    assert window._get_checked_folder_ids() == set(window.flashcards_by_folder)
+
+    reloaded_window = MainWindow()
+    assert [
+        reloaded_window.sidebar_folder_list.item(index).data(window.FOLDER_NAME_ROLE)
+        for index in range(reloaded_window.sidebar_folder_list.count())
+    ] == ["chemistry", "biology", "physics"]
 
 
 def test_start_timer_hides_navigation_until_stopped(
@@ -1245,7 +1363,7 @@ def test_management_select_and_unselect_all_controls(
 def test_management_add_button_is_plus_at_top(
     app: QApplication, tmp_path: Path
 ) -> None:
-    """Verify add control is a plus button and inserts rows."""
+    """Verify the management action bar exposes reorder, sort, and add controls."""
     window = MainWindow()
     biology_folder = tmp_path / "biology"
     biology_folder.mkdir()
@@ -1254,11 +1372,21 @@ def test_management_add_button_is_plus_at_top(
     window.handle_sidebar_folder_double_click(window.sidebar_folder_list.item(0))
     table = window.management_page.flashcards_table
     management_layout = window.management_page.layout()
+    action_layout = management_layout.itemAt(2).layout()
+    assert action_layout is not None
+    action_button_texts = [
+        action_layout.itemAt(index).widget().text()
+        for index in range(action_layout.count())
+        if isinstance(action_layout.itemAt(index).widget(), QPushButton)
+    ]
 
     assert window.management_page.add_flashcard_button.text() == "+"
-    assert management_layout.itemAt(2).layout().itemAt(1).widget() is (
-        window.management_page.add_flashcard_button
-    )
+    assert action_button_texts == [
+        "Move Up",
+        "Move Down",
+        "Sort by Question A-Z",
+        "+",
+    ]
     assert management_layout.itemAt(3).widget() is table
     window.management_page.add_flashcard_button.click()
     assert table.rowCount() == 2
