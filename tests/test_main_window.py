@@ -19,7 +19,11 @@ from PySide6.QtWidgets import (
 
 from estudai.services.csv_flashcards import Flashcard
 from estudai.services.folder_storage import list_persisted_folders
-from estudai.services.settings import AppSettings
+from estudai.services.settings import (
+    AppSettings,
+    WrongAnswerCompletionMode,
+    WrongAnswerReinsertionMode,
+)
 from estudai.ui.main_window import MainWindow, SidebarCheckboxDelegate
 
 
@@ -541,6 +545,117 @@ def test_scored_session_marks_wrong_then_correct_until_complete(
     assert "completed" not in window.timer_page.folder_context_label.text()
 
 
+def test_scored_session_mode_b_requires_more_correct_than_wrong_end_to_end(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify Mode B keeps a card active until correct answers exceed wrong answers."""
+    callbacks: list[object] = []
+    monkeypatch.setattr(
+        "estudai.ui.main_window.load_app_settings",
+        lambda: AppSettings(
+            timer_duration_seconds=1500,
+            flashcard_probability_percent=30,
+            flashcard_random_order_enabled=False,
+            question_display_duration_seconds=2,
+            answer_display_duration_seconds=3,
+            wrong_answer_completion_mode=(
+                WrongAnswerCompletionMode.UNTIL_CORRECT_MORE_THAN_WRONG
+            ),
+        ),
+    )
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+    monkeypatch.setattr(
+        window,
+        "_start_flashcard_phase_timer",
+        lambda _delay, callback: callbacks.append(callback),
+    )
+    window.timer_page.start_timer()
+
+    window.timer_page.is_running = False
+    window.handle_timer_cycle_completed()
+    callbacks.pop(0)()
+    window.timer_page.wrong_button.click()
+    callbacks.pop(0)()
+    assert window._study_session.card_states[0].value == "wrong_pending"
+    assert window._study_session.card_counters[0].wrong_count == 1
+
+    window.timer_page.is_running = False
+    window.handle_timer_cycle_completed()
+    callbacks.pop(0)()
+    window.timer_page.correct_button.click()
+    callbacks.pop(0)()
+    assert window._study_session.card_states[0].value == "wrong_pending"
+    assert window._study_session.card_counters[0].correct_count == 1
+    assert window._study_session.active is True
+
+    window.timer_page.is_running = False
+    window.handle_timer_cycle_completed()
+    callbacks.pop(0)()
+    window.timer_page.correct_button.click()
+    callbacks.pop(0)()
+
+    assert window._study_session.active is False
+    assert window.timer_page.is_running is False
+
+
+def test_wrong_answer_after_x_reinsertion_returns_card_after_requested_gap(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify After-X reinsertion changes the next-card order in the UI flow."""
+    callbacks: list[object] = []
+    monkeypatch.setattr(
+        "estudai.ui.main_window.load_app_settings",
+        lambda: AppSettings(
+            timer_duration_seconds=1500,
+            flashcard_probability_percent=30,
+            flashcard_random_order_enabled=False,
+            question_display_duration_seconds=2,
+            answer_display_duration_seconds=3,
+            wrong_answer_reinsertion_mode=(
+                WrongAnswerReinsertionMode.AFTER_X_FLASHCARDS
+            ),
+            wrong_answer_reinsert_after_count=1,
+        ),
+    )
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text(
+        "Q1?,A1.\nQ2?,A2.\nQ3?,A3.\n",
+        encoding="utf-8",
+    )
+    assert window.add_folder(biology_folder) is True
+    monkeypatch.setattr(
+        window,
+        "_start_flashcard_phase_timer",
+        lambda _delay, callback: callbacks.append(callback),
+    )
+    window.timer_page.start_timer()
+
+    window.timer_page.is_running = False
+    window.handle_timer_cycle_completed()
+    assert window.timer_page.flashcard_question_label.text() == "Q1?"
+    callbacks.pop(0)()
+    window.timer_page.wrong_button.click()
+    callbacks.pop(0)()
+    assert window._study_session.queued_flashcard_indexes() == [1, 0, 2]
+
+    window.timer_page.is_running = False
+    window.handle_timer_cycle_completed()
+    assert window.timer_page.flashcard_question_label.text() == "Q2?"
+    callbacks.pop(0)()
+    window.timer_page.correct_button.click()
+    callbacks.pop(0)()
+
+    window.timer_page.is_running = False
+    window.handle_timer_cycle_completed()
+    assert window.timer_page.flashcard_question_label.text() == "Q1?"
+
+
 def test_stop_button_resets_runtime_study_session_state(
     app: QApplication, tmp_path: Path
 ) -> None:
@@ -722,7 +837,12 @@ def test_flashcard_pause_handler_stops_and_resumes_phase_timer(
                 source_file=Path("cards.csv"),
                 source_line=1,
             )
-        ]
+        ],
+        wrong_answer_completion_mode=WrongAnswerCompletionMode.UNTIL_CORRECT_ONCE,
+        wrong_answer_reinsertion_mode=WrongAnswerReinsertionMode.PUSH_TO_END,
+        wrong_answer_reinsert_after_count=3,
+        random_order=False,
+        choice_func=lambda indexes: indexes[0],
     )
     window._study_session.set_current_flashcard(0)
     window.timer_page.show_flashcard_question("Q?", display_duration_seconds=5)

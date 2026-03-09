@@ -8,6 +8,8 @@ from PySide6.QtWidgets import QApplication
 
 from estudai.services.settings import (
     AppSettings,
+    WrongAnswerCompletionMode,
+    WrongAnswerReinsertionMode,
     copy_notification_sound_file,
     get_default_notification_sound_path,
     load_app_settings,
@@ -45,11 +47,32 @@ def test_settings_defaults_and_persistence() -> None:
         question_display_duration_seconds=4,
         answer_display_duration_seconds=7,
         notification_sound_path="/tmp/sound.wav",
+        wrong_answer_completion_mode=(
+            WrongAnswerCompletionMode.UNTIL_CORRECT_MORE_THAN_WRONG
+        ),
+        wrong_answer_reinsertion_mode=(WrongAnswerReinsertionMode.AFTER_X_FLASHCARDS),
+        wrong_answer_reinsert_after_count=5,
     )
     save_app_settings(expected)
 
     restored = load_app_settings()
     assert restored == expected
+
+
+def test_settings_persist_wrong_answer_reinsert_after_zero() -> None:
+    """Verify the After-X setting accepts and restores zero."""
+    expected = AppSettings(
+        wrong_answer_reinsertion_mode=WrongAnswerReinsertionMode.AFTER_X_FLASHCARDS,
+        wrong_answer_reinsert_after_count=0,
+    )
+
+    save_app_settings(expected)
+
+    restored = load_app_settings()
+    assert restored.wrong_answer_reinsertion_mode is (
+        WrongAnswerReinsertionMode.AFTER_X_FLASHCARDS
+    )
+    assert restored.wrong_answer_reinsert_after_count == 0
 
 
 def test_get_default_notification_sound_path_prefers_frozen_bundle(
@@ -103,6 +126,9 @@ def test_settings_page_only_persists_changes_after_save(app: QApplication) -> No
     page.flashcard_random_order_checkbox.setChecked(True)
     page.question_duration_spinbox.setValue(5)
     page.answer_duration_spinbox.setValue(11)
+    page.wrong_answer_completion_mode_combo.setCurrentIndex(1)
+    page.wrong_answer_reinsertion_mode_combo.setCurrentIndex(0)
+    page.wrong_answer_reinsert_after_spinbox.setValue(6)
 
     unchanged = load_app_settings()
     assert unchanged == AppSettings()
@@ -114,6 +140,15 @@ def test_settings_page_only_persists_changes_after_save(app: QApplication) -> No
     assert persisted.flashcard_random_order_enabled is True
     assert persisted.question_display_duration_seconds == 5
     assert persisted.answer_display_duration_seconds == 11
+    assert (
+        persisted.wrong_answer_completion_mode
+        is WrongAnswerCompletionMode.UNTIL_CORRECT_MORE_THAN_WRONG
+    )
+    assert (
+        persisted.wrong_answer_reinsertion_mode
+        is WrongAnswerReinsertionMode.AFTER_X_FLASHCARDS
+    )
+    assert persisted.wrong_answer_reinsert_after_count == 6
 
 
 def test_settings_page_checkbox_keeps_native_indicator_styles(
@@ -124,6 +159,45 @@ def test_settings_page_checkbox_keeps_native_indicator_styles(
     stylesheet = page.flashcard_random_order_checkbox.styleSheet()
 
     assert stylesheet == ""
+
+
+def test_settings_page_enables_after_x_only_for_matching_mode(
+    app: QApplication,
+) -> None:
+    """Verify the reinsertion X input tracks the selected reinsertion mode."""
+    save_app_settings(
+        AppSettings(
+            wrong_answer_reinsertion_mode=WrongAnswerReinsertionMode.PUSH_TO_END
+        )
+    )
+    page = SettingsPage()
+
+    assert page.wrong_answer_reinsert_after_spinbox.isEnabled() is False
+
+    page.wrong_answer_reinsertion_mode_combo.setCurrentIndex(0)
+
+    assert page.wrong_answer_reinsert_after_spinbox.isEnabled() is True
+
+
+def test_settings_page_blocks_save_when_spinbox_text_is_out_of_range(
+    app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify invalid typed numeric input raises a warning and aborts save."""
+    save_app_settings(AppSettings(flashcard_probability_percent=30))
+    page = SettingsPage()
+    warnings: list[str] = []
+    page.flashcard_probability_spinbox.lineEdit().setText("101")
+    monkeypatch.setattr(
+        "estudai.ui.pages.settings_page.QMessageBox.warning",
+        lambda _parent, _title, message: warnings.append(message),
+    )
+
+    page._handle_save_clicked()
+
+    assert warnings == [
+        "Probability of showing flashcard must be between 0 and 100 percent."
+    ]
+    assert load_app_settings().flashcard_probability_percent == 30
 
 
 def test_settings_page_uploads_sound_and_plays_test(
@@ -174,18 +248,35 @@ def test_settings_page_cancel_restores_persisted_values(app: QApplication) -> No
             flashcard_random_order_enabled=True,
             question_display_duration_seconds=4,
             answer_display_duration_seconds=7,
+            wrong_answer_completion_mode=(
+                WrongAnswerCompletionMode.UNTIL_CORRECT_MORE_THAN_WRONG
+            ),
+            wrong_answer_reinsertion_mode=(
+                WrongAnswerReinsertionMode.AFTER_X_FLASHCARDS
+            ),
+            wrong_answer_reinsert_after_count=8,
         )
     )
     page = SettingsPage()
     page.timer_duration_spinbox.setValue(999)
     page.flashcard_probability_spinbox.setValue(1)
     page.flashcard_random_order_checkbox.setChecked(False)
+    page.wrong_answer_completion_mode_combo.setCurrentIndex(0)
+    page.wrong_answer_reinsertion_mode_combo.setCurrentIndex(1)
+    page.wrong_answer_reinsert_after_spinbox.setValue(2)
 
     page._handle_cancel_clicked()
 
     assert page.timer_duration_spinbox.value() == 120
     assert page.flashcard_probability_spinbox.value() == 55
     assert page.flashcard_random_order_checkbox.isChecked() is True
+    assert page.wrong_answer_completion_mode_combo.currentData() == (
+        WrongAnswerCompletionMode.UNTIL_CORRECT_MORE_THAN_WRONG.value
+    )
+    assert page.wrong_answer_reinsertion_mode_combo.currentData() == (
+        WrongAnswerReinsertionMode.AFTER_X_FLASHCARDS.value
+    )
+    assert page.wrong_answer_reinsert_after_spinbox.value() == 8
 
 
 def test_settings_page_warns_and_tests_default_sound(

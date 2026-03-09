@@ -1,0 +1,169 @@
+"""Study-session retry and queue behavior tests."""
+
+from pathlib import Path
+
+from estudai.services.csv_flashcards import Flashcard
+from estudai.services.settings import (
+    WrongAnswerCompletionMode,
+    WrongAnswerReinsertionMode,
+)
+from estudai.ui.study_session import StudyCardState, StudySessionController
+
+
+def _flashcards(count: int) -> list[Flashcard]:
+    """Build a small deterministic flashcard set for session tests."""
+    return [
+        Flashcard(
+            question=f"Q{index}?",
+            answer=f"A{index}.",
+            source_file=Path("cards.csv"),
+            source_line=index + 1,
+        )
+        for index in range(count)
+    ]
+
+
+def _start_session(
+    flashcard_count: int,
+    *,
+    completion_mode: WrongAnswerCompletionMode = (
+        WrongAnswerCompletionMode.UNTIL_CORRECT_ONCE
+    ),
+    reinsertion_mode: WrongAnswerReinsertionMode = (
+        WrongAnswerReinsertionMode.PUSH_TO_END
+    ),
+    reinsert_after_count: int = 3,
+    random_order: bool = False,
+) -> StudySessionController:
+    """Create and start a study session with configurable retry rules."""
+    session = StudySessionController()
+    started = session.start(
+        _flashcards(flashcard_count),
+        wrong_answer_completion_mode=completion_mode,
+        wrong_answer_reinsertion_mode=reinsertion_mode,
+        wrong_answer_reinsert_after_count=reinsert_after_count,
+        random_order=random_order,
+        choice_func=lambda indexes: indexes[-1],
+    )
+
+    assert started is True
+    return session
+
+
+def test_retry_mode_a_completes_after_one_correct_retry() -> None:
+    """Verify Mode A completes a wrong card after the next correct answer."""
+    session = _start_session(2)
+
+    assert session.next_flashcard().question == "Q0?"
+    assert session.apply_current_score("wrong") is True
+    assert session.card_states[0] is StudyCardState.WRONG_PENDING
+    assert session.queued_flashcard_indexes() == [1, 0]
+
+    assert session.next_flashcard().question == "Q1?"
+    assert session.apply_current_score("correct") is True
+    assert session.card_states[1] is StudyCardState.COMPLETED
+
+    assert session.next_flashcard().question == "Q0?"
+    assert session.apply_current_score("correct") is True
+    assert session.card_states[0] is StudyCardState.COMPLETED
+    assert session.is_complete() is True
+
+
+def test_retry_mode_b_requires_more_correct_than_wrong() -> None:
+    """Verify Mode B keeps a card active until correct answers exceed wrong answers."""
+    session = _start_session(
+        1,
+        completion_mode=WrongAnswerCompletionMode.UNTIL_CORRECT_MORE_THAN_WRONG,
+    )
+
+    assert session.next_flashcard().question == "Q0?"
+    assert session.apply_current_score("wrong") is True
+    assert session.card_counters[0].wrong_count == 1
+    assert session.card_states[0] is StudyCardState.WRONG_PENDING
+    assert session.queued_flashcard_indexes() == [0]
+
+    assert session.next_flashcard().question == "Q0?"
+    assert session.apply_current_score("correct") is True
+    assert session.card_counters[0].correct_count == 1
+    assert session.card_states[0] is StudyCardState.WRONG_PENDING
+    assert session.queued_flashcard_indexes() == [0]
+
+    assert session.next_flashcard().question == "Q0?"
+    assert session.apply_current_score("correct") is True
+    assert session.card_counters[0].correct_count == 2
+    assert session.card_states[0] is StudyCardState.COMPLETED
+
+
+def test_wrong_answer_reinsert_after_x_places_card_after_requested_gap() -> None:
+    """Verify wrong cards are reinserted after X upcoming flashcards."""
+    session = _start_session(
+        4,
+        reinsertion_mode=WrongAnswerReinsertionMode.AFTER_X_FLASHCARDS,
+        reinsert_after_count=1,
+    )
+
+    assert session.next_flashcard().question == "Q0?"
+    assert session.apply_current_score("wrong") is True
+
+    assert session.queued_flashcard_indexes() == [1, 0, 2, 3]
+
+
+def test_wrong_answer_reinsert_after_zero_shows_card_again_immediately() -> None:
+    """Verify After-X zero reinserts the wrong card at the front of the queue."""
+    session = _start_session(
+        3,
+        reinsertion_mode=WrongAnswerReinsertionMode.AFTER_X_FLASHCARDS,
+        reinsert_after_count=0,
+    )
+
+    assert session.next_flashcard().question == "Q0?"
+    assert session.apply_current_score("wrong") is True
+
+    assert session.queued_flashcard_indexes() == [0, 1, 2]
+
+
+def test_wrong_answer_reinsert_after_x_pushes_to_end_when_gap_is_too_large() -> None:
+    """Verify large X values fall back to queue-end reinsertion."""
+    session = _start_session(
+        3,
+        reinsertion_mode=WrongAnswerReinsertionMode.AFTER_X_FLASHCARDS,
+        reinsert_after_count=10,
+    )
+
+    assert session.next_flashcard().question == "Q0?"
+    assert session.apply_current_score("wrong") is True
+
+    assert session.queued_flashcard_indexes() == [1, 2, 0]
+
+
+def test_repeated_wrong_answers_keep_card_in_queue_without_dropping_it() -> None:
+    """Verify repeated wrong answers preserve the card and accumulate counters."""
+    session = _start_session(1)
+
+    assert session.next_flashcard().question == "Q0?"
+    assert session.apply_current_score("wrong") is True
+    assert session.next_flashcard().question == "Q0?"
+    assert session.apply_current_score("wrong") is True
+
+    assert session.card_counters[0].wrong_count == 2
+    assert session.card_states[0] is StudyCardState.WRONG_PENDING
+    assert session.queued_flashcard_indexes() == [0]
+
+
+def test_random_order_builds_predictable_initial_queue_and_keeps_wrong_card_active() -> (
+    None
+):
+    """Verify random-order sessions preserve reinsertion behavior deterministically."""
+    session = _start_session(
+        3,
+        reinsertion_mode=WrongAnswerReinsertionMode.AFTER_X_FLASHCARDS,
+        reinsert_after_count=1,
+        random_order=True,
+    )
+
+    assert session.queued_flashcard_indexes() == [2, 1, 0]
+    assert session.next_flashcard().question == "Q2?"
+    assert session.apply_current_score("wrong") is True
+
+    assert session.queued_flashcard_indexes() == [1, 2, 0]
+    assert session.next_flashcard().question == "Q1?"
