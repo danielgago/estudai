@@ -255,7 +255,9 @@ class TimerPage(QWidget):
             checked_text_color = QColor("black")
             if checked_fill_color.lightness() < 150:
                 checked_text_color = QColor("white")
-            disabled_fill_color = blend_colors(button_color, window_color, overlay_ratio=0.55)
+            disabled_fill_color = blend_colors(
+                button_color, window_color, overlay_ratio=0.55
+            )
             disabled_border_color = blend_colors(
                 disabled_fill_color,
                 window_color,
