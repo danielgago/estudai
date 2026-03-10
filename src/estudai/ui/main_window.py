@@ -340,6 +340,34 @@ class MainWindow(QMainWindow):
 
     def _configure_window_shortcuts(self) -> None:
         """Register app-scoped shortcuts that should work regardless of focus."""
+        self._timer_page_pause_resume_shortcut = QShortcut(
+            QKeySequence("Space"), self
+        )
+        self._timer_page_pause_resume_shortcut.setContext(Qt.ApplicationShortcut)
+        self._timer_page_pause_resume_shortcut.activated.connect(
+            self._trigger_timer_page_pause_resume
+        )
+
+        self._timer_page_start_stop_shortcuts = [
+            QShortcut(QKeySequence("Return"), self),
+            QShortcut(QKeySequence("Enter"), self),
+        ]
+        for shortcut in self._timer_page_start_stop_shortcuts:
+            shortcut.setContext(Qt.ApplicationShortcut)
+            shortcut.activated.connect(self._trigger_timer_page_start_stop)
+
+        self._timer_page_mark_correct_shortcut = QShortcut(QKeySequence("Up"), self)
+        self._timer_page_mark_correct_shortcut.setContext(Qt.ApplicationShortcut)
+        self._timer_page_mark_correct_shortcut.activated.connect(
+            self._trigger_timer_page_mark_correct
+        )
+
+        self._timer_page_mark_wrong_shortcut = QShortcut(QKeySequence("Down"), self)
+        self._timer_page_mark_wrong_shortcut.setContext(Qt.ApplicationShortcut)
+        self._timer_page_mark_wrong_shortcut.activated.connect(
+            self._trigger_timer_page_mark_wrong
+        )
+
         self._toggle_fullscreen_shortcut = QShortcut(QKeySequence("F11"), self)
         self._toggle_fullscreen_shortcut.setContext(Qt.ApplicationShortcut)
         self._toggle_fullscreen_shortcut.activated.connect(self.toggle_fullscreen)
@@ -550,22 +578,50 @@ class MainWindow(QMainWindow):
             return
 
         if action is HotkeyAction.PAUSE_RESUME:
-            if self.timer_page.pause_button.isEnabled():
-                self.timer_page.pause_button.click()
+            self._trigger_timer_page_pause_resume()
             return
         if action is HotkeyAction.START_STOP:
-            if self.timer_page.start_button.isEnabled():
-                self.timer_page.start_button.click()
-            elif self.timer_page.stop_button.isEnabled():
-                self.timer_page.stop_button.click()
+            self._trigger_timer_page_start_stop()
             return
         if action is HotkeyAction.MARK_CORRECT:
-            if self.timer_page.correct_button.isEnabled():
-                self.timer_page.correct_button.click()
+            self._trigger_timer_page_mark_correct()
             return
         if action is HotkeyAction.MARK_WRONG:
-            if self.timer_page.wrong_button.isEnabled():
-                self.timer_page.wrong_button.click()
+            self._trigger_timer_page_mark_wrong()
+
+    def _timer_page_is_active(self) -> bool:
+        """Return whether timer hotkeys should be active for the current page."""
+        return self.stacked_widget.currentWidget() is self.timer_page
+
+    def _trigger_timer_page_pause_resume(self) -> None:
+        """Mirror the pause/resume button path for local and global shortcuts."""
+        if not self._timer_page_is_active():
+            return
+        if self.timer_page.pause_button.isEnabled():
+            self.timer_page.pause_button.click()
+
+    def _trigger_timer_page_start_stop(self) -> None:
+        """Mirror the start/stop button path for local and global shortcuts."""
+        if not self._timer_page_is_active():
+            return
+        if self.timer_page.start_button.isEnabled():
+            self.timer_page.start_button.click()
+        elif self.timer_page.stop_button.isEnabled():
+            self.timer_page.stop_button.click()
+
+    def _trigger_timer_page_mark_correct(self) -> None:
+        """Mirror the correct button path for local and global shortcuts."""
+        if not self._timer_page_is_active():
+            return
+        if self.timer_page.correct_button.isEnabled():
+            self.timer_page.correct_button.click()
+
+    def _trigger_timer_page_mark_wrong(self) -> None:
+        """Mirror the wrong button path for local and global shortcuts."""
+        if not self._timer_page_is_active():
+            return
+        if self.timer_page.wrong_button.isEnabled():
+            self.timer_page.wrong_button.click()
 
     def _start_flashcard_phase_timer(
         self, duration_milliseconds: int, callback
@@ -1018,24 +1074,6 @@ class MainWindow(QMainWindow):
         """Leave fullscreen mode when currently active."""
         if self.isFullScreen():
             self.showNormal()
-
-    def keyPressEvent(self, event) -> None:  # noqa: N802
-        """Handle keyboard shortcuts scoped to the main window.
-
-        Args:
-            event: Key event to process.
-        """
-        if (
-            event.key() == Qt.Key_Space
-            and self.stacked_widget.currentWidget() is self.timer_page
-        ):
-            if self.timer_page.start_button.isEnabled():
-                self.timer_page.start_timer()
-            elif self.timer_page.pause_button.isEnabled():
-                self.timer_page.pause_timer()
-            event.accept()
-            return
-        super().keyPressEvent(event)
 
     def _widget_contains_global_position(
         self, widget: QWidget, global_position: QPoint

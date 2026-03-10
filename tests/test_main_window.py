@@ -1654,28 +1654,69 @@ def test_sidebar_click_does_not_leave_management_page(
     assert window.stacked_widget.currentWidget() is window.management_page
 
 
-def test_spacebar_shortcut_starts_and_pauses_timer(
+def test_in_app_timer_shortcuts_control_timer(
     app: QApplication, tmp_path: Path
 ) -> None:
-    """Verify spacebar starts timer when stopped and pauses when running."""
+    """Verify in-app timer shortcuts mirror the timer button flows."""
     window = MainWindow()
     biology_folder = tmp_path / "biology"
     biology_folder.mkdir()
     (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
     assert window.add_folder(biology_folder) is True
-    start_event = QKeyEvent(QEvent.KeyPress, Qt.Key_Space, Qt.NoModifier)
-    pause_event = QKeyEvent(QEvent.KeyPress, Qt.Key_Space, Qt.NoModifier)
-    resume_event = QKeyEvent(QEvent.KeyPress, Qt.Key_Space, Qt.NoModifier)
 
-    window.keyPressEvent(start_event)
+    assert window._timer_page_pause_resume_shortcut.context() == Qt.ApplicationShortcut
+    assert window._timer_page_pause_resume_shortcut.key().toString() == "Space"
+    assert len(window._timer_page_start_stop_shortcuts) == 2
+    assert {
+        shortcut.key().toString() for shortcut in window._timer_page_start_stop_shortcuts
+    } == {"Return", "Enter"}
+    assert (
+        window._timer_page_mark_correct_shortcut.context() == Qt.ApplicationShortcut
+    )
+    assert window._timer_page_mark_correct_shortcut.key().toString() == "Up"
+    assert window._timer_page_mark_wrong_shortcut.context() == Qt.ApplicationShortcut
+    assert window._timer_page_mark_wrong_shortcut.key().toString() == "Down"
+
+    window._timer_page_start_stop_shortcuts[0].activated.emit()
     assert window.timer_page.is_running is True
 
-    window.keyPressEvent(pause_event)
+    window._timer_page_pause_resume_shortcut.activated.emit()
     assert window.timer_page.is_running is False
 
-    window.keyPressEvent(resume_event)
+    window._timer_page_pause_resume_shortcut.activated.emit()
     assert window.timer_page.is_running is True
-    window.timer_page.stop_button.click()
+
+    window._timer_page_start_stop_shortcuts[1].activated.emit()
+    assert window.timer_page.is_running is False
+    assert window.timer_page.start_button.isEnabled() is True
+    assert window.timer_page.stop_button.isEnabled() is False
+
+
+def test_modified_global_binding_does_not_trigger_local_space_shortcut(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify Ctrl+Alt+Space only follows the global pause path inside the app."""
+    backend = _FakeHotkeyBackend()
+    window = MainWindow(hotkey_service=GlobalHotkeyService(backend=backend))
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+
+    window._timer_page_start_stop_shortcuts[0].activated.emit()
+    assert window.timer_page.is_running is True
+
+    modified_space_event = QKeyEvent(
+        QEvent.KeyPress,
+        Qt.Key_Space,
+        Qt.ControlModifier | Qt.AltModifier,
+    )
+    QApplication.sendEvent(window, modified_space_event)
+    assert window.timer_page.is_running is True
+
+    backend.trigger("ctrl+alt+space")
+    assert window.timer_page.is_running is False
+    assert window.timer_page.pause_button.text() == "Resume"
 
 
 def test_fullscreen_shortcuts_use_app_scope_and_expected_handlers(
@@ -1763,6 +1804,37 @@ def test_global_hotkeys_score_flashcards_through_existing_controls(
     assert window._pending_flashcard_score == "correct"
 
     backend.trigger("ctrl+alt+down")
+    assert window.timer_page.selected_flashcard_score() == "wrong"
+    assert window._pending_flashcard_score == "wrong"
+
+
+def test_in_app_hotkeys_score_flashcards_through_existing_controls(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify local Up and Down shortcuts mirror the flashcard score buttons."""
+    save_app_settings(
+        AppSettings(
+            question_display_duration_seconds=1,
+            answer_display_duration_seconds=8,
+        )
+    )
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+    assert window._start_study_session() is True
+
+    flashcard = window._next_flashcard_for_display()
+    assert flashcard is not None
+    window.show_flashcard_popup(flashcard)
+    window._show_current_flashcard_answer(window._active_flashcard_sequence_id, 8)
+
+    window._timer_page_mark_correct_shortcut.activated.emit()
+    assert window.timer_page.selected_flashcard_score() == "correct"
+    assert window._pending_flashcard_score == "correct"
+
+    window._timer_page_mark_wrong_shortcut.activated.emit()
     assert window.timer_page.selected_flashcard_score() == "wrong"
     assert window._pending_flashcard_score == "wrong"
 
