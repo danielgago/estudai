@@ -16,7 +16,9 @@ from PySide6.QtCore import (
 from PySide6.QtGui import (
     QColor,
     QFont,
+    QKeySequence,
     QPalette,
+    QShortcut,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -169,6 +171,7 @@ class MainWindow(QMainWindow):
 
         self._build_sidebar(root_layout)
         self._build_content_area(root_layout)
+        self._configure_window_shortcuts()
 
         app_settings = load_app_settings()
         self.timer_page = TimerPage(
@@ -334,6 +337,16 @@ class MainWindow(QMainWindow):
         self.stacked_widget = QStackedWidget()
         content_layout.addWidget(self.stacked_widget)
         root_layout.addWidget(content_container)
+
+    def _configure_window_shortcuts(self) -> None:
+        """Register app-scoped shortcuts that should work regardless of focus."""
+        self._toggle_fullscreen_shortcut = QShortcut(QKeySequence("F11"), self)
+        self._toggle_fullscreen_shortcut.setContext(Qt.ApplicationShortcut)
+        self._toggle_fullscreen_shortcut.activated.connect(self.toggle_fullscreen)
+
+        self._exit_fullscreen_shortcut = QShortcut(QKeySequence("Escape"), self)
+        self._exit_fullscreen_shortcut.setContext(Qt.ApplicationShortcut)
+        self._exit_fullscreen_shortcut.activated.connect(self.exit_fullscreen)
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         """Resize sidebar width proportionally with window size."""
@@ -993,6 +1006,18 @@ class MainWindow(QMainWindow):
             self.sidebar.setVisible(True)
             return
         self.sidebar.setVisible(False)
+
+    def toggle_fullscreen(self) -> None:
+        """Toggle between fullscreen and normal window modes."""
+        if self.isFullScreen():
+            self.showNormal()
+            return
+        self.showFullScreen()
+
+    def exit_fullscreen(self) -> None:
+        """Leave fullscreen mode when currently active."""
+        if self.isFullScreen():
+            self.showNormal()
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         """Handle keyboard shortcuts scoped to the main window.

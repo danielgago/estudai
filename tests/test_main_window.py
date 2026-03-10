@@ -70,6 +70,41 @@ class _FakeHotkeyBackend:
         raise HotkeyRegistrationError(msg)
 
 
+class _FullscreenSpyWindow(MainWindow):
+    """Main window variant that records fullscreen method calls for tests."""
+
+    def __init__(self) -> None:
+        self.fullscreen_state = False
+        self.fullscreen_calls: list[str] = []
+        self.toggle_fullscreen_call_count = 0
+        self.exit_fullscreen_call_count = 0
+        super().__init__()
+
+    def isFullScreen(self) -> bool:  # noqa: N802
+        """Return the test-controlled fullscreen state."""
+        return self.fullscreen_state
+
+    def showFullScreen(self) -> None:  # noqa: N802
+        """Record fullscreen entry without needing a real window manager."""
+        self.fullscreen_calls.append("showFullScreen")
+        self.fullscreen_state = True
+
+    def showNormal(self) -> None:  # noqa: N802
+        """Record fullscreen exit without needing a real window manager."""
+        self.fullscreen_calls.append("showNormal")
+        self.fullscreen_state = False
+
+    def toggle_fullscreen(self) -> None:
+        """Record shortcut activation and delegate to the real logic."""
+        self.toggle_fullscreen_call_count += 1
+        super().toggle_fullscreen()
+
+    def exit_fullscreen(self) -> None:
+        """Record shortcut activation and delegate to the real logic."""
+        self.exit_fullscreen_call_count += 1
+        super().exit_fullscreen()
+
+
 def test_main_window_registers_all_pages(app: QApplication) -> None:
     """Verify that all expected pages are present in the stack."""
     window = MainWindow()
@@ -1641,6 +1676,39 @@ def test_spacebar_shortcut_starts_and_pauses_timer(
     window.keyPressEvent(resume_event)
     assert window.timer_page.is_running is True
     window.timer_page.stop_button.click()
+
+
+def test_fullscreen_shortcuts_use_app_scope_and_expected_handlers(
+    app: QApplication,
+) -> None:
+    """Verify F11 toggles fullscreen and Escape exits it through shortcuts."""
+    window = _FullscreenSpyWindow()
+
+    assert window._toggle_fullscreen_shortcut.context() == Qt.ApplicationShortcut
+    assert window._toggle_fullscreen_shortcut.key().toString() == "F11"
+    assert window._exit_fullscreen_shortcut.context() == Qt.ApplicationShortcut
+    assert window._exit_fullscreen_shortcut.key().toString() == "Esc"
+
+    window._toggle_fullscreen_shortcut.activated.emit()
+    window._exit_fullscreen_shortcut.activated.emit()
+
+    assert window.toggle_fullscreen_call_count == 1
+    assert window.exit_fullscreen_call_count == 1
+    assert window.fullscreen_calls == ["showFullScreen", "showNormal"]
+
+
+def test_toggle_fullscreen_switches_between_fullscreen_and_normal_modes(
+    app: QApplication,
+) -> None:
+    """Verify fullscreen helper enters and leaves fullscreen deterministically."""
+    window = _FullscreenSpyWindow()
+
+    window.toggle_fullscreen()
+    window.toggle_fullscreen()
+    window.exit_fullscreen()
+
+    assert window.fullscreen_calls == ["showFullScreen", "showNormal"]
+    assert window.isFullScreen() is False
 
 
 def test_global_hotkeys_control_timer_using_button_paths(
