@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QUrl, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QKeySequence
 from PySide6.QtWidgets import (
     QComboBox,
     QCheckBox,
@@ -14,6 +15,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QKeySequenceEdit,
     QMessageBox,
     QPushButton,
     QSpinBox,
@@ -27,12 +29,14 @@ except ImportError:  # pragma: no cover - depends on system multimedia libraries
     QAudioOutput = None  # type: ignore[assignment]
     QMediaPlayer = None  # type: ignore[assignment]
 
+from estudai.services.hotkeys import normalize_hotkey_bindings
 from estudai.services.settings import (
     AppSettings,
     WrongAnswerCompletionMode,
     WrongAnswerReinsertionMode,
     copy_notification_sound_file,
     get_default_notification_sound_path,
+    hotkey_bindings_from_settings,
     load_app_settings,
     save_app_settings,
 )
@@ -43,12 +47,19 @@ class SettingsPage(QWidget):
     """Page that edits and persists app settings."""
 
     timer_duration_seconds_changed = Signal(int)
+    settings_saved = Signal(object)
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        save_settings_callback: Callable[[AppSettings], None] | None = None,
+    ) -> None:
         """Initialize the settings page."""
         super().__init__()
         self._notification_sound_path = ""
         self._default_notification_sound_path = get_default_notification_sound_path()
+        self._save_settings_callback = (
+            save_settings_callback or self._save_settings_directly
+        )
         self._audio_output: object | None = None
         self._sound_player: object | None = None
         if QAudioOutput is not None and QMediaPlayer is not None:
@@ -171,6 +182,39 @@ class SettingsPage(QWidget):
         sound_buttons_layout.addStretch()
         sound_layout.addLayout(sound_buttons_layout)
         layout.addWidget(sound_group)
+
+        hotkey_group = QGroupBox("Global Hotkeys")
+        hotkey_form = QFormLayout(hotkey_group)
+        self.pause_resume_hotkey_edit = QKeySequenceEdit()
+        self.pause_resume_hotkey_edit.setClearButtonEnabled(True)
+        self.start_stop_hotkey_edit = QKeySequenceEdit()
+        self.start_stop_hotkey_edit.setClearButtonEnabled(True)
+        self.mark_correct_hotkey_edit = QKeySequenceEdit()
+        self.mark_correct_hotkey_edit.setClearButtonEnabled(True)
+        self.mark_wrong_hotkey_edit = QKeySequenceEdit()
+        self.mark_wrong_hotkey_edit.setClearButtonEnabled(True)
+        for editor in (
+            self.pause_resume_hotkey_edit,
+            self.start_stop_hotkey_edit,
+            self.mark_correct_hotkey_edit,
+            self.mark_wrong_hotkey_edit,
+        ):
+            maximum_sequence_length = getattr(editor, "setMaximumSequenceLength", None)
+            if callable(maximum_sequence_length):
+                maximum_sequence_length(1)
+        hotkey_form.addRow("Pause / Resume:", self.pause_resume_hotkey_edit)
+        hotkey_form.addRow("Start / Stop:", self.start_stop_hotkey_edit)
+        hotkey_form.addRow("Mark correct:", self.mark_correct_hotkey_edit)
+        hotkey_form.addRow("Mark wrong:", self.mark_wrong_hotkey_edit)
+        self.hotkey_help_label = QLabel(
+            "Bindings are system-wide on Windows and X11 Linux sessions. "
+            "Choose single key combinations only."
+        )
+        self.hotkey_help_label.setWordWrap(True)
+        set_muted_label_color(self.hotkey_help_label)
+        hotkey_form.addRow("", self.hotkey_help_label)
+        layout.addWidget(hotkey_group)
+
         footer_layout = QHBoxLayout()
         footer_layout.addStretch()
         self.cancel_button = QPushButton("Cancel")
@@ -185,6 +229,7 @@ class SettingsPage(QWidget):
         if event.type() in (QEvent.PaletteChange, QEvent.ApplicationPaletteChange):
             set_muted_label_color(self.description_label)
             set_muted_label_color(self.notification_sound_label)
+            set_muted_label_color(self.hotkey_help_label)
         super().changeEvent(event)
 
     def _connect_signals(self) -> None:
@@ -223,6 +268,18 @@ class SettingsPage(QWidget):
         self.wrong_answer_reinsert_after_spinbox.setValue(
             settings.wrong_answer_reinsert_after_count
         )
+        self.pause_resume_hotkey_edit.setKeySequence(
+            QKeySequence(settings.pause_resume_hotkey)
+        )
+        self.start_stop_hotkey_edit.setKeySequence(
+            QKeySequence(settings.start_stop_hotkey)
+        )
+        self.mark_correct_hotkey_edit.setKeySequence(
+            QKeySequence(settings.mark_correct_hotkey)
+        )
+        self.mark_wrong_hotkey_edit.setKeySequence(
+            QKeySequence(settings.mark_wrong_hotkey)
+        )
         self._update_wrong_answer_reinsert_after_enabled_state()
         self._update_sound_summary()
 
@@ -252,6 +309,10 @@ class SettingsPage(QWidget):
                 self.wrong_answer_reinsertion_mode_combo.currentData()
             ),
             wrong_answer_reinsert_after_count=self.wrong_answer_reinsert_after_spinbox.value(),
+            pause_resume_hotkey=self.pause_resume_hotkey_edit.keySequence().toString(),
+            start_stop_hotkey=self.start_stop_hotkey_edit.keySequence().toString(),
+            mark_correct_hotkey=self.mark_correct_hotkey_edit.keySequence().toString(),
+            mark_wrong_hotkey=self.mark_wrong_hotkey_edit.keySequence().toString(),
         )
 
     def _persist_settings(self) -> None:
@@ -261,8 +322,13 @@ class SettingsPage(QWidget):
             QMessageBox.warning(self, "Invalid settings", validation_message)
             return
         settings = self._collect_settings()
-        save_app_settings(settings)
+        try:
+            self._save_settings_callback(settings)
+        except ValueError as error:
+            QMessageBox.warning(self, "Invalid settings", str(error))
+            return
         self.timer_duration_seconds_changed.emit(settings.timer_duration_seconds)
+        self.settings_saved.emit(settings)
 
     def _update_sound_summary(self) -> None:
         """Refresh selected sound label and test button state."""
@@ -385,4 +451,15 @@ class SettingsPage(QWidget):
             if not line_edit.hasAcceptableInput():
                 return f"{label} must be between {expected_range}."
 
+        try:
+            normalize_hotkey_bindings(
+                hotkey_bindings_from_settings(self._collect_settings())
+            )
+        except ValueError as error:
+            return str(error)
+
         return None
+
+    def _save_settings_directly(self, settings: AppSettings) -> None:
+        """Persist settings when no external save orchestrator is provided."""
+        save_app_settings(settings)

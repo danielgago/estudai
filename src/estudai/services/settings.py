@@ -11,6 +11,7 @@ from pathlib import Path
 from PySide6.QtCore import QSettings
 
 from .folder_storage import get_app_data_dir
+from .hotkeys import DEFAULT_HOTKEY_BINDINGS, HotkeyAction
 
 SETTINGS_FILENAME = "settings.ini"
 SOUNDS_FOLDER_NAME = "sounds"
@@ -25,6 +26,10 @@ SETTINGS_KEY_WRONG_ANSWER_REINSERTION_MODE = "flashcard/wrong_answer_reinsertion
 SETTINGS_KEY_WRONG_ANSWER_REINSERT_AFTER_COUNT = (
     "flashcard/wrong_answer_reinsert_after_count"
 )
+SETTINGS_KEY_HOTKEY_PAUSE_RESUME = "hotkeys/pause_resume"
+SETTINGS_KEY_HOTKEY_START_STOP = "hotkeys/start_stop"
+SETTINGS_KEY_HOTKEY_MARK_CORRECT = "hotkeys/mark_correct"
+SETTINGS_KEY_HOTKEY_MARK_WRONG = "hotkeys/mark_wrong"
 ALLOWED_SOUND_EXTENSIONS = {".mp3", ".wav"}
 
 
@@ -59,6 +64,10 @@ class AppSettings:
         WrongAnswerReinsertionMode.PUSH_TO_END
     )
     wrong_answer_reinsert_after_count: int = 3
+    pause_resume_hotkey: str = DEFAULT_HOTKEY_BINDINGS[HotkeyAction.PAUSE_RESUME]
+    start_stop_hotkey: str = DEFAULT_HOTKEY_BINDINGS[HotkeyAction.START_STOP]
+    mark_correct_hotkey: str = DEFAULT_HOTKEY_BINDINGS[HotkeyAction.MARK_CORRECT]
+    mark_wrong_hotkey: str = DEFAULT_HOTKEY_BINDINGS[HotkeyAction.MARK_WRONG]
 
 
 def get_default_notification_sound_path() -> str:
@@ -169,6 +178,29 @@ def _normalize_enum[EnumType: StrEnum](
     return default
 
 
+def _normalize_text(raw_value: object, *, default: str) -> str:
+    """Normalize a string-like value into trimmed text."""
+    if isinstance(raw_value, str):
+        normalized = raw_value.strip()
+        if normalized:
+            return normalized
+        return default
+    if raw_value is None:
+        return default
+    normalized = str(raw_value).strip()
+    return normalized or default
+
+
+def hotkey_bindings_from_settings(settings: AppSettings) -> dict[HotkeyAction, str]:
+    """Return the persisted hotkey bindings keyed by app action."""
+    return {
+        HotkeyAction.PAUSE_RESUME: settings.pause_resume_hotkey,
+        HotkeyAction.START_STOP: settings.start_stop_hotkey,
+        HotkeyAction.MARK_CORRECT: settings.mark_correct_hotkey,
+        HotkeyAction.MARK_WRONG: settings.mark_wrong_hotkey,
+    }
+
+
 def load_app_settings() -> AppSettings:
     """Load current app settings from QSettings.
 
@@ -252,6 +284,34 @@ def load_app_settings() -> AppSettings:
             minimum=0,
             maximum=999,
         ),
+        pause_resume_hotkey=_normalize_text(
+            qsettings.value(
+                SETTINGS_KEY_HOTKEY_PAUSE_RESUME,
+                AppSettings.pause_resume_hotkey,
+            ),
+            default=AppSettings.pause_resume_hotkey,
+        ),
+        start_stop_hotkey=_normalize_text(
+            qsettings.value(
+                SETTINGS_KEY_HOTKEY_START_STOP,
+                AppSettings.start_stop_hotkey,
+            ),
+            default=AppSettings.start_stop_hotkey,
+        ),
+        mark_correct_hotkey=_normalize_text(
+            qsettings.value(
+                SETTINGS_KEY_HOTKEY_MARK_CORRECT,
+                AppSettings.mark_correct_hotkey,
+            ),
+            default=AppSettings.mark_correct_hotkey,
+        ),
+        mark_wrong_hotkey=_normalize_text(
+            qsettings.value(
+                SETTINGS_KEY_HOTKEY_MARK_WRONG,
+                AppSettings.mark_wrong_hotkey,
+            ),
+            default=AppSettings.mark_wrong_hotkey,
+        ),
     )
 
 
@@ -329,6 +389,34 @@ def save_app_settings(settings: AppSettings) -> None:
             default=AppSettings.wrong_answer_reinsert_after_count,
             minimum=0,
             maximum=999,
+        ),
+    )
+    qsettings.setValue(
+        SETTINGS_KEY_HOTKEY_PAUSE_RESUME,
+        _normalize_text(
+            settings.pause_resume_hotkey,
+            default=AppSettings.pause_resume_hotkey,
+        ),
+    )
+    qsettings.setValue(
+        SETTINGS_KEY_HOTKEY_START_STOP,
+        _normalize_text(
+            settings.start_stop_hotkey,
+            default=AppSettings.start_stop_hotkey,
+        ),
+    )
+    qsettings.setValue(
+        SETTINGS_KEY_HOTKEY_MARK_CORRECT,
+        _normalize_text(
+            settings.mark_correct_hotkey,
+            default=AppSettings.mark_correct_hotkey,
+        ),
+    )
+    qsettings.setValue(
+        SETTINGS_KEY_HOTKEY_MARK_WRONG,
+        _normalize_text(
+            settings.mark_wrong_hotkey,
+            default=AppSettings.mark_wrong_hotkey,
         ),
     )
     qsettings.sync()

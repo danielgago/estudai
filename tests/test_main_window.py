@@ -19,10 +19,13 @@ from PySide6.QtWidgets import (
 
 from estudai.services.csv_flashcards import Flashcard
 from estudai.services.folder_storage import list_persisted_folders
+from estudai.services.hotkeys import GlobalHotkeyService, HotkeyRegistrationError
 from estudai.services.settings import (
     AppSettings,
     WrongAnswerCompletionMode,
     WrongAnswerReinsertionMode,
+    load_app_settings,
+    save_app_settings,
 )
 from estudai.ui.main_window import MainWindow, SidebarCheckboxDelegate
 
@@ -40,6 +43,31 @@ def app() -> QApplication:
 def isolated_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Use an isolated app data directory for each test."""
     monkeypatch.setenv("ESTUDAI_DATA_DIR", str(tmp_path / "app-data"))
+
+
+class _FakeHotkeyBackend:
+    """Minimal backend that lets UI tests trigger global hotkeys deterministically."""
+
+    def __init__(self) -> None:
+        self.active_handles: dict[str, tuple[str, object]] = {}
+        self._next_handle = 0
+
+    def register(self, binding: str, callback) -> object:
+        handle = f"handle-{self._next_handle}"
+        self._next_handle += 1
+        self.active_handles[handle] = (binding, callback)
+        return handle
+
+    def unregister(self, handle: object) -> None:
+        self.active_handles.pop(str(handle), None)
+
+    def trigger(self, binding: str) -> None:
+        for registered_binding, callback in self.active_handles.values():
+            if registered_binding == binding:
+                callback()
+                return
+        msg = f"No hotkey registered for {binding}"
+        raise HotkeyRegistrationError(msg)
 
 
 def test_main_window_registers_all_pages(app: QApplication) -> None:
@@ -1613,6 +1641,91 @@ def test_spacebar_shortcut_starts_and_pauses_timer(
     window.keyPressEvent(resume_event)
     assert window.timer_page.is_running is True
     window.timer_page.stop_button.click()
+
+
+def test_global_hotkeys_control_timer_using_button_paths(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify global start/stop and pause/resume actions mirror timer buttons."""
+    backend = _FakeHotkeyBackend()
+    window = MainWindow(hotkey_service=GlobalHotkeyService(backend=backend))
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+
+    backend.trigger("ctrl+alt+enter")
+    assert window.timer_page.is_running is True
+
+    backend.trigger("ctrl+alt+space")
+    assert window.timer_page.is_running is False
+    assert window.timer_page.pause_button.text() == "Resume"
+
+    backend.trigger("ctrl+alt+enter")
+    assert window.timer_page.is_running is False
+    assert window.timer_page.start_button.isEnabled() is True
+    assert window.timer_page.stop_button.isEnabled() is False
+
+
+def test_global_hotkeys_score_flashcards_through_existing_controls(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify scoring hotkeys drive the same selected-state flow as the score buttons."""
+    save_app_settings(
+        AppSettings(
+            question_display_duration_seconds=1,
+            answer_display_duration_seconds=8,
+        )
+    )
+    backend = _FakeHotkeyBackend()
+    window = MainWindow(hotkey_service=GlobalHotkeyService(backend=backend))
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+    assert window._start_study_session() is True
+
+    flashcard = window._next_flashcard_for_display()
+    assert flashcard is not None
+    window.show_flashcard_popup(flashcard)
+    window._show_current_flashcard_answer(window._active_flashcard_sequence_id, 8)
+
+    backend.trigger("ctrl+alt+up")
+    assert window.timer_page.selected_flashcard_score() == "correct"
+    assert window._pending_flashcard_score == "correct"
+
+    backend.trigger("ctrl+alt+down")
+    assert window.timer_page.selected_flashcard_score() == "wrong"
+    assert window._pending_flashcard_score == "wrong"
+
+
+def test_saving_settings_rebinds_active_global_hotkeys(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify saving new bindings updates the active global registration set."""
+    backend = _FakeHotkeyBackend()
+    window = MainWindow(hotkey_service=GlobalHotkeyService(backend=backend))
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+
+    window.switch_to_settings()
+    window.settings_page.start_stop_hotkey_edit.setKeySequence("Ctrl+Alt+S")
+    window.settings_page.pause_resume_hotkey_edit.setKeySequence("Ctrl+Alt+P")
+    window.settings_page.mark_correct_hotkey_edit.setKeySequence("Ctrl+Alt+Right")
+    window.settings_page.mark_wrong_hotkey_edit.setKeySequence("Ctrl+Alt+Left")
+
+    window.settings_page._handle_save_clicked()
+
+    persisted = load_app_settings()
+    assert persisted.start_stop_hotkey == "Ctrl+Alt+S"
+    assert persisted.pause_resume_hotkey == "Ctrl+Alt+P"
+    assert persisted.mark_correct_hotkey == "Ctrl+Alt+Right"
+    assert persisted.mark_wrong_hotkey == "Ctrl+Alt+Left"
+
+    backend.trigger("ctrl+alt+s")
+    assert window.timer_page.is_running is True
 
 
 def test_management_save_validates_non_empty_fields(

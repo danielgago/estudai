@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from PySide6.QtWidgets import QApplication
 
+from estudai.services.hotkeys import DEFAULT_HOTKEY_BINDINGS, HotkeyAction
 from estudai.services.settings import (
     AppSettings,
     WrongAnswerCompletionMode,
@@ -52,6 +53,10 @@ def test_settings_defaults_and_persistence() -> None:
         ),
         wrong_answer_reinsertion_mode=(WrongAnswerReinsertionMode.AFTER_X_FLASHCARDS),
         wrong_answer_reinsert_after_count=5,
+        pause_resume_hotkey="Ctrl+Alt+P",
+        start_stop_hotkey="Ctrl+Alt+S",
+        mark_correct_hotkey="Ctrl+Alt+Right",
+        mark_wrong_hotkey="Ctrl+Alt+Left",
     )
     save_app_settings(expected)
 
@@ -82,6 +87,26 @@ def test_settings_persist_zero_second_timer_value() -> None:
     restored = load_app_settings()
 
     assert restored.timer_duration_seconds == 0
+
+
+def test_settings_default_hotkeys_match_expected_bindings() -> None:
+    """Verify new installs load the shipped global hotkey defaults."""
+    restored = load_app_settings()
+
+    assert (
+        restored.pause_resume_hotkey
+        == DEFAULT_HOTKEY_BINDINGS[HotkeyAction.PAUSE_RESUME]
+    )
+    assert (
+        restored.start_stop_hotkey == DEFAULT_HOTKEY_BINDINGS[HotkeyAction.START_STOP]
+    )
+    assert (
+        restored.mark_correct_hotkey
+        == DEFAULT_HOTKEY_BINDINGS[HotkeyAction.MARK_CORRECT]
+    )
+    assert (
+        restored.mark_wrong_hotkey == DEFAULT_HOTKEY_BINDINGS[HotkeyAction.MARK_WRONG]
+    )
 
 
 def test_get_default_notification_sound_path_prefers_frozen_bundle(
@@ -138,6 +163,10 @@ def test_settings_page_only_persists_changes_after_save(app: QApplication) -> No
     page.wrong_answer_completion_mode_combo.setCurrentIndex(1)
     page.wrong_answer_reinsertion_mode_combo.setCurrentIndex(0)
     page.wrong_answer_reinsert_after_spinbox.setValue(6)
+    page.pause_resume_hotkey_edit.setKeySequence("Ctrl+Alt+P")
+    page.start_stop_hotkey_edit.setKeySequence("Ctrl+Alt+S")
+    page.mark_correct_hotkey_edit.setKeySequence("Ctrl+Alt+Right")
+    page.mark_wrong_hotkey_edit.setKeySequence("Ctrl+Alt+Left")
 
     unchanged = load_app_settings()
     assert unchanged == AppSettings()
@@ -158,6 +187,10 @@ def test_settings_page_only_persists_changes_after_save(app: QApplication) -> No
         is WrongAnswerReinsertionMode.AFTER_X_FLASHCARDS
     )
     assert persisted.wrong_answer_reinsert_after_count == 6
+    assert persisted.pause_resume_hotkey == "Ctrl+Alt+P"
+    assert persisted.start_stop_hotkey == "Ctrl+Alt+S"
+    assert persisted.mark_correct_hotkey == "Ctrl+Alt+Right"
+    assert persisted.mark_wrong_hotkey == "Ctrl+Alt+Left"
 
 
 def test_settings_page_checkbox_keeps_native_indicator_styles(
@@ -219,6 +252,28 @@ def test_settings_page_blocks_save_when_spinbox_text_is_out_of_range(
         "Probability of showing flashcard must be between 0 and 100 percent."
     ]
     assert load_app_settings().flashcard_probability_percent == 30
+
+
+def test_settings_page_blocks_duplicate_hotkeys(
+    app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify duplicate hotkey assignments warn and do not persist."""
+    save_app_settings(AppSettings())
+    page = SettingsPage()
+    warnings: list[str] = []
+    page.pause_resume_hotkey_edit.setKeySequence("Ctrl+Alt+Space")
+    page.start_stop_hotkey_edit.setKeySequence("Ctrl+Alt+Space")
+    monkeypatch.setattr(
+        "estudai.ui.pages.settings_page.QMessageBox.warning",
+        lambda _parent, _title, message: warnings.append(message),
+    )
+
+    page._handle_save_clicked()
+
+    assert warnings == [
+        "Hotkeys must be unique. 'Ctrl+Alt+Space' is assigned to both 'pause_resume' and 'start_stop'."
+    ]
+    assert load_app_settings() == AppSettings()
 
 
 def test_settings_page_uploads_sound_and_plays_test(

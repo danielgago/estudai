@@ -5,8 +5,10 @@ description = "Flashcard timer for studying while multitasking"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "keyboard>=0.13.5",
     "pylatexenc>=2.10",
     "pyside6>=6.10.2",
+    "python-xlib>=0.33",
 ]
 
 [project.scripts]
