@@ -12,8 +12,10 @@ from estudai.services.settings import (
     AppSettings,
     DEFAULT_IN_APP_SHORTCUT_BINDINGS,
     InAppShortcutAction,
+    SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_DISPLAY_NAME,
     SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_PATH,
     SETTINGS_KEY_LEGACY_NOTIFICATION_SOUND_PATH,
+    SETTINGS_KEY_QUESTION_NOTIFICATION_SOUND_DISPLAY_NAME,
     SETTINGS_KEY_QUESTION_NOTIFICATION_SOUND_PATH,
     WrongAnswerCompletionMode,
     WrongAnswerReinsertionMode,
@@ -73,7 +75,9 @@ def test_settings_defaults_and_persistence() -> None:
         question_display_duration_seconds=4,
         answer_display_duration_seconds=7,
         question_notification_sound_path="/tmp/question-sound.wav",
+        question_notification_sound_display_name="question-sound.wav",
         answer_notification_sound_path="/tmp/answer-sound.wav",
+        answer_notification_sound_display_name="answer-sound.wav",
         wrong_answer_completion_mode=(
             WrongAnswerCompletionMode.UNTIL_CORRECT_MORE_THAN_WRONG
         ),
@@ -253,7 +257,9 @@ def test_settings_migrates_legacy_notification_sound_to_both_slots() -> None:
     restored = load_app_settings()
 
     assert restored.question_notification_sound_path == "/tmp/legacy.wav"
+    assert restored.question_notification_sound_display_name == "legacy.wav"
     assert restored.answer_notification_sound_path == "/tmp/legacy.wav"
+    assert restored.answer_notification_sound_display_name == "legacy.wav"
 
 
 def test_settings_save_clears_legacy_notification_sound_key() -> None:
@@ -276,8 +282,16 @@ def test_settings_save_clears_legacy_notification_sound_key() -> None:
         == "/tmp/question.wav"
     )
     assert (
+        qsettings.value(SETTINGS_KEY_QUESTION_NOTIFICATION_SOUND_DISPLAY_NAME)
+        == "question.wav"
+    )
+    assert (
         qsettings.value(SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_PATH)
         == "/tmp/answer.wav"
+    )
+    assert (
+        qsettings.value(SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_DISPLAY_NAME)
+        == "answer.wav"
     )
 
 
@@ -513,6 +527,14 @@ def test_settings_page_uploads_sound_and_plays_test(
     page._handle_upload_answer_sound_clicked()
     assert page.test_question_sound_button.isEnabled()
     assert page.test_answer_sound_button.isEnabled()
+    assert (
+        page.question_notification_sound_label.text()
+        == "Selected question sound: question.mp3"
+    )
+    assert (
+        page.answer_notification_sound_label.text()
+        == "Selected answer sound: answer.wav"
+    )
     assert load_app_settings().question_notification_sound_path == ""
     assert load_app_settings().answer_notification_sound_path == ""
 
@@ -520,8 +542,20 @@ def test_settings_page_uploads_sound_and_plays_test(
     persisted_settings = load_app_settings()
     persisted_question_sound = Path(persisted_settings.question_notification_sound_path)
     persisted_answer_sound = Path(persisted_settings.answer_notification_sound_path)
+    assert (
+        persisted_settings.question_notification_sound_display_name == "question.mp3"
+    )
+    assert persisted_settings.answer_notification_sound_display_name == "answer.wav"
     assert page.test_question_sound_button.isEnabled()
     assert page.test_answer_sound_button.isEnabled()
+    assert (
+        page.question_notification_sound_label.text()
+        == "Selected question sound: question.mp3"
+    )
+    assert (
+        page.answer_notification_sound_label.text()
+        == "Selected answer sound: answer.wav"
+    )
 
     page._handle_test_question_sound_clicked()
     page._handle_test_answer_sound_clicked()
@@ -570,6 +604,53 @@ def test_settings_page_cancel_restores_persisted_values(app: QApplication) -> No
         WrongAnswerReinsertionMode.AFTER_X_FLASHCARDS.value
     )
     assert page.wrong_answer_reinsert_after_spinbox.value() == 8
+
+
+def test_settings_page_cancel_keeps_persisted_sound_and_name(
+    app: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify cancel does not overwrite the saved sound slot or display name."""
+    persisted_sound = tmp_path / "persisted.wav"
+    replacement_sound = tmp_path / "replacement.mp3"
+    persisted_sound.write_bytes(b"RIFF....WAVEfmt ")
+    replacement_sound.write_bytes(b"ID3")
+    persisted_path = copy_notification_sound_file(persisted_sound, slot_name="question")
+    save_app_settings(
+        AppSettings(
+            question_notification_sound_path=persisted_path,
+            question_notification_sound_display_name="persisted.wav",
+        )
+    )
+    original_bytes = Path(persisted_path).read_bytes()
+    page = SettingsPage()
+
+    monkeypatch.setattr(
+        "estudai.ui.pages.settings_page.QFileDialog.getOpenFileName",
+        lambda *_args, **_kwargs: (
+            str(replacement_sound),
+            "Sound files (*.mp3 *.wav)",
+        ),
+    )
+    page._handle_upload_question_sound_clicked()
+
+    assert (
+        page.question_notification_sound_label.text()
+        == "Selected question sound: replacement.mp3"
+    )
+    assert Path(persisted_path).read_bytes() == original_bytes
+
+    page._handle_cancel_clicked()
+
+    restored = load_app_settings()
+    assert restored.question_notification_sound_path == persisted_path
+    assert restored.question_notification_sound_display_name == "persisted.wav"
+    assert Path(persisted_path).read_bytes() == original_bytes
+    assert (
+        page.question_notification_sound_label.text()
+        == "Selected question sound: persisted.wav"
+    )
 
 
 def test_settings_page_warns_and_tests_default_sound(
