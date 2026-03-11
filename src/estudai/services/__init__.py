@@ -7,6 +7,7 @@ from .folder_storage import (
     delete_persisted_folder,
     import_folder,
     list_persisted_folders,
+    move_persisted_folder,
     rename_persisted_folder,
 )
 from .settings import (
@@ -27,6 +28,7 @@ __all__ = [
     "list_persisted_folders",
     "load_app_settings",
     "load_flashcards_from_folder",
+    "move_persisted_folder",
     "rename_persisted_folder",
     "save_app_settings",
 ]

@@ -2,174 +2,47 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QPoint, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPalette
+from collections.abc import Iterator
+from dataclasses import dataclass
+
+from PySide6.QtCore import QEvent, QPoint, QItemSelectionModel, Qt, Signal
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QApplication,
     QAbstractItemView,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QMenu,
     QPushButton,
-    QStyle,
-    QStyleOptionButton,
-    QStyleOptionViewItem,
-    QStyledItemDelegate,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
-from estudai.services.csv_flashcards import Flashcard
-from estudai.ui.utils import create_checkable_table_item
+from estudai.services.csv_flashcards import (
+    Flashcard,
+    flashcard_question_sort_key,
+    normalize_flashcard_fields,
+)
+from estudai.ui.utils import (
+    NativeCheckboxDelegate,
+    NativeCheckboxHeaderView,
+    centered_checkbox_rect,
+    create_checkable_table_item,
+    format_card_count,
+    set_muted_label_color,
+)
 
 
-class SelectAllHeaderView(QHeaderView):
-    """Header view that paints a native checkbox in the first column."""
+@dataclass(frozen=True)
+class FlashcardTableRowState:
+    """Editable flashcard row state including selection and checked status."""
 
-    toggle_requested = Signal()
-
-    def __init__(self, orientation: Qt.Orientation, parent: QWidget) -> None:
-        """Initialize the custom header view.
-
-        Args:
-            orientation: Header orientation.
-            parent: Parent widget.
-        """
-        super().__init__(orientation, parent)
-        self._checked = False
-
-    def set_checked(self, checked: bool) -> None:
-        """Update the painted checkbox state.
-
-        Args:
-            checked: Checkbox state.
-        """
-        if self._checked == checked:
-            return
-        self._checked = checked
-        self.viewport().update()
-
-    def is_checked(self) -> bool:
-        """Return current checkbox state."""
-        return self._checked
-
-    def paintSection(
-        self, painter: QPainter, rect, logical_index: int
-    ) -> None:  # noqa: N802
-        """Paint the first section with a native checkbox indicator."""
-        if logical_index != 0:
-            super().paintSection(painter, rect, logical_index)
-            return
-
-        super().paintSection(painter, rect, logical_index)
-        style = self.style()
-        option = QStyleOptionButton()
-        option.initFrom(self)
-        checkbox_rect = style.subElementRect(QStyle.SE_CheckBoxIndicator, option, self)
-        checkbox_rect.moveCenter(rect.center())
-
-        option.rect = checkbox_rect
-        option.state = QStyle.State_Enabled
-        if self._checked:
-            option.state |= QStyle.State_On
-        else:
-            option.state |= QStyle.State_Off
-
-        painter.save()
-        style.drawPrimitive(QStyle.PE_IndicatorCheckBox, option, painter, self)
-        painter.restore()
-
-    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
-        """Emit toggle request when clicking inside first header section."""
-        if event.button() == Qt.LeftButton and self.logicalIndexAt(event.pos()) == 0:
-            self.toggle_requested.emit()
-            event.accept()
-            return
-        super().mouseReleaseEvent(event)
-
-
-class CenteredCheckboxDelegate(QStyledItemDelegate):
-    """Delegate that paints checkboxes centered inside their table cell."""
-
-    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
-        """Paint first-column checkboxes centered to match header indicator."""
-        if index.column() != 0:
-            super().paint(painter, option, index)
-            return
-
-        style = (
-            option.widget.style() if option.widget is not None else QApplication.style()
-        )
-        item_option = QStyleOptionViewItem(option)
-        self.initStyleOption(item_option, index)
-        item_option.text = ""
-        item_option.features &= ~QStyleOptionViewItem.HasCheckIndicator
-        style.drawControl(QStyle.CE_ItemViewItem, item_option, painter, option.widget)
-
-        check_state = index.data(Qt.CheckStateRole)
-        if check_state is None:
-            return
-        checkbox_option = QStyleOptionButton()
-        checkbox_option.state = QStyle.State_Enabled
-        if Qt.CheckState(check_state) == Qt.Checked:
-            checkbox_option.state |= QStyle.State_On
-        else:
-            checkbox_option.state |= QStyle.State_Off
-        checkbox_option.rect = self._checkbox_rect(option)
-        style.drawPrimitive(
-            QStyle.PE_IndicatorCheckBox,
-            checkbox_option,
-            painter,
-            option.widget,
-        )
-
-    def editorEvent(self, event, model, option: QStyleOptionViewItem, index) -> bool:
-        """Toggle first-column checkboxes only when centered indicator is clicked."""
-        if index.column() != 0:
-            return super().editorEvent(event, model, option, index)
-
-        flags = model.flags(index)
-        if not (flags & Qt.ItemIsUserCheckable and flags & Qt.ItemIsEnabled):
-            return False
-
-        if event.type() not in (
-            QEvent.MouseButtonRelease,
-            QEvent.MouseButtonPress,
-            QEvent.MouseButtonDblClick,
-        ):
-            return super().editorEvent(event, model, option, index)
-        if not isinstance(event, QMouseEvent) or event.button() != Qt.LeftButton:
-            return False
-
-        if event.type() == QEvent.MouseButtonPress:
-            return True
-        if not self._checkbox_rect(option).contains(event.position().toPoint()):
-            return False
-
-        check_state = index.data(Qt.CheckStateRole)
-        if check_state is None:
-            return False
-        target_state = Qt.Unchecked
-        if Qt.CheckState(check_state) != Qt.Checked:
-            target_state = Qt.Checked
-        return model.setData(index, target_state, Qt.CheckStateRole)
-
-    def _checkbox_rect(self, option: QStyleOptionViewItem):
-        """Return centered checkbox indicator rect for the given item option."""
-        style = (
-            option.widget.style() if option.widget is not None else QApplication.style()
-        )
-        checkbox_option = QStyleOptionButton()
-        indicator_rect = style.subElementRect(
-            QStyle.SE_CheckBoxIndicator,
-            checkbox_option,
-            option.widget,
-        )
-        indicator_rect.moveCenter(option.rect.center())
-        return indicator_rect
+    question: str
+    answer: str
+    checked: bool
+    selected: bool
 
 
 class ManagementPage(QWidget):
@@ -197,10 +70,19 @@ class ManagementPage(QWidget):
         layout.addWidget(self.title_label)
 
         self.folder_context_label = QLabel("0 cards")
-        self._set_muted_label_color(self.folder_context_label)
+        set_muted_label_color(self.folder_context_label)
         layout.addWidget(self.folder_context_label)
 
         table_actions_layout = QHBoxLayout()
+        self.move_up_button = QPushButton("Move Up")
+        self.move_up_button.clicked.connect(self.move_selected_rows_up)
+        table_actions_layout.addWidget(self.move_up_button)
+        self.move_down_button = QPushButton("Move Down")
+        self.move_down_button.clicked.connect(self.move_selected_rows_down)
+        table_actions_layout.addWidget(self.move_down_button)
+        self.sort_flashcards_button = QPushButton("Sort by Question A-Z")
+        self.sort_flashcards_button.clicked.connect(self.sort_flashcards_by_question)
+        table_actions_layout.addWidget(self.sort_flashcards_button)
         table_actions_layout.addStretch()
         self.add_flashcard_button = QPushButton("+")
         self.add_flashcard_button.setFixedSize(34, 34)
@@ -211,20 +93,26 @@ class ManagementPage(QWidget):
 
         self.flashcards_table = QTableWidget(0, 3)
         self.flashcards_table.setHorizontalHeaderLabels(["", "Question", "Answer"])
-        self.select_all_header = SelectAllHeaderView(
+        self.select_all_header = NativeCheckboxHeaderView(
             Qt.Horizontal,
             self.flashcards_table,
         )
         self.flashcards_table.setHorizontalHeader(self.select_all_header)
         self.flashcards_table.setItemDelegateForColumn(
             0,
-            CenteredCheckboxDelegate(self.flashcards_table),
+            NativeCheckboxDelegate(
+                self.flashcards_table,
+                checkbox_rect_resolver=centered_checkbox_rect,
+            ),
         )
         self.flashcards_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.flashcards_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.flashcards_table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.flashcards_table.customContextMenuRequested.connect(
             self.open_flashcards_table_menu
+        )
+        self.flashcards_table.itemSelectionChanged.connect(
+            self._update_row_action_buttons
         )
         self.select_all_header.toggle_requested.connect(self._toggle_header_selection)
         self.flashcards_table.itemChanged.connect(self.handle_table_item_changed)
@@ -254,30 +142,8 @@ class ManagementPage(QWidget):
     def changeEvent(self, event: QEvent) -> None:  # noqa: N802
         """Refresh palette-driven colors when theme/palette changes."""
         if event.type() in (QEvent.PaletteChange, QEvent.ApplicationPaletteChange):
-            self._set_muted_label_color(self.folder_context_label)
+            set_muted_label_color(self.folder_context_label)
         super().changeEvent(event)
-
-    def _set_muted_label_color(self, label: QLabel) -> None:
-        """Apply a readable secondary-text color derived from the active palette."""
-        palette = label.palette()
-        muted_color = self._blend_colors(
-            palette.color(QPalette.WindowText),
-            palette.color(QPalette.Window),
-            overlay_ratio=0.35,
-        )
-        palette.setColor(QPalette.WindowText, muted_color)
-        label.setPalette(palette)
-
-    @staticmethod
-    def _blend_colors(base: QColor, overlay: QColor, overlay_ratio: float) -> QColor:
-        """Return a deterministic blend between base and overlay colors."""
-        clamped_ratio = max(0.0, min(1.0, overlay_ratio))
-        base_ratio = 1.0 - clamped_ratio
-        return QColor(
-            int((base.red() * base_ratio) + (overlay.red() * clamped_ratio)),
-            int((base.green() * base_ratio) + (overlay.green() * clamped_ratio)),
-            int((base.blue() * base_ratio) + (overlay.blue() * clamped_ratio)),
-        )
 
     def set_folder_flashcards(
         self,
@@ -296,8 +162,7 @@ class ManagementPage(QWidget):
         """
         self.folder_id = folder_id
         self.title_label.setText(folder_name)
-        card_word = "card" if len(flashcards) == 1 else "cards"
-        self.folder_context_label.setText(f"{len(flashcards)} {card_word}")
+        self.folder_context_label.setText(format_card_count(len(flashcards)))
         self.flashcards_table.blockSignals(True)
         self.flashcards_table.setRowCount(0)
 
@@ -310,6 +175,7 @@ class ManagementPage(QWidget):
             )
         self.flashcards_table.blockSignals(False)
         self._sync_select_all_header()
+        self._update_row_action_buttons()
 
     def _insert_row(
         self,
@@ -339,6 +205,7 @@ class ManagementPage(QWidget):
         self.flashcards_table.setCurrentCell(row_index, 1)
         self.flashcards_table.editItem(self.flashcards_table.item(row_index, 1))
         self._sync_select_all_header()
+        self._update_row_action_buttons()
 
     def open_flashcards_table_menu(self, position: QPoint) -> None:
         """Open right-click table menu for selected flashcard rows.
@@ -382,14 +249,10 @@ class ManagementPage(QWidget):
 
     def _are_all_flashcards_checked(self) -> bool:
         """Return whether all flashcard rows are currently checked."""
-        row_count = self.flashcards_table.rowCount()
-        if row_count == 0:
+        checkbox_items = list(self._iter_selection_items())
+        if not checkbox_items:
             return False
-        for row_index in range(row_count):
-            checkbox_item = self.flashcards_table.item(row_index, 0)
-            if checkbox_item is None or checkbox_item.checkState() != Qt.Checked:
-                return False
-        return True
+        return all(item.checkState() == Qt.Checked for item in checkbox_items)
 
     def _sync_select_all_header(self) -> None:
         """Update first-column header indicator to match row checkbox state."""
@@ -411,12 +274,17 @@ class ManagementPage(QWidget):
         """
         self.flashcards_table.blockSignals(True)
         target_state = Qt.Checked if checked else Qt.Unchecked
+        for checkbox_item in self._iter_selection_items():
+            checkbox_item.setCheckState(target_state)
+        self.flashcards_table.blockSignals(False)
+        self._sync_select_all_header()
+
+    def _iter_selection_items(self) -> Iterator[QTableWidgetItem]:
+        """Yield first-column checkbox items for all current rows."""
         for row_index in range(self.flashcards_table.rowCount()):
             checkbox_item = self.flashcards_table.item(row_index, 0)
             if checkbox_item is not None:
-                checkbox_item.setCheckState(target_state)
-        self.flashcards_table.blockSignals(False)
-        self._sync_select_all_header()
+                yield checkbox_item
 
     def select_all_flashcards(self) -> None:
         """Mark all flashcards as selected for timer usage."""
@@ -444,6 +312,103 @@ class ManagementPage(QWidget):
         for row_index in sorted(set(row_indexes), reverse=True):
             self.flashcards_table.removeRow(row_index)
         self._sync_select_all_header()
+        self._update_row_action_buttons()
+
+    def move_selected_rows_up(self) -> None:
+        """Move the current selected flashcard rows one step upward."""
+        rows = self._collect_table_row_states()
+        moved = False
+        for row_index in range(1, len(rows)):
+            if rows[row_index].selected and not rows[row_index - 1].selected:
+                rows[row_index - 1], rows[row_index] = (
+                    rows[row_index],
+                    rows[row_index - 1],
+                )
+                moved = True
+        if moved:
+            self._set_table_row_states(rows)
+
+    def move_selected_rows_down(self) -> None:
+        """Move the current selected flashcard rows one step downward."""
+        rows = self._collect_table_row_states()
+        moved = False
+        for row_index in range(len(rows) - 2, -1, -1):
+            if rows[row_index].selected and not rows[row_index + 1].selected:
+                rows[row_index], rows[row_index + 1] = (
+                    rows[row_index + 1],
+                    rows[row_index],
+                )
+                moved = True
+        if moved:
+            self._set_table_row_states(rows)
+
+    def sort_flashcards_by_question(self) -> None:
+        """Sort all flashcards alphabetically by normalized question text."""
+        rows = self._collect_table_row_states()
+        sorted_rows = sorted(
+            rows,
+            key=lambda row: flashcard_question_sort_key(row.question, row.answer),
+        )
+        if sorted_rows != rows:
+            self._set_table_row_states(sorted_rows)
+
+    def _collect_table_row_states(self) -> list[FlashcardTableRowState]:
+        """Return current table rows including checked and selected state."""
+        selected_rows = set(self.selected_table_rows())
+        rows: list[FlashcardTableRowState] = []
+        for row_index in range(self.flashcards_table.rowCount()):
+            question_item = self.flashcards_table.item(row_index, 1)
+            answer_item = self.flashcards_table.item(row_index, 2)
+            selection_item = self.flashcards_table.item(row_index, 0)
+            rows.append(
+                FlashcardTableRowState(
+                    question="" if question_item is None else question_item.text(),
+                    answer="" if answer_item is None else answer_item.text(),
+                    checked=(
+                        selection_item is not None
+                        and selection_item.checkState() == Qt.Checked
+                    ),
+                    selected=row_index in selected_rows,
+                )
+            )
+        return rows
+
+    def _set_table_row_states(self, rows: list[FlashcardTableRowState]) -> None:
+        """Replace the table content while preserving row selection state."""
+        self.flashcards_table.blockSignals(True)
+        self.flashcards_table.setRowCount(0)
+        for row_index, row in enumerate(rows):
+            self._insert_row(
+                row_index,
+                row.question,
+                row.answer,
+                checked=row.checked,
+            )
+        selection_model = self.flashcards_table.selectionModel()
+        if selection_model is not None:
+            selection_model.clearSelection()
+            model = self.flashcards_table.model()
+            for row_index, row in enumerate(rows):
+                if not row.selected:
+                    continue
+                selection_model.select(
+                    model.index(row_index, 0),
+                    QItemSelectionModel.Select | QItemSelectionModel.Rows,
+                )
+        self.flashcards_table.blockSignals(False)
+        self._sync_select_all_header()
+        self._update_row_action_buttons()
+
+    def _update_row_action_buttons(self) -> None:
+        """Enable reorder actions only when the current selection can move."""
+        row_count = self.flashcards_table.rowCount()
+        selected_rows = self.selected_table_rows()
+        has_selection = bool(selected_rows)
+        self.move_up_button.setEnabled(has_selection and min(selected_rows) > 0)
+        self.move_down_button.setEnabled(
+            has_selection and max(selected_rows) < row_count - 1
+        )
+        self.sort_flashcards_button.setEnabled(row_count > 1)
 
     def collect_flashcards_for_save(self) -> tuple[list[tuple[str, str]], set[int]]:
         """Collect and validate table content before save.
@@ -460,12 +425,17 @@ class ManagementPage(QWidget):
             question_item = self.flashcards_table.item(row_index, 1)
             answer_item = self.flashcards_table.item(row_index, 2)
             selection_item = self.flashcards_table.item(row_index, 0)
-            question = "" if question_item is None else question_item.text().strip()
-            answer = "" if answer_item is None else answer_item.text().strip()
-            if not question or not answer:
-                msg = f"Row {row_index + 1}: Question and Answer cannot be empty."
+            question = "" if question_item is None else question_item.text()
+            answer = "" if answer_item is None else answer_item.text()
+            try:
+                normalized_question, normalized_answer = normalize_flashcard_fields(
+                    question,
+                    answer,
+                )
+            except ValueError as error:
+                msg = f"Row {row_index + 1}: {error}"
                 raise ValueError(msg)
-            rows.append((question, answer))
+            rows.append((normalized_question, normalized_answer))
             if selection_item is not None and selection_item.checkState() == Qt.Checked:
                 selected_indexes.add(row_index)
         return rows, selected_indexes
