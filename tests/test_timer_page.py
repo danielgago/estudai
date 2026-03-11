@@ -321,3 +321,14 @@ def test_flashcard_text_formats_inline_latex() -> None:
     assert "MT<sub>1</sub>" in page.flashcard_answer_label.text()
     assert "Ca<sup>2+</sup>" in page.flashcard_answer_label.text()
     assert "GABA<sub>A</sub>" in page.flashcard_answer_label.text()
+
+
+def test_flashcard_text_decodes_html_entities_as_plain_text() -> None:
+    """Verify plain flashcard text decodes HTML entities without switching to rich text."""
+    _get_app()
+    page = TimerPage()
+
+    page.show_flashcard_question("A &gt; B and it&#x27;s fine.")
+
+    assert page.flashcard_question_label.text() == "A > B and it's fine."
+    assert page.flashcard_question_label.textFormat() == Qt.PlainText

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -149,7 +150,11 @@ class NotebookLMCsvImportDialog(QDialog):
         self.file_path_label.setText(Path(selected_file).name)
         try:
             parsed = parse_notebooklm_csv(Path(selected_file))
-        except OSError as error:
+        except (csv.Error, OSError, UnicodeDecodeError) as error:
+            self._parsed_rows = []
+            self._valid_rows = []
+            self._render_preview_rows()
+            self._update_import_button_state()
             QMessageBox.warning(self, "Import NotebookLM CSV", str(error))
             return
         self._parsed_rows = parsed.rows

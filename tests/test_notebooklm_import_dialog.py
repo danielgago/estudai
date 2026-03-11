@@ -83,9 +83,15 @@ def test_choose_csv_file_error_and_cancel_paths(
         "estudai.ui.dialog.notebooklm_import_dialog.QFileDialog.getOpenFileName",
         lambda *_args, **_kwargs: (str(csv_path), "CSV files (*.csv)"),
     )
+    dialog._choose_csv_file()
+    assert dialog.import_rows() == [("Q?", "A.")]
+    assert dialog.import_button.isEnabled()
+
     monkeypatch.setattr(
         "estudai.ui.dialog.notebooklm_import_dialog.parse_notebooklm_csv",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("boom")),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            UnicodeDecodeError("utf-8", b"\xff", 0, 1, "boom")
+        ),
     )
     monkeypatch.setattr(
         "estudai.ui.dialog.notebooklm_import_dialog.QMessageBox.warning",
@@ -94,6 +100,8 @@ def test_choose_csv_file_error_and_cancel_paths(
     dialog._choose_csv_file()
 
     assert warnings
+    assert dialog.preview_table.rowCount() == 0
+    assert dialog.summary_label.text() == "Valid rows: 0 | Invalid rows: 0"
     assert dialog.import_rows() == []
     assert not dialog.import_button.isEnabled()
 

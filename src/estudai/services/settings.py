@@ -15,6 +15,7 @@ from .hotkeys import DEFAULT_HOTKEY_BINDINGS, HotkeyAction
 
 SETTINGS_FILENAME = "settings.ini"
 SOUNDS_FOLDER_NAME = "sounds"
+MAX_TIMER_DURATION_SECONDS = (59 * 60) + 59
 SETTINGS_KEY_TIMER_DURATION_SECONDS = "timer/duration_seconds"
 SETTINGS_KEY_FLASHCARD_PROBABILITY_PERCENT = "flashcard/probability_percent"
 SETTINGS_KEY_FLASHCARD_RANDOM_ORDER_ENABLED = "flashcard/random_order_enabled"
@@ -375,7 +376,7 @@ def load_app_settings() -> AppSettings:
             ),
             default=AppSettings.timer_duration_seconds,
             minimum=0,
-            maximum=99 * 3600,
+            maximum=MAX_TIMER_DURATION_SECONDS,
         ),
         flashcard_probability_percent=_normalize_int(
             qsettings.value(
@@ -538,7 +539,7 @@ def save_app_settings(settings: AppSettings) -> None:
             settings.timer_duration_seconds,
             default=AppSettings.timer_duration_seconds,
             minimum=0,
-            maximum=99 * 3600,
+            maximum=MAX_TIMER_DURATION_SECONDS,
         ),
     )
     qsettings.setValue(

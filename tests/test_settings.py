@@ -12,6 +12,7 @@ from estudai.services.settings import (
     AppSettings,
     DEFAULT_IN_APP_SHORTCUT_BINDINGS,
     InAppShortcutAction,
+    MAX_TIMER_DURATION_SECONDS,
     SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_DISPLAY_NAME,
     SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_PATH,
     SETTINGS_KEY_LEGACY_NOTIFICATION_SOUND_PATH,
@@ -123,6 +124,17 @@ def test_settings_persist_zero_second_timer_value() -> None:
     restored = load_app_settings()
 
     assert restored.timer_duration_seconds == 0
+
+
+def test_settings_clamp_timer_duration_to_supported_maximum() -> None:
+    """Verify persisted timer duration never exceeds 59 minutes and 59 seconds."""
+    save_app_settings(
+        AppSettings(timer_duration_seconds=MAX_TIMER_DURATION_SECONDS + 1)
+    )
+
+    restored = load_app_settings()
+
+    assert restored.timer_duration_seconds == MAX_TIMER_DURATION_SECONDS
 
 
 def test_settings_persist_empty_shortcuts() -> None:
@@ -295,6 +307,25 @@ def test_settings_save_clears_legacy_notification_sound_key() -> None:
     )
 
 
+def test_settings_upgrade_from_1_0_preserves_legacy_sound_path_on_save() -> None:
+    """Verify a 1.0-style sound setting survives the first 1.1 save."""
+    qsettings = _open_settings()
+    legacy_sound_path = "/tmp/notification-sound.wav"
+    qsettings.setValue(SETTINGS_KEY_LEGACY_NOTIFICATION_SOUND_PATH, legacy_sound_path)
+    qsettings.sync()
+
+    upgraded = load_app_settings()
+    save_app_settings(upgraded)
+
+    reloaded = load_app_settings()
+    qsettings = _open_settings()
+    assert qsettings.contains(SETTINGS_KEY_LEGACY_NOTIFICATION_SOUND_PATH) is False
+    assert reloaded.question_notification_sound_path == legacy_sound_path
+    assert reloaded.question_notification_sound_display_name == "notification-sound.wav"
+    assert reloaded.answer_notification_sound_path == legacy_sound_path
+    assert reloaded.answer_notification_sound_display_name == "notification-sound.wav"
+
+
 def test_settings_page_only_persists_changes_after_save(app: QApplication) -> None:
     """Verify editing spinbox values persists only when save is clicked."""
     save_app_settings(AppSettings())
@@ -386,6 +417,19 @@ def test_settings_page_reopens_with_zero_second_timer_value(
 
     assert page.timer_duration_spinbox.minimum() == 0
     assert page.timer_duration_spinbox.value() == 0
+
+
+def test_settings_page_disables_global_hotkeys_when_unavailable(
+    app: QApplication,
+) -> None:
+    """Verify unavailable global hotkeys are explained and not editable."""
+    page = SettingsPage(
+        global_hotkey_availability_error="Global hotkeys are unsupported here."
+    )
+
+    assert not page.pause_resume_hotkey_edit.isEnabled()
+    assert not page.start_stop_hotkey_edit.isEnabled()
+    assert "unsupported" in page.hotkey_help_label.text().lower()
 
 
 def test_settings_page_enables_after_x_only_for_matching_mode(

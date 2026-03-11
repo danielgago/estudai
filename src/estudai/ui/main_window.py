@@ -1,5 +1,6 @@
 """Main application window."""
 
+import csv
 import random
 from dataclasses import dataclass
 from pathlib import Path
@@ -186,7 +187,8 @@ class MainWindow(QMainWindow):
         )
         self.management_page = ManagementPage()
         self.settings_page = SettingsPage(
-            save_settings_callback=self._save_settings_from_page
+            save_settings_callback=self._save_settings_from_page,
+            global_hotkey_availability_error=self._hotkey_service.availability_error,
         )
         self.stacked_widget.addWidget(self.timer_page)
         self.stacked_widget.addWidget(self.management_page)
@@ -716,8 +718,26 @@ class MainWindow(QMainWindow):
         """Reset sequential flashcard pointer to the first card."""
         self._flashcard_sequence.reset_order()
 
+    def _should_show_flashcard_this_cycle(self, probability_percent: int) -> bool:
+        """Return whether the current timer cycle should show a flashcard."""
+        normalized_probability = max(0, min(100, int(probability_percent)))
+        if normalized_probability <= 0:
+            return False
+        if normalized_probability >= 100:
+            return True
+        return random.randint(1, 100) <= normalized_probability
+
     def handle_timer_cycle_completed(self) -> None:
         """Advance the current study session when a timer cycle finishes."""
+        app_settings = load_app_settings()
+        if (
+            app_settings.timer_duration_seconds > 0
+            and not self._should_show_flashcard_this_cycle(
+                app_settings.flashcard_probability_percent
+            )
+        ):
+            self.timer_page.restart_timer_cycle()
+            return
         flashcard = self._next_flashcard_for_display()
         if flashcard is None:
             self._complete_study_session()
@@ -1458,7 +1478,7 @@ class MainWindow(QMainWindow):
         )
         if not selected_path:
             return
-        self.add_folder(Path(selected_path))
+        self.add_folder(Path(selected_path), show_errors=True)
 
     def prompt_and_create_folder(self) -> None:
         """Prompt for a folder name and create a managed empty folder."""
@@ -1505,7 +1525,18 @@ class MainWindow(QMainWindow):
             return
 
         target_folder_path = Path(persisted_folder.stored_path)
-        existing_flashcards = load_flashcards_from_folder(target_folder_path)
+        existing_flashcards, load_error = self._load_folder_flashcards(
+            persisted_folder.name,
+            target_folder_path,
+        )
+        if load_error is not None:
+            QMessageBox.warning(
+                self,
+                "Import NotebookLM CSV",
+                "Existing flashcards in the selected folder could not be read. "
+                "The import will replace them.\n"
+                f"{load_error}",
+            )
         existing_rows = [
             (flashcard.question, flashcard.answer) for flashcard in existing_flashcards
         ]
@@ -1645,7 +1676,7 @@ class MainWindow(QMainWindow):
         self.handle_management_data_changed(preferred_checked_ids=checked_ids)
         self.switch_to_timer()
 
-    def add_folder(self, folder_path: Path) -> bool:
+    def add_folder(self, folder_path: Path, *, show_errors: bool = False) -> bool:
         """Copy one selected folder, persist it, and load flashcards.
 
         Args:
@@ -1657,7 +1688,9 @@ class MainWindow(QMainWindow):
         checked_ids = self._get_checked_folder_ids()
         try:
             persisted_folder = import_folder(folder_path)
-        except FileNotFoundError, NotADirectoryError, OSError:
+        except (FileNotFoundError, NotADirectoryError, OSError) as error:
+            if show_errors:
+                QMessageBox.warning(self, "Import folder", str(error))
             return False
         checked_ids.add(persisted_folder.id)
         self.handle_management_data_changed(preferred_checked_ids=checked_ids)
@@ -1696,6 +1729,29 @@ class MainWindow(QMainWindow):
         """Return folder name without flashcard count suffix."""
         return self._sidebar_folders.folder_item_name(item)
 
+    def _load_folder_flashcards(
+        self,
+        folder_name: str,
+        folder_path: Path,
+    ) -> tuple[list[Flashcard], str | None]:
+        """Load one folder's flashcards without aborting the whole refresh."""
+        try:
+            return load_flashcards_from_folder(folder_path), None
+        except (csv.Error, OSError, UnicodeDecodeError) as error:
+            return [], f"{folder_name}: {error}"
+
+    def _show_folder_load_warning(self, errors: list[str]) -> None:
+        """Warn when one or more persisted folders could not be read."""
+        if not errors:
+            return
+        details = "\n".join(f"- {error}" for error in errors)
+        QMessageBox.warning(
+            self,
+            "Load flashcards",
+            "Some folders could not be read and were loaded with 0 flashcards:\n"
+            f"{details}",
+        )
+
     def _format_sidebar_folder_label(
         self, folder_name: str, flashcard_count: int
     ) -> str:
@@ -1717,6 +1773,7 @@ class MainWindow(QMainWindow):
         self.persisted_folder_paths = {}
         remaining_folder_ids: set[str] = set()
         preferred_current_row: int | None = None
+        folder_load_errors: list[str] = []
         self.sidebar_folder_list.blockSignals(True)
         self.sidebar_folder_list.clear()
 
@@ -1726,9 +1783,13 @@ class MainWindow(QMainWindow):
                 continue
             remaining_folder_ids.add(persisted_folder.id)
             self.persisted_folder_paths[persisted_folder.id] = stored_folder
-            self.flashcards_by_folder[persisted_folder.id] = (
-                load_flashcards_from_folder(stored_folder)
+            folder_flashcards, load_error = self._load_folder_flashcards(
+                persisted_folder.name,
+                stored_folder,
             )
+            if load_error is not None:
+                folder_load_errors.append(load_error)
+            self.flashcards_by_folder[persisted_folder.id] = folder_flashcards
             folder_flashcards = self.flashcards_by_folder[persisted_folder.id]
             self.selected_flashcard_indexes_by_folder[persisted_folder.id] = (
                 normalize_selected_indexes(
@@ -1767,6 +1828,7 @@ class MainWindow(QMainWindow):
         }
         self._refresh_loaded_flashcards()
         self._update_sidebar_reorder_buttons()
+        self._show_folder_load_warning(folder_load_errors)
 
     def _update_sidebar_reorder_buttons(self) -> None:
         """Enable sidebar reorder buttons when a single folder can move."""

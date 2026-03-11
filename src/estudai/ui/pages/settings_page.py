@@ -41,6 +41,7 @@ from estudai.services.hotkeys import (
 from estudai.services.settings import (
     AppSettings,
     InAppShortcutAction,
+    MAX_TIMER_DURATION_SECONDS,
     WrongAnswerCompletionMode,
     WrongAnswerReinsertionMode,
     copy_notification_sound_file,
@@ -67,6 +68,8 @@ class SettingsPage(QWidget):
     def __init__(
         self,
         save_settings_callback: Callable[[AppSettings], None] | None = None,
+        *,
+        global_hotkey_availability_error: str | None = None,
     ) -> None:
         """Initialize the settings page."""
         super().__init__()
@@ -82,6 +85,7 @@ class SettingsPage(QWidget):
         self._save_settings_callback = (
             save_settings_callback or self._save_settings_directly
         )
+        self._global_hotkey_availability_error = global_hotkey_availability_error
         self._audio_output: object | None = None
         self._sound_player: object | None = None
         self._active_preview_role: str | None = None
@@ -100,6 +104,7 @@ class SettingsPage(QWidget):
             self._handle_preview_playback_stopped
         )
         self._build_ui()
+        self._apply_global_hotkey_availability_state()
         self._load_persisted_settings()
         self._connect_signals()
 
@@ -172,7 +177,7 @@ class SettingsPage(QWidget):
         self._configure_form_layout(timer_form)
 
         self.timer_duration_spinbox = QSpinBox()
-        self.timer_duration_spinbox.setRange(0, 99 * 3600)
+        self.timer_duration_spinbox.setRange(0, MAX_TIMER_DURATION_SECONDS)
         self.timer_duration_spinbox.setSuffix(" s")
         timer_form.addRow("Timer duration:", self.timer_duration_spinbox)
         content_layout.addWidget(timer_group)
@@ -432,6 +437,28 @@ class SettingsPage(QWidget):
         self.save_button.clicked.connect(self._handle_save_clicked)
         self.wrong_answer_reinsertion_mode_combo.currentIndexChanged.connect(
             self._update_wrong_answer_reinsert_after_enabled_state
+        )
+
+    def _apply_global_hotkey_availability_state(self) -> None:
+        """Reflect current global-hotkey availability in the settings form."""
+        hotkey_edits = (
+            self.pause_resume_hotkey_edit,
+            self.start_stop_hotkey_edit,
+            self.mark_correct_hotkey_edit,
+            self.mark_wrong_hotkey_edit,
+            self.copy_question_hotkey_edit,
+        )
+        hotkeys_available = self._global_hotkey_availability_error is None
+        for editor in hotkey_edits:
+            editor.setEnabled(hotkeys_available)
+        if hotkeys_available:
+            self.hotkey_help_label.setText(
+                "Bindings are system-wide. Choose single key combinations only."
+            )
+            return
+        self.hotkey_help_label.setText(
+            "Global hotkeys are unavailable on this system. "
+            f"{self._global_hotkey_availability_error}"
         )
 
     def _load_persisted_settings(self) -> None:
@@ -838,7 +865,7 @@ class SettingsPage(QWidget):
             (
                 self.timer_duration_spinbox,
                 "Timer duration",
-                "0 and 356400 seconds",
+                f"0 and {MAX_TIMER_DURATION_SECONDS} seconds",
             ),
             (
                 self.flashcard_probability_spinbox,

@@ -18,7 +18,10 @@ from PySide6.QtWidgets import (
 )
 
 from estudai.services.csv_flashcards import Flashcard
-from estudai.services.folder_storage import list_persisted_folders
+from estudai.services.folder_storage import (
+    create_managed_folder,
+    list_persisted_folders,
+)
 from estudai.services.hotkeys import GlobalHotkeyService, HotkeyRegistrationError
 from estudai.services.settings import (
     AppSettings,
@@ -678,7 +681,7 @@ def test_zero_second_timer_starts_flashcards_immediately_and_resets_to_ready(
         "estudai.ui.main_window.load_app_settings",
         lambda: AppSettings(
             timer_duration_seconds=0,
-            flashcard_probability_percent=30,
+            flashcard_probability_percent=0,
             flashcard_random_order_enabled=False,
             question_display_duration_seconds=2,
             answer_display_duration_seconds=3,
@@ -710,6 +713,78 @@ def test_zero_second_timer_starts_flashcards_immediately_and_resets_to_ready(
     assert window.timer_page.timer_display.text() == "Ready?"
 
 
+def test_timer_cycle_restarts_countdown_when_probability_roll_fails(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify non-zero timers restart instead of showing a flashcard on a miss."""
+    monkeypatch.setattr(
+        "estudai.ui.main_window.load_app_settings",
+        lambda: AppSettings(
+            timer_duration_seconds=120,
+            flashcard_probability_percent=0,
+            flashcard_random_order_enabled=False,
+            question_display_duration_seconds=2,
+            answer_display_duration_seconds=3,
+        ),
+    )
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+
+    window.timer_page.start_timer()
+    assert window._study_session.active is True
+
+    window.timer_page.is_running = False
+    window.handle_timer_cycle_completed()
+
+    assert window.timer_page.is_running is True
+    assert window.timer_page.flashcard_question_label.isHidden()
+    assert window._study_session.current_flashcard() is None
+
+
+def test_invalid_csv_folder_warns_and_loads_as_empty(
+    app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify one unreadable folder does not prevent the window from loading."""
+    persisted_folder = create_managed_folder("Broken")
+    broken_csv = Path(persisted_folder.stored_path) / "cards.csv"
+    broken_csv.write_bytes(b"\xff\xfe\x00bad")
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        "estudai.ui.main_window.QMessageBox.warning",
+        lambda _parent, _title, message: warnings.append(message),
+    )
+
+    window = MainWindow()
+
+    assert warnings
+    assert persisted_folder.id in window.flashcards_by_folder
+    assert window.flashcards_by_folder[persisted_folder.id] == []
+
+
+def test_prompt_add_folder_surfaces_import_errors(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify failed folder imports are reported to the user."""
+    missing_folder = tmp_path / "missing"
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        "estudai.ui.main_window.QFileDialog.getExistingDirectory",
+        lambda *_args, **_kwargs: str(missing_folder),
+    )
+    monkeypatch.setattr(
+        "estudai.ui.main_window.QMessageBox.warning",
+        lambda _parent, _title, message: warnings.append(message),
+    )
+    window = MainWindow()
+
+    window.prompt_and_add_folder()
+
+    assert warnings == [f"Folder not found: {missing_folder.resolve()}"]
+
+
 def test_scored_session_marks_wrong_then_correct_until_complete(
     app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -719,7 +794,7 @@ def test_scored_session_marks_wrong_then_correct_until_complete(
         "estudai.ui.main_window.load_app_settings",
         lambda: AppSettings(
             timer_duration_seconds=1500,
-            flashcard_probability_percent=30,
+            flashcard_probability_percent=100,
             flashcard_random_order_enabled=False,
             question_display_duration_seconds=2,
             answer_display_duration_seconds=3,
@@ -794,7 +869,7 @@ def test_scored_session_mode_b_requires_more_correct_than_wrong_end_to_end(
         "estudai.ui.main_window.load_app_settings",
         lambda: AppSettings(
             timer_duration_seconds=1500,
-            flashcard_probability_percent=30,
+            flashcard_probability_percent=100,
             flashcard_random_order_enabled=False,
             question_display_duration_seconds=2,
             answer_display_duration_seconds=3,
@@ -851,7 +926,7 @@ def test_wrong_answer_after_x_reinsertion_returns_card_after_requested_gap(
         "estudai.ui.main_window.load_app_settings",
         lambda: AppSettings(
             timer_duration_seconds=1500,
-            flashcard_probability_percent=30,
+            flashcard_probability_percent=100,
             flashcard_random_order_enabled=False,
             question_display_duration_seconds=2,
             answer_display_duration_seconds=3,
@@ -929,7 +1004,7 @@ def test_timer_completion_uses_random_choice_when_setting_enabled(
         "estudai.ui.main_window.load_app_settings",
         lambda: AppSettings(
             timer_duration_seconds=1500,
-            flashcard_probability_percent=30,
+            flashcard_probability_percent=100,
             flashcard_random_order_enabled=True,
             question_display_duration_seconds=2,
             answer_display_duration_seconds=3,
@@ -984,7 +1059,7 @@ def test_flashcard_sequence_plays_sound_for_question_and_answer(
         "estudai.ui.main_window.load_app_settings",
         lambda: AppSettings(
             timer_duration_seconds=1500,
-            flashcard_probability_percent=30,
+            flashcard_probability_percent=100,
             question_display_duration_seconds=2,
             answer_display_duration_seconds=3,
             question_notification_sound_path=str(question_sound_path),
@@ -1044,7 +1119,7 @@ def test_flashcard_sequence_uses_default_sound_for_both_phases_when_unset(
         "estudai.ui.main_window.load_app_settings",
         lambda: AppSettings(
             timer_duration_seconds=1500,
-            flashcard_probability_percent=30,
+            flashcard_probability_percent=100,
             question_display_duration_seconds=2,
             answer_display_duration_seconds=3,
         ),
@@ -1090,7 +1165,7 @@ def test_flashcard_sequence_stops_sound_when_question_phase_ends(
         "estudai.ui.main_window.load_app_settings",
         lambda: AppSettings(
             timer_duration_seconds=1500,
-            flashcard_probability_percent=30,
+            flashcard_probability_percent=100,
             question_display_duration_seconds=2,
             answer_display_duration_seconds=3,
             question_notification_sound_path=str(question_sound_path),
@@ -1135,7 +1210,7 @@ def test_stop_button_stops_active_flashcard_sound(
         "estudai.ui.main_window.load_app_settings",
         lambda: AppSettings(
             timer_duration_seconds=1500,
-            flashcard_probability_percent=30,
+            flashcard_probability_percent=100,
             question_display_duration_seconds=2,
             answer_display_duration_seconds=3,
             question_notification_sound_path=str(question_sound_path),
@@ -1158,7 +1233,7 @@ def test_unanswered_flashcard_returns_after_other_cards(
         "estudai.ui.main_window.load_app_settings",
         lambda: AppSettings(
             timer_duration_seconds=1500,
-            flashcard_probability_percent=30,
+            flashcard_probability_percent=100,
             flashcard_random_order_enabled=False,
             question_display_duration_seconds=2,
             answer_display_duration_seconds=3,
@@ -1198,7 +1273,7 @@ def test_paused_flashcard_edit_updates_current_display_and_future_retry(
         "estudai.ui.main_window.load_app_settings",
         lambda: AppSettings(
             timer_duration_seconds=1500,
-            flashcard_probability_percent=30,
+            flashcard_probability_percent=100,
             flashcard_random_order_enabled=False,
             question_display_duration_seconds=2,
             answer_display_duration_seconds=3,
@@ -1265,7 +1340,7 @@ def test_paused_flashcard_delete_removes_card_from_active_session(
         "estudai.ui.main_window.load_app_settings",
         lambda: AppSettings(
             timer_duration_seconds=1500,
-            flashcard_probability_percent=30,
+            flashcard_probability_percent=100,
             flashcard_random_order_enabled=False,
             question_display_duration_seconds=2,
             answer_display_duration_seconds=3,
@@ -1315,7 +1390,7 @@ def test_deleting_last_paused_flashcard_completes_session_cleanly(
         "estudai.ui.main_window.load_app_settings",
         lambda: AppSettings(
             timer_duration_seconds=1500,
-            flashcard_probability_percent=30,
+            flashcard_probability_percent=100,
             flashcard_random_order_enabled=False,
             question_display_duration_seconds=2,
             answer_display_duration_seconds=3,
@@ -1360,7 +1435,7 @@ def test_paused_flashcard_delete_keeps_next_card_editable(
         "estudai.ui.main_window.load_app_settings",
         lambda: AppSettings(
             timer_duration_seconds=1500,
-            flashcard_probability_percent=30,
+            flashcard_probability_percent=100,
             flashcard_random_order_enabled=False,
             question_display_duration_seconds=2,
             answer_display_duration_seconds=3,
