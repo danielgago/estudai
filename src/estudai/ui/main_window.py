@@ -10,7 +10,6 @@ from PySide6.QtCore import (
     QSize,
     QTimer,
     Qt,
-    QUrl,
     Signal,
 )
 from PySide6.QtGui import (
@@ -82,6 +81,7 @@ from estudai.ui.utils import (
     blend_colors,
     left_aligned_checkbox_rect,
 )
+from .audio_playback import TimedAudioPlaybackController
 
 from .dialog import FlashcardEditDialog, NotebookLMCsvImportDialog
 from .flashcard_sequence import FlashcardSequenceController
@@ -163,6 +163,10 @@ class MainWindow(QMainWindow):
             self._flashcard_sound_output = QAudioOutput(self)
             self._flashcard_sound_player = QMediaPlayer(self)
             self._flashcard_sound_player.setAudioOutput(self._flashcard_sound_output)
+        self._flashcard_sound_controller = TimedAudioPlaybackController(
+            self,
+            player=self._flashcard_sound_player,
+        )
         self.setWindowTitle("Estudai!")
         self.setGeometry(100, 100, 900, 650)
         app_settings = load_app_settings()
@@ -496,12 +500,14 @@ class MainWindow(QMainWindow):
 
     def switch_to_timer(self) -> None:
         """Switch to timer page."""
+        self.settings_page.stop_active_preview()
         self.stacked_widget.setCurrentWidget(self.timer_page)
         if not self.timer_page.is_running:
             self.sidebar_toggle_button.setVisible(True)
 
     def switch_to_management(self) -> None:
         """Switch to flashcard management page."""
+        self.settings_page.stop_active_preview()
         self.stacked_widget.setCurrentWidget(self.management_page)
         self.sidebar.setVisible(False)
 
@@ -704,6 +710,7 @@ class MainWindow(QMainWindow):
     def _cancel_flashcard_phase_timer(self) -> None:
         """Stop and clear pending flashcard phase callbacks."""
         self._flashcard_sequence.cancel_phase_timer()
+        self._flashcard_sound_controller.stop()
 
     def _reset_flashcard_sequence_order(self) -> None:
         """Reset sequential flashcard pointer to the first card."""
@@ -870,9 +877,14 @@ class MainWindow(QMainWindow):
             replacements[previous_flashcard] = updated_folder_flashcards[updated_index]
         self._study_session.replace_flashcards(replacements)
 
-    def _play_flashcard_notification_sound(self, *, question_phase: bool) -> None:
+    def _play_flashcard_notification_sound(
+        self,
+        *,
+        question_phase: bool,
+        phase_duration_ms: int,
+    ) -> None:
         """Play the configured flashcard sound for the current phase."""
-        if self._flashcard_sound_player is None:
+        if not self._flashcard_sound_controller.is_available:
             return
         settings = load_app_settings()
         configured_sound_path = (
@@ -888,8 +900,11 @@ class MainWindow(QMainWindow):
         sound_path = Path(sound_path_value)
         if not sound_path.exists():
             return
-        self._flashcard_sound_player.setSource(QUrl.fromLocalFile(str(sound_path)))
-        self._flashcard_sound_player.play()
+        self._flashcard_sound_controller.play(
+            sound_path,
+            max_duration_ms=phase_duration_ms,
+            context="question" if question_phase else "answer",
+        )
 
     def _show_current_flashcard_answer(
         self,
@@ -922,7 +937,10 @@ class MainWindow(QMainWindow):
         ):
             return
         self.timer_page.show_flashcard_answer(answer, answer_display_duration_seconds)
-        self._play_flashcard_notification_sound(question_phase=False)
+        self._play_flashcard_notification_sound(
+            question_phase=False,
+            phase_duration_ms=answer_display_duration_seconds * 1000,
+        )
         self._start_flashcard_phase_timer(
             answer_display_duration_seconds * 1000,
             lambda: self._finish_flashcard_answer_phase(sequence_id),
@@ -962,7 +980,10 @@ class MainWindow(QMainWindow):
             flashcard.question,
             app_settings.question_display_duration_seconds,
         )
-        self._play_flashcard_notification_sound(question_phase=True)
+        self._play_flashcard_notification_sound(
+            question_phase=True,
+            phase_duration_ms=app_settings.question_display_duration_seconds * 1000,
+        )
         self._start_flashcard_phase_timer(
             app_settings.question_display_duration_seconds * 1000,
             lambda: self._show_current_flashcard_answer(
@@ -1191,6 +1212,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802
         """Release global hotkeys and app-wide filters when closing the window."""
+        self.settings_page.stop_active_preview()
+        self._flashcard_sound_controller.stop()
         self._hotkey_service.clear()
         app = QApplication.instance()
         if app is not None:

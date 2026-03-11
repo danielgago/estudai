@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, Qt, QUrl, Signal
+from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtGui import QFont, QKeySequence
 from PySide6.QtWidgets import (
     QComboBox,
@@ -48,8 +49,12 @@ from estudai.services.settings import (
     in_app_shortcut_bindings_from_settings,
     load_app_settings,
     save_app_settings,
+    validate_notification_sound_file,
 )
+from estudai.ui.audio_playback import TimedAudioPlaybackController
 from estudai.ui.utils import set_muted_label_color
+
+SOUND_PREVIEW_LIMIT_MS = 5000
 
 
 class SettingsPage(QWidget):
@@ -66,17 +71,34 @@ class SettingsPage(QWidget):
         """Initialize the settings page."""
         super().__init__()
         self._question_notification_sound_path = ""
+        self._question_notification_sound_display_name = ""
         self._answer_notification_sound_path = ""
+        self._answer_notification_sound_display_name = ""
+        self._pending_question_notification_sound_source_path = ""
+        self._pending_question_notification_sound_display_name = ""
+        self._pending_answer_notification_sound_source_path = ""
+        self._pending_answer_notification_sound_display_name = ""
         self._default_notification_sound_path = get_default_notification_sound_path()
         self._save_settings_callback = (
             save_settings_callback or self._save_settings_directly
         )
         self._audio_output: object | None = None
         self._sound_player: object | None = None
+        self._active_preview_role: str | None = None
         if QAudioOutput is not None and QMediaPlayer is not None:
             self._audio_output = QAudioOutput(self)
             self._sound_player = QMediaPlayer(self)
             self._sound_player.setAudioOutput(self._audio_output)
+        self._preview_sound_controller = TimedAudioPlaybackController(
+            self,
+            player=self._sound_player,
+        )
+        self._preview_sound_controller.playback_started.connect(
+            self._handle_preview_playback_started
+        )
+        self._preview_sound_controller.playback_stopped.connect(
+            self._handle_preview_playback_stopped
+        )
         self._build_ui()
         self._load_persisted_settings()
         self._connect_signals()
@@ -244,8 +266,10 @@ class SettingsPage(QWidget):
         question_sound_buttons_layout = QHBoxLayout()
         self.upload_question_sound_button = QPushButton("Upload Sound (.mp3/.wav)")
         self.test_question_sound_button = QPushButton("Test Sound")
+        self.stop_question_sound_button = QPushButton("Stop")
         question_sound_buttons_layout.addWidget(self.upload_question_sound_button)
         question_sound_buttons_layout.addWidget(self.test_question_sound_button)
+        question_sound_buttons_layout.addWidget(self.stop_question_sound_button)
         question_sound_buttons_layout.addStretch()
         question_sound_layout.addLayout(question_sound_buttons_layout)
         content_layout.addWidget(question_sound_group)
@@ -259,8 +283,10 @@ class SettingsPage(QWidget):
         answer_sound_buttons_layout = QHBoxLayout()
         self.upload_answer_sound_button = QPushButton("Upload Sound (.mp3/.wav)")
         self.test_answer_sound_button = QPushButton("Test Sound")
+        self.stop_answer_sound_button = QPushButton("Stop")
         answer_sound_buttons_layout.addWidget(self.upload_answer_sound_button)
         answer_sound_buttons_layout.addWidget(self.test_answer_sound_button)
+        answer_sound_buttons_layout.addWidget(self.stop_answer_sound_button)
         answer_sound_buttons_layout.addStretch()
         answer_sound_layout.addLayout(answer_sound_buttons_layout)
         content_layout.addWidget(answer_sound_group)
@@ -396,6 +422,12 @@ class SettingsPage(QWidget):
         self.test_answer_sound_button.clicked.connect(
             self._handle_test_answer_sound_clicked
         )
+        self.stop_question_sound_button.clicked.connect(
+            self._handle_stop_question_sound_clicked
+        )
+        self.stop_answer_sound_button.clicked.connect(
+            self._handle_stop_answer_sound_clicked
+        )
         self.cancel_button.clicked.connect(self._handle_cancel_clicked)
         self.save_button.clicked.connect(self._handle_save_clicked)
         self.wrong_answer_reinsertion_mode_combo.currentIndexChanged.connect(
@@ -419,7 +451,17 @@ class SettingsPage(QWidget):
         self._question_notification_sound_path = (
             settings.question_notification_sound_path
         )
+        self._question_notification_sound_display_name = (
+            settings.question_notification_sound_display_name
+        )
         self._answer_notification_sound_path = settings.answer_notification_sound_path
+        self._answer_notification_sound_display_name = (
+            settings.answer_notification_sound_display_name
+        )
+        self._pending_question_notification_sound_source_path = ""
+        self._pending_question_notification_sound_display_name = ""
+        self._pending_answer_notification_sound_source_path = ""
+        self._pending_answer_notification_sound_display_name = ""
         self._set_combo_value(
             self.wrong_answer_completion_mode_combo,
             settings.wrong_answer_completion_mode.value,
@@ -485,7 +527,13 @@ class SettingsPage(QWidget):
             question_display_duration_seconds=self.question_duration_spinbox.value(),
             answer_display_duration_seconds=self.answer_duration_spinbox.value(),
             question_notification_sound_path=self._question_notification_sound_path,
+            question_notification_sound_display_name=(
+                self._question_notification_sound_display_name
+            ),
             answer_notification_sound_path=self._answer_notification_sound_path,
+            answer_notification_sound_display_name=(
+                self._answer_notification_sound_display_name
+            ),
             wrong_answer_completion_mode=WrongAnswerCompletionMode(
                 self.wrong_answer_completion_mode_combo.currentData()
             ),
@@ -525,38 +573,44 @@ class SettingsPage(QWidget):
             return
         settings = self._collect_settings()
         try:
+            settings = self._apply_pending_sound_uploads(settings)
             self._save_settings_callback(settings)
-        except ValueError as error:
+        except (FileNotFoundError, ValueError) as error:
             QMessageBox.warning(self, "Invalid settings", str(error))
             return
+        self._apply_saved_sound_state(settings)
         self.timer_duration_seconds_changed.emit(settings.timer_duration_seconds)
         self.settings_saved.emit(settings)
 
     def _update_sound_summary(self) -> None:
         """Refresh selected sound labels and test button states."""
         self._update_sound_control_summary(
-            custom_sound_path=self._question_notification_sound_path,
+            custom_sound_path=self._selected_sound_path("question"),
+            custom_sound_display_name=self._selected_sound_display_name("question"),
             label=self.question_notification_sound_label,
             test_button=self.test_question_sound_button,
             sound_role="question",
         )
         self._update_sound_control_summary(
-            custom_sound_path=self._answer_notification_sound_path,
+            custom_sound_path=self._selected_sound_path("answer"),
+            custom_sound_display_name=self._selected_sound_display_name("answer"),
             label=self.answer_notification_sound_label,
             test_button=self.test_answer_sound_button,
             sound_role="answer",
         )
+        self._update_preview_stop_buttons()
 
     def _update_sound_control_summary(
         self,
         *,
         custom_sound_path: str,
+        custom_sound_display_name: str,
         label: QLabel,
         test_button: QPushButton,
         sound_role: str,
     ) -> None:
         """Refresh one selected sound label and test button state."""
-        can_play_sound = self._sound_player is not None
+        can_play_sound = self._preview_sound_controller.is_available
         if not custom_sound_path:
             if self._default_notification_sound_path:
                 default_name = Path(self._default_notification_sound_path).name
@@ -573,23 +627,22 @@ class SettingsPage(QWidget):
             test_button.setEnabled(False)
             return
         sound_path = Path(custom_sound_path)
-        label.setText(f"Selected {sound_role} sound: {sound_path.name}")
+        display_name = custom_sound_display_name or sound_path.name
+        label.setText(f"Selected {sound_role} sound: {display_name}")
         test_button.setEnabled(sound_path.exists() and can_play_sound)
 
     def _handle_upload_question_sound_clicked(self) -> None:
         """Open a file picker to set the question notification sound."""
-        self._question_notification_sound_path = self._upload_sound(
-            slot_name="question"
-        )
+        self._upload_sound(slot_name="question")
         self._update_sound_summary()
 
     def _handle_upload_answer_sound_clicked(self) -> None:
         """Open a file picker to set the answer notification sound."""
-        self._answer_notification_sound_path = self._upload_sound(slot_name="answer")
+        self._upload_sound(slot_name="answer")
         self._update_sound_summary()
 
-    def _upload_sound(self, *, slot_name: str) -> str:
-        """Open a file picker and persist one selected notification sound copy."""
+    def _upload_sound(self, *, slot_name: str) -> None:
+        """Open a file picker and stage one selected notification sound."""
         selected_path, _ = QFileDialog.getOpenFileName(
             self,
             "Select notification sound",
@@ -597,49 +650,62 @@ class SettingsPage(QWidget):
             "Sound files (*.mp3 *.wav)",
         )
         if not selected_path:
-            return (
-                self._question_notification_sound_path
-                if slot_name == "question"
-                else self._answer_notification_sound_path
-            )
+            return
 
         try:
-            return copy_notification_sound_file(
-                Path(selected_path),
-                slot_name=slot_name,
-            )
+            resolved_source = validate_notification_sound_file(Path(selected_path))
         except (FileNotFoundError, ValueError) as error:
             QMessageBox.warning(self, "Upload sound", str(error))
-            return (
-                self._question_notification_sound_path
-                if slot_name == "question"
-                else self._answer_notification_sound_path
+            return
+        if slot_name == "question":
+            self._pending_question_notification_sound_source_path = str(resolved_source)
+            self._pending_question_notification_sound_display_name = (
+                resolved_source.name
             )
+            return
+        self._pending_answer_notification_sound_source_path = str(resolved_source)
+        self._pending_answer_notification_sound_display_name = resolved_source.name
 
     def _handle_cancel_clicked(self) -> None:
         """Discard unsaved form edits and restore persisted settings."""
+        self.stop_active_preview()
         self._load_persisted_settings()
         self.cancel_requested.emit()
 
     def _handle_save_clicked(self) -> None:
         """Persist current form edits."""
+        self.stop_active_preview()
         self._persist_settings()
 
     def _handle_test_question_sound_clicked(self) -> None:
         """Play the current question notification sound."""
         self._play_selected_sound(
-            custom_sound_path=self._question_notification_sound_path
+            custom_sound_path=self._selected_sound_path("question"),
+            sound_role="question",
         )
 
     def _handle_test_answer_sound_clicked(self) -> None:
         """Play the current answer notification sound."""
         self._play_selected_sound(
-            custom_sound_path=self._answer_notification_sound_path
+            custom_sound_path=self._selected_sound_path("answer"),
+            sound_role="answer",
         )
 
-    def _play_selected_sound(self, *, custom_sound_path: str) -> None:
+    def _handle_stop_question_sound_clicked(self) -> None:
+        """Stop the active question preview when one is playing."""
+        self._stop_preview_sound("question")
+
+    def _handle_stop_answer_sound_clicked(self) -> None:
+        """Stop the active answer preview when one is playing."""
+        self._stop_preview_sound("answer")
+
+    def stop_active_preview(self) -> None:
+        """Stop any in-progress settings sound preview."""
+        self._preview_sound_controller.stop()
+
+    def _play_selected_sound(self, *, custom_sound_path: str, sound_role: str) -> None:
         """Play one selected notification sound or the bundled default."""
-        if self._sound_player is None:
+        if not self._preview_sound_controller.is_available:
             QMessageBox.warning(
                 self,
                 "Test sound",
@@ -655,8 +721,108 @@ class SettingsPage(QWidget):
             QMessageBox.warning(self, "Test sound", "Saved sound file is missing.")
             self._update_sound_summary()
             return
-        self._sound_player.setSource(QUrl.fromLocalFile(str(sound_path)))
-        self._sound_player.play()
+        self._preview_sound_controller.play(
+            sound_path,
+            max_duration_ms=SOUND_PREVIEW_LIMIT_MS,
+            context=sound_role,
+        )
+
+    def _stop_preview_sound(self, sound_role: str) -> None:
+        """Stop the current preview only when it matches the requested role."""
+        if self._preview_sound_controller.active_context != sound_role:
+            return
+        self._preview_sound_controller.stop()
+
+    def _selected_sound_path(self, slot_name: str) -> str:
+        """Return the currently selected sound path, including unsaved uploads."""
+        if slot_name == "question":
+            return (
+                self._pending_question_notification_sound_source_path
+                or self._question_notification_sound_path
+            )
+        return (
+            self._pending_answer_notification_sound_source_path
+            or self._answer_notification_sound_path
+        )
+
+    def _selected_sound_display_name(self, slot_name: str) -> str:
+        """Return the display name for the current sound selection."""
+        selected_sound_path = self._selected_sound_path(slot_name)
+        if slot_name == "question":
+            return (
+                self._pending_question_notification_sound_display_name
+                or self._question_notification_sound_display_name
+                or (Path(selected_sound_path).name if selected_sound_path else "")
+            )
+        return (
+            self._pending_answer_notification_sound_display_name
+            or self._answer_notification_sound_display_name
+            or (Path(selected_sound_path).name if selected_sound_path else "")
+        )
+
+    def _apply_pending_sound_uploads(self, settings: AppSettings) -> AppSettings:
+        """Copy staged uploads into managed storage and merge them into settings."""
+        updated_settings = settings
+        if self._pending_question_notification_sound_source_path:
+            updated_settings = replace(
+                updated_settings,
+                question_notification_sound_path=copy_notification_sound_file(
+                    Path(self._pending_question_notification_sound_source_path),
+                    slot_name="question",
+                ),
+                question_notification_sound_display_name=(
+                    self._pending_question_notification_sound_display_name
+                ),
+            )
+        if self._pending_answer_notification_sound_source_path:
+            updated_settings = replace(
+                updated_settings,
+                answer_notification_sound_path=copy_notification_sound_file(
+                    Path(self._pending_answer_notification_sound_source_path),
+                    slot_name="answer",
+                ),
+                answer_notification_sound_display_name=(
+                    self._pending_answer_notification_sound_display_name
+                ),
+            )
+        return updated_settings
+
+    def _apply_saved_sound_state(self, settings: AppSettings) -> None:
+        """Commit a successfully saved sound selection into the page state."""
+        self._question_notification_sound_path = (
+            settings.question_notification_sound_path
+        )
+        self._question_notification_sound_display_name = (
+            settings.question_notification_sound_display_name
+        )
+        self._answer_notification_sound_path = settings.answer_notification_sound_path
+        self._answer_notification_sound_display_name = (
+            settings.answer_notification_sound_display_name
+        )
+        self._pending_question_notification_sound_source_path = ""
+        self._pending_question_notification_sound_display_name = ""
+        self._pending_answer_notification_sound_source_path = ""
+        self._pending_answer_notification_sound_display_name = ""
+        self._update_sound_summary()
+
+    def _handle_preview_playback_started(self, context: object) -> None:
+        """Update stop-action state when preview playback begins."""
+        self._active_preview_role = context if isinstance(context, str) else None
+        self._update_preview_stop_buttons()
+
+    def _handle_preview_playback_stopped(self, _context: object) -> None:
+        """Update stop-action state when preview playback ends."""
+        self._active_preview_role = None
+        self._update_preview_stop_buttons()
+
+    def _update_preview_stop_buttons(self) -> None:
+        """Show only the stop action for the currently playing preview."""
+        question_preview_active = self._active_preview_role == "question"
+        answer_preview_active = self._active_preview_role == "answer"
+        self.stop_question_sound_button.setVisible(question_preview_active)
+        self.stop_question_sound_button.setEnabled(question_preview_active)
+        self.stop_answer_sound_button.setVisible(answer_preview_active)
+        self.stop_answer_sound_button.setEnabled(answer_preview_active)
 
     def _update_wrong_answer_reinsert_after_enabled_state(self) -> None:
         """Enable X only when the matching reinsertion mode is selected."""

@@ -25,6 +25,12 @@ SETTINGS_KEY_QUESTION_NOTIFICATION_SOUND_PATH = (
     "flashcard/question_notification_sound_path"
 )
 SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_PATH = "flashcard/answer_notification_sound_path"
+SETTINGS_KEY_QUESTION_NOTIFICATION_SOUND_DISPLAY_NAME = (
+    "flashcard/question_notification_sound_display_name"
+)
+SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_DISPLAY_NAME = (
+    "flashcard/answer_notification_sound_display_name"
+)
 SETTINGS_KEY_WRONG_ANSWER_COMPLETION_MODE = "flashcard/wrong_answer_completion_mode"
 SETTINGS_KEY_WRONG_ANSWER_REINSERTION_MODE = "flashcard/wrong_answer_reinsertion_mode"
 SETTINGS_KEY_WRONG_ANSWER_REINSERT_AFTER_COUNT = (
@@ -86,7 +92,9 @@ class AppSettings:
     question_display_duration_seconds: int = 8
     answer_display_duration_seconds: int = 8
     question_notification_sound_path: str = ""
+    question_notification_sound_display_name: str = ""
     answer_notification_sound_path: str = ""
+    answer_notification_sound_display_name: str = ""
     wrong_answer_completion_mode: WrongAnswerCompletionMode = (
         WrongAnswerCompletionMode.UNTIL_CORRECT_ONCE
     )
@@ -268,6 +276,26 @@ def in_app_shortcut_bindings_from_settings(
     }
 
 
+def _default_notification_sound_display_name(sound_path: str) -> str:
+    """Return the fallback display name for a persisted custom sound path."""
+    normalized_sound_path = sound_path.strip()
+    if not normalized_sound_path:
+        return ""
+    return Path(normalized_sound_path).name
+
+
+def _normalize_notification_sound_display_name(
+    display_name: str,
+    *,
+    sound_path: str,
+) -> str:
+    """Normalize persisted sound display-name metadata."""
+    normalized_display_name = display_name.strip()
+    if normalized_display_name:
+        return normalized_display_name
+    return _default_notification_sound_display_name(sound_path)
+
+
 def load_app_settings() -> AppSettings:
     """Load current app settings from QSettings.
 
@@ -312,6 +340,33 @@ def load_app_settings() -> AppSettings:
     ):
         question_notification_sound_path = legacy_notification_sound_path
         answer_notification_sound_path = legacy_notification_sound_path
+    question_notification_sound_display_name = _normalize_text(
+        qsettings.value(
+            SETTINGS_KEY_QUESTION_NOTIFICATION_SOUND_DISPLAY_NAME,
+            "",
+        ),
+        default="",
+        allow_empty=True,
+    )
+    if (
+        question_notification_sound_path
+        and not question_notification_sound_display_name
+    ):
+        question_notification_sound_display_name = (
+            _default_notification_sound_display_name(question_notification_sound_path)
+        )
+    answer_notification_sound_display_name = _normalize_text(
+        qsettings.value(
+            SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_DISPLAY_NAME,
+            "",
+        ),
+        default="",
+        allow_empty=True,
+    )
+    if answer_notification_sound_path and not answer_notification_sound_display_name:
+        answer_notification_sound_display_name = (
+            _default_notification_sound_display_name(answer_notification_sound_path)
+        )
     return AppSettings(
         timer_duration_seconds=_normalize_int(
             qsettings.value(
@@ -357,7 +412,11 @@ def load_app_settings() -> AppSettings:
             maximum=3600,
         ),
         question_notification_sound_path=question_notification_sound_path,
+        question_notification_sound_display_name=(
+            question_notification_sound_display_name
+        ),
         answer_notification_sound_path=answer_notification_sound_path,
+        answer_notification_sound_display_name=answer_notification_sound_display_name,
         wrong_answer_completion_mode=_normalize_enum(
             qsettings.value(
                 SETTINGS_KEY_WRONG_ANSWER_COMPLETION_MODE,
@@ -517,9 +576,37 @@ def save_app_settings(settings: AppSettings) -> None:
         SETTINGS_KEY_QUESTION_NOTIFICATION_SOUND_PATH,
         settings.question_notification_sound_path.strip(),
     )
+    normalized_question_notification_sound_path = (
+        settings.question_notification_sound_path.strip()
+    )
+    qsettings.setValue(
+        SETTINGS_KEY_QUESTION_NOTIFICATION_SOUND_DISPLAY_NAME,
+        (
+            _normalize_notification_sound_display_name(
+                settings.question_notification_sound_display_name,
+                sound_path=normalized_question_notification_sound_path,
+            )
+            if normalized_question_notification_sound_path
+            else ""
+        ),
+    )
     qsettings.setValue(
         SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_PATH,
         settings.answer_notification_sound_path.strip(),
+    )
+    normalized_answer_notification_sound_path = (
+        settings.answer_notification_sound_path.strip()
+    )
+    qsettings.setValue(
+        SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_DISPLAY_NAME,
+        (
+            _normalize_notification_sound_display_name(
+                settings.answer_notification_sound_display_name,
+                sound_path=normalized_answer_notification_sound_path,
+            )
+            if normalized_answer_notification_sound_path
+            else ""
+        ),
     )
     qsettings.remove(SETTINGS_KEY_LEGACY_NOTIFICATION_SOUND_PATH)
     qsettings.setValue(
@@ -630,6 +717,19 @@ def save_app_settings(settings: AppSettings) -> None:
     qsettings.sync()
 
 
+def validate_notification_sound_file(source_path: Path) -> Path:
+    """Validate a user-selected notification sound file and return its path."""
+    resolved_source = source_path.expanduser().resolve()
+    if not resolved_source.exists() or not resolved_source.is_file():
+        msg = f"Sound file not found: {resolved_source}"
+        raise FileNotFoundError(msg)
+    extension = resolved_source.suffix.lower()
+    if extension not in ALLOWED_SOUND_EXTENSIONS:
+        msg = "Unsupported sound file type. Use .mp3 or .wav."
+        raise ValueError(msg)
+    return resolved_source
+
+
 def copy_notification_sound_file(source_path: Path, *, slot_name: str) -> str:
     """Copy a selected notification sound file into app data storage.
 
@@ -644,14 +744,8 @@ def copy_notification_sound_file(source_path: Path, *, slot_name: str) -> str:
         FileNotFoundError: If the source path does not exist.
         ValueError: If source extension or slot name is not supported.
     """
-    resolved_source = source_path.expanduser().resolve()
-    if not resolved_source.exists() or not resolved_source.is_file():
-        msg = f"Sound file not found: {resolved_source}"
-        raise FileNotFoundError(msg)
+    resolved_source = validate_notification_sound_file(source_path)
     extension = resolved_source.suffix.lower()
-    if extension not in ALLOWED_SOUND_EXTENSIONS:
-        msg = "Unsupported sound file type. Use .mp3 or .wav."
-        raise ValueError(msg)
     normalized_slot_name = slot_name.strip().lower().replace(" ", "-")
     if not normalized_slot_name:
         msg = "Sound slot name is required."
