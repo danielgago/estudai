@@ -355,12 +355,17 @@ class MainWindow(QMainWindow):
         self._timer_page_mark_wrong_shortcut = self._create_application_shortcut(
             self._trigger_timer_page_mark_wrong
         )
+        self._timer_page_copy_question_shortcut = self._create_application_shortcut(
+            self._trigger_timer_page_copy_question
+        )
         self._toggle_fullscreen_shortcut = self._create_application_shortcut(
             self.toggle_fullscreen
         )
+        self._toggle_fullscreen_shortcut.setKey(QKeySequence("F11"))
         self._exit_fullscreen_shortcut = self._create_application_shortcut(
             self.exit_fullscreen
         )
+        self._exit_fullscreen_shortcut.setKey(QKeySequence("Escape"))
 
     def _create_application_shortcut(self, callback: object) -> QShortcut:
         """Create one app-scoped shortcut with no binding assigned yet."""
@@ -386,16 +391,15 @@ class MainWindow(QMainWindow):
         self._timer_page_mark_wrong_shortcut.setKey(
             QKeySequence(bindings[InAppShortcutAction.MARK_WRONG])
         )
-        self._toggle_fullscreen_shortcut.setKey(
-            QKeySequence(bindings[InAppShortcutAction.TOGGLE_FULLSCREEN])
-        )
-        self._exit_fullscreen_shortcut.setKey(
-            QKeySequence(bindings[InAppShortcutAction.EXIT_FULLSCREEN])
+        self._timer_page_copy_question_shortcut.setKey(
+            QKeySequence(bindings[InAppShortcutAction.COPY_QUESTION])
         )
 
     def _start_stop_shortcut_sequences(self, binding: str) -> list[QKeySequence]:
         """Return the start/stop shortcut list, keeping Enter and Return aligned."""
-        normalized_binding = normalize_hotkey_binding(binding)
+        normalized_binding = normalize_hotkey_binding(binding, allow_empty=True)
+        if not normalized_binding:
+            return [QKeySequence()]
         primary_sequence = QKeySequence(binding)
         primary_binding = primary_sequence.toString()
         sequences = [primary_sequence]
@@ -622,6 +626,9 @@ class MainWindow(QMainWindow):
             return
         if action is HotkeyAction.MARK_WRONG:
             self._trigger_timer_page_mark_wrong()
+            return
+        if action is HotkeyAction.COPY_QUESTION:
+            self._trigger_timer_page_copy_question()
 
     def _timer_page_is_active(self) -> bool:
         """Return whether timer hotkeys should be active for the current page."""
@@ -656,6 +663,21 @@ class MainWindow(QMainWindow):
             return
         if self.timer_page.wrong_button.isEnabled():
             self.timer_page.wrong_button.click()
+
+    def _trigger_timer_page_copy_question(self) -> None:
+        """Copy the current flashcard question and show transient feedback."""
+        if not self._timer_page_is_active():
+            return
+        if self.timer_page.flashcard_question_label.isHidden():
+            return
+        question = self.timer_page.current_flashcard_question_text().strip()
+        if not question:
+            return
+        clipboard = QApplication.clipboard()
+        if clipboard is None:
+            return
+        clipboard.setText(question)
+        self.timer_page.show_copy_feedback()
 
     def _start_flashcard_phase_timer(
         self, duration_milliseconds: int, callback

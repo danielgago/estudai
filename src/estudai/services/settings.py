@@ -30,12 +30,12 @@ SETTINGS_KEY_HOTKEY_PAUSE_RESUME = "hotkeys/pause_resume"
 SETTINGS_KEY_HOTKEY_START_STOP = "hotkeys/start_stop"
 SETTINGS_KEY_HOTKEY_MARK_CORRECT = "hotkeys/mark_correct"
 SETTINGS_KEY_HOTKEY_MARK_WRONG = "hotkeys/mark_wrong"
+SETTINGS_KEY_HOTKEY_COPY_QUESTION = "hotkeys/copy_question"
 SETTINGS_KEY_IN_APP_SHORTCUT_PAUSE_RESUME = "app_shortcuts/pause_resume"
 SETTINGS_KEY_IN_APP_SHORTCUT_START_STOP = "app_shortcuts/start_stop"
 SETTINGS_KEY_IN_APP_SHORTCUT_MARK_CORRECT = "app_shortcuts/mark_correct"
 SETTINGS_KEY_IN_APP_SHORTCUT_MARK_WRONG = "app_shortcuts/mark_wrong"
-SETTINGS_KEY_IN_APP_SHORTCUT_TOGGLE_FULLSCREEN = "app_shortcuts/toggle_fullscreen"
-SETTINGS_KEY_IN_APP_SHORTCUT_EXIT_FULLSCREEN = "app_shortcuts/exit_fullscreen"
+SETTINGS_KEY_IN_APP_SHORTCUT_COPY_QUESTION = "app_shortcuts/copy_question"
 ALLOWED_SOUND_EXTENSIONS = {".mp3", ".wav"}
 
 
@@ -60,8 +60,7 @@ class InAppShortcutAction(StrEnum):
     START_STOP = "start_stop"
     MARK_CORRECT = "mark_correct"
     MARK_WRONG = "mark_wrong"
-    TOGGLE_FULLSCREEN = "toggle_fullscreen"
-    EXIT_FULLSCREEN = "exit_fullscreen"
+    COPY_QUESTION = "copy_question"
 
 
 DEFAULT_IN_APP_SHORTCUT_BINDINGS: dict[InAppShortcutAction, str] = {
@@ -69,8 +68,7 @@ DEFAULT_IN_APP_SHORTCUT_BINDINGS: dict[InAppShortcutAction, str] = {
     InAppShortcutAction.START_STOP: "Enter",
     InAppShortcutAction.MARK_CORRECT: "Up",
     InAppShortcutAction.MARK_WRONG: "Down",
-    InAppShortcutAction.TOGGLE_FULLSCREEN: "F11",
-    InAppShortcutAction.EXIT_FULLSCREEN: "Escape",
+    InAppShortcutAction.COPY_QUESTION: "C",
 }
 
 
@@ -95,6 +93,7 @@ class AppSettings:
     start_stop_hotkey: str = DEFAULT_HOTKEY_BINDINGS[HotkeyAction.START_STOP]
     mark_correct_hotkey: str = DEFAULT_HOTKEY_BINDINGS[HotkeyAction.MARK_CORRECT]
     mark_wrong_hotkey: str = DEFAULT_HOTKEY_BINDINGS[HotkeyAction.MARK_WRONG]
+    copy_question_hotkey: str = DEFAULT_HOTKEY_BINDINGS[HotkeyAction.COPY_QUESTION]
     in_app_pause_resume_shortcut: str = DEFAULT_IN_APP_SHORTCUT_BINDINGS[
         InAppShortcutAction.PAUSE_RESUME
     ]
@@ -107,11 +106,8 @@ class AppSettings:
     in_app_mark_wrong_shortcut: str = DEFAULT_IN_APP_SHORTCUT_BINDINGS[
         InAppShortcutAction.MARK_WRONG
     ]
-    in_app_toggle_fullscreen_shortcut: str = DEFAULT_IN_APP_SHORTCUT_BINDINGS[
-        InAppShortcutAction.TOGGLE_FULLSCREEN
-    ]
-    in_app_exit_fullscreen_shortcut: str = DEFAULT_IN_APP_SHORTCUT_BINDINGS[
-        InAppShortcutAction.EXIT_FULLSCREEN
+    in_app_copy_question_shortcut: str = DEFAULT_IN_APP_SHORTCUT_BINDINGS[
+        InAppShortcutAction.COPY_QUESTION
     ]
 
 
@@ -223,17 +219,24 @@ def _normalize_enum[EnumType: StrEnum](
     return default
 
 
-def _normalize_text(raw_value: object, *, default: str) -> str:
+def _normalize_text(
+    raw_value: object,
+    *,
+    default: str,
+    allow_empty: bool = False,
+) -> str:
     """Normalize a string-like value into trimmed text."""
     if isinstance(raw_value, str):
         normalized = raw_value.strip()
-        if normalized:
+        if normalized or allow_empty:
             return normalized
         return default
     if raw_value is None:
         return default
     normalized = str(raw_value).strip()
-    return normalized or default
+    if normalized or allow_empty:
+        return normalized
+    return default
 
 
 def hotkey_bindings_from_settings(settings: AppSettings) -> dict[HotkeyAction, str]:
@@ -243,6 +246,7 @@ def hotkey_bindings_from_settings(settings: AppSettings) -> dict[HotkeyAction, s
         HotkeyAction.START_STOP: settings.start_stop_hotkey,
         HotkeyAction.MARK_CORRECT: settings.mark_correct_hotkey,
         HotkeyAction.MARK_WRONG: settings.mark_wrong_hotkey,
+        HotkeyAction.COPY_QUESTION: settings.copy_question_hotkey,
     }
 
 
@@ -255,10 +259,7 @@ def in_app_shortcut_bindings_from_settings(
         InAppShortcutAction.START_STOP: settings.in_app_start_stop_shortcut,
         InAppShortcutAction.MARK_CORRECT: settings.in_app_mark_correct_shortcut,
         InAppShortcutAction.MARK_WRONG: settings.in_app_mark_wrong_shortcut,
-        InAppShortcutAction.TOGGLE_FULLSCREEN: (
-            settings.in_app_toggle_fullscreen_shortcut
-        ),
-        InAppShortcutAction.EXIT_FULLSCREEN: settings.in_app_exit_fullscreen_shortcut,
+        InAppShortcutAction.COPY_QUESTION: settings.in_app_copy_question_shortcut,
     }
 
 
@@ -351,6 +352,7 @@ def load_app_settings() -> AppSettings:
                 AppSettings.pause_resume_hotkey,
             ),
             default=AppSettings.pause_resume_hotkey,
+            allow_empty=True,
         ),
         start_stop_hotkey=_normalize_text(
             qsettings.value(
@@ -358,6 +360,7 @@ def load_app_settings() -> AppSettings:
                 AppSettings.start_stop_hotkey,
             ),
             default=AppSettings.start_stop_hotkey,
+            allow_empty=True,
         ),
         mark_correct_hotkey=_normalize_text(
             qsettings.value(
@@ -365,6 +368,7 @@ def load_app_settings() -> AppSettings:
                 AppSettings.mark_correct_hotkey,
             ),
             default=AppSettings.mark_correct_hotkey,
+            allow_empty=True,
         ),
         mark_wrong_hotkey=_normalize_text(
             qsettings.value(
@@ -372,6 +376,15 @@ def load_app_settings() -> AppSettings:
                 AppSettings.mark_wrong_hotkey,
             ),
             default=AppSettings.mark_wrong_hotkey,
+            allow_empty=True,
+        ),
+        copy_question_hotkey=_normalize_text(
+            qsettings.value(
+                SETTINGS_KEY_HOTKEY_COPY_QUESTION,
+                AppSettings.copy_question_hotkey,
+            ),
+            default=AppSettings.copy_question_hotkey,
+            allow_empty=True,
         ),
         in_app_pause_resume_shortcut=_normalize_text(
             qsettings.value(
@@ -379,6 +392,7 @@ def load_app_settings() -> AppSettings:
                 AppSettings.in_app_pause_resume_shortcut,
             ),
             default=AppSettings.in_app_pause_resume_shortcut,
+            allow_empty=True,
         ),
         in_app_start_stop_shortcut=_normalize_text(
             qsettings.value(
@@ -386,6 +400,7 @@ def load_app_settings() -> AppSettings:
                 AppSettings.in_app_start_stop_shortcut,
             ),
             default=AppSettings.in_app_start_stop_shortcut,
+            allow_empty=True,
         ),
         in_app_mark_correct_shortcut=_normalize_text(
             qsettings.value(
@@ -393,6 +408,7 @@ def load_app_settings() -> AppSettings:
                 AppSettings.in_app_mark_correct_shortcut,
             ),
             default=AppSettings.in_app_mark_correct_shortcut,
+            allow_empty=True,
         ),
         in_app_mark_wrong_shortcut=_normalize_text(
             qsettings.value(
@@ -400,20 +416,15 @@ def load_app_settings() -> AppSettings:
                 AppSettings.in_app_mark_wrong_shortcut,
             ),
             default=AppSettings.in_app_mark_wrong_shortcut,
+            allow_empty=True,
         ),
-        in_app_toggle_fullscreen_shortcut=_normalize_text(
+        in_app_copy_question_shortcut=_normalize_text(
             qsettings.value(
-                SETTINGS_KEY_IN_APP_SHORTCUT_TOGGLE_FULLSCREEN,
-                AppSettings.in_app_toggle_fullscreen_shortcut,
+                SETTINGS_KEY_IN_APP_SHORTCUT_COPY_QUESTION,
+                AppSettings.in_app_copy_question_shortcut,
             ),
-            default=AppSettings.in_app_toggle_fullscreen_shortcut,
-        ),
-        in_app_exit_fullscreen_shortcut=_normalize_text(
-            qsettings.value(
-                SETTINGS_KEY_IN_APP_SHORTCUT_EXIT_FULLSCREEN,
-                AppSettings.in_app_exit_fullscreen_shortcut,
-            ),
-            default=AppSettings.in_app_exit_fullscreen_shortcut,
+            default=AppSettings.in_app_copy_question_shortcut,
+            allow_empty=True,
         ),
     )
 
@@ -499,6 +510,7 @@ def save_app_settings(settings: AppSettings) -> None:
         _normalize_text(
             settings.pause_resume_hotkey,
             default=AppSettings.pause_resume_hotkey,
+            allow_empty=True,
         ),
     )
     qsettings.setValue(
@@ -506,6 +518,7 @@ def save_app_settings(settings: AppSettings) -> None:
         _normalize_text(
             settings.start_stop_hotkey,
             default=AppSettings.start_stop_hotkey,
+            allow_empty=True,
         ),
     )
     qsettings.setValue(
@@ -513,6 +526,7 @@ def save_app_settings(settings: AppSettings) -> None:
         _normalize_text(
             settings.mark_correct_hotkey,
             default=AppSettings.mark_correct_hotkey,
+            allow_empty=True,
         ),
     )
     qsettings.setValue(
@@ -520,6 +534,15 @@ def save_app_settings(settings: AppSettings) -> None:
         _normalize_text(
             settings.mark_wrong_hotkey,
             default=AppSettings.mark_wrong_hotkey,
+            allow_empty=True,
+        ),
+    )
+    qsettings.setValue(
+        SETTINGS_KEY_HOTKEY_COPY_QUESTION,
+        _normalize_text(
+            settings.copy_question_hotkey,
+            default=AppSettings.copy_question_hotkey,
+            allow_empty=True,
         ),
     )
     qsettings.setValue(
@@ -527,6 +550,7 @@ def save_app_settings(settings: AppSettings) -> None:
         _normalize_text(
             settings.in_app_pause_resume_shortcut,
             default=AppSettings.in_app_pause_resume_shortcut,
+            allow_empty=True,
         ),
     )
     qsettings.setValue(
@@ -534,6 +558,7 @@ def save_app_settings(settings: AppSettings) -> None:
         _normalize_text(
             settings.in_app_start_stop_shortcut,
             default=AppSettings.in_app_start_stop_shortcut,
+            allow_empty=True,
         ),
     )
     qsettings.setValue(
@@ -541,6 +566,7 @@ def save_app_settings(settings: AppSettings) -> None:
         _normalize_text(
             settings.in_app_mark_correct_shortcut,
             default=AppSettings.in_app_mark_correct_shortcut,
+            allow_empty=True,
         ),
     )
     qsettings.setValue(
@@ -548,20 +574,15 @@ def save_app_settings(settings: AppSettings) -> None:
         _normalize_text(
             settings.in_app_mark_wrong_shortcut,
             default=AppSettings.in_app_mark_wrong_shortcut,
+            allow_empty=True,
         ),
     )
     qsettings.setValue(
-        SETTINGS_KEY_IN_APP_SHORTCUT_TOGGLE_FULLSCREEN,
+        SETTINGS_KEY_IN_APP_SHORTCUT_COPY_QUESTION,
         _normalize_text(
-            settings.in_app_toggle_fullscreen_shortcut,
-            default=AppSettings.in_app_toggle_fullscreen_shortcut,
-        ),
-    )
-    qsettings.setValue(
-        SETTINGS_KEY_IN_APP_SHORTCUT_EXIT_FULLSCREEN,
-        _normalize_text(
-            settings.in_app_exit_fullscreen_shortcut,
-            default=AppSettings.in_app_exit_fullscreen_shortcut,
+            settings.in_app_copy_question_shortcut,
+            default=AppSettings.in_app_copy_question_shortcut,
+            allow_empty=True,
         ),
     )
     qsettings.sync()

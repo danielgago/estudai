@@ -64,12 +64,13 @@ def test_global_hotkey_service_applies_bindings_and_dispatches_callbacks() -> No
         HotkeyAction.START_STOP: "ctrl+alt+enter",
         HotkeyAction.MARK_CORRECT: "ctrl+alt+up",
         HotkeyAction.MARK_WRONG: "ctrl+alt+down",
+        HotkeyAction.COPY_QUESTION: "ctrl+alt+c",
     }
 
     backend.trigger("ctrl+alt+space")
-    backend.trigger("ctrl+alt+down")
+    backend.trigger("ctrl+alt+c")
 
-    assert triggered == [HotkeyAction.PAUSE_RESUME, HotkeyAction.MARK_WRONG]
+    assert triggered == [HotkeyAction.PAUSE_RESUME, HotkeyAction.COPY_QUESTION]
 
 
 def test_global_hotkey_service_rejects_duplicate_bindings_before_registration() -> None:
@@ -84,11 +85,43 @@ def test_global_hotkey_service_rejects_duplicate_bindings_before_registration() 
                 HotkeyAction.START_STOP: "Ctrl+Alt+Space",
                 HotkeyAction.MARK_CORRECT: "Ctrl+Alt+Up",
                 HotkeyAction.MARK_WRONG: "Ctrl+Alt+Down",
+                HotkeyAction.COPY_QUESTION: "Ctrl+Alt+C",
             },
             {action: lambda: None for action in HotkeyAction},
         )
 
     assert backend.registered_bindings == []
+
+
+def test_global_hotkey_service_skips_empty_bindings() -> None:
+    """Verify empty bindings disable actions without touching the backend."""
+    backend = _FakeHotkeyBackend()
+    service = GlobalHotkeyService(backend=backend)
+    triggered: list[HotkeyAction] = []
+
+    applied = service.apply_bindings(
+        {
+            HotkeyAction.PAUSE_RESUME: "",
+            HotkeyAction.START_STOP: "Ctrl+Alt+Enter",
+            HotkeyAction.MARK_CORRECT: "",
+            HotkeyAction.MARK_WRONG: "Ctrl+Alt+Down",
+            HotkeyAction.COPY_QUESTION: "",
+        },
+        {
+            action: lambda action=action: triggered.append(action)
+            for action in HotkeyAction
+        },
+    )
+
+    assert applied == {
+        HotkeyAction.START_STOP: "ctrl+alt+enter",
+        HotkeyAction.MARK_WRONG: "ctrl+alt+down",
+    }
+    assert backend.registered_bindings == ["ctrl+alt+enter", "ctrl+alt+down"]
+
+    backend.trigger("ctrl+alt+enter")
+
+    assert triggered == [HotkeyAction.START_STOP]
 
 
 def test_global_hotkey_service_restores_previous_bindings_after_failed_update() -> None:
@@ -111,6 +144,7 @@ def test_global_hotkey_service_restores_previous_bindings_after_failed_update() 
                 HotkeyAction.START_STOP: "Ctrl+Alt+Enter",
                 HotkeyAction.MARK_CORRECT: "Ctrl+Alt+Up",
                 HotkeyAction.MARK_WRONG: "Ctrl+Alt+Down",
+                HotkeyAction.COPY_QUESTION: "Ctrl+Alt+C",
             },
             callbacks,
         )
@@ -120,6 +154,7 @@ def test_global_hotkey_service_restores_previous_bindings_after_failed_update() 
         HotkeyAction.START_STOP: "ctrl+alt+enter",
         HotkeyAction.MARK_CORRECT: "ctrl+alt+up",
         HotkeyAction.MARK_WRONG: "ctrl+alt+down",
+        HotkeyAction.COPY_QUESTION: "ctrl+alt+c",
     }
 
     backend.trigger("ctrl+alt+space")

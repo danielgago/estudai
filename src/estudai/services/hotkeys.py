@@ -29,6 +29,7 @@ class HotkeyAction(StrEnum):
     START_STOP = "start_stop"
     MARK_CORRECT = "mark_correct"
     MARK_WRONG = "mark_wrong"
+    COPY_QUESTION = "copy_question"
 
 
 DEFAULT_HOTKEY_BINDINGS: dict[HotkeyAction, str] = {
@@ -36,6 +37,7 @@ DEFAULT_HOTKEY_BINDINGS: dict[HotkeyAction, str] = {
     HotkeyAction.START_STOP: "Ctrl+Alt+Enter",
     HotkeyAction.MARK_CORRECT: "Ctrl+Alt+Up",
     HotkeyAction.MARK_WRONG: "Ctrl+Alt+Down",
+    HotkeyAction.COPY_QUESTION: "Ctrl+Alt+C",
 }
 
 _MODIFIER_TOKENS = {"alt", "ctrl", "shift", "windows", "cmd", "command"}
@@ -136,10 +138,12 @@ def _normalize_hotkey_token(token: str) -> str:
     return normalized
 
 
-def normalize_hotkey_binding(binding: str) -> str:
+def normalize_hotkey_binding(binding: str, *, allow_empty: bool = False) -> str:
     """Normalize one user-provided hotkey binding string."""
     normalized_binding = binding.strip()
     if not normalized_binding:
+        if allow_empty:
+            return ""
         msg = "Hotkeys cannot be empty."
         raise HotkeyRegistrationError(msg)
     if "," in normalized_binding:
@@ -159,12 +163,17 @@ def normalize_hotkey_binding(binding: str) -> str:
 
 def normalize_hotkey_bindings(
     bindings: Mapping[HotkeyAction, str],
+    *,
+    allow_empty: bool = False,
 ) -> dict[HotkeyAction, str]:
     """Normalize all required app hotkey bindings and reject duplicates."""
     normalized_bindings: dict[HotkeyAction, str] = {}
     owners_by_binding: dict[str, HotkeyAction] = {}
     for action in HotkeyAction:
-        binding = normalize_hotkey_binding(bindings[action])
+        binding = normalize_hotkey_binding(bindings[action], allow_empty=allow_empty)
+        normalized_bindings[action] = binding
+        if not binding:
+            continue
         owner = owners_by_binding.get(binding)
         if owner is not None:
             msg = (
@@ -173,7 +182,6 @@ def normalize_hotkey_bindings(
                 f"'{action.value}'."
             )
             raise HotkeyRegistrationError(msg)
-        normalized_bindings[action] = binding
         owners_by_binding[binding] = action
     return normalized_bindings
 
@@ -483,18 +491,21 @@ class GlobalHotkeyService:
         callbacks: Mapping[HotkeyAction, Callable[[], None]],
     ) -> dict[HotkeyAction, str]:
         """Replace the active hotkey set and roll back on failure."""
-        normalized_bindings = normalize_hotkey_bindings(bindings)
+        normalized_bindings = normalize_hotkey_bindings(bindings, allow_empty=True)
         previous_registrations = dict(self._registrations)
 
         self.clear()
         try:
             for action in HotkeyAction:
+                binding = normalized_bindings[action]
+                if not binding:
+                    continue
                 handle = self._backend.register(
-                    normalized_bindings[action],
+                    binding,
                     callbacks[action],
                 )
                 self._registrations[action] = _RegisteredHotkey(
-                    binding=normalized_bindings[action],
+                    binding=binding,
                     callback=callbacks[action],
                     handle=handle,
                 )

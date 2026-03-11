@@ -1674,6 +1674,8 @@ def test_in_app_timer_shortcuts_control_timer(
     assert window._timer_page_mark_correct_shortcut.key().toString() == "Up"
     assert window._timer_page_mark_wrong_shortcut.context() == Qt.ApplicationShortcut
     assert window._timer_page_mark_wrong_shortcut.key().toString() == "Down"
+    assert window._timer_page_copy_question_shortcut.context() == Qt.ApplicationShortcut
+    assert window._timer_page_copy_question_shortcut.key().toString() == "C"
 
     window._timer_page_start_stop_shortcut.activated.emit()
     assert window.timer_page.is_running is True
@@ -1806,6 +1808,29 @@ def test_global_hotkeys_score_flashcards_through_existing_controls(
     assert window._pending_flashcard_score == "wrong"
 
 
+def test_global_hotkey_copies_visible_flashcard_question(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify the global copy hotkey writes the active question to the clipboard."""
+    backend = _FakeHotkeyBackend()
+    window = MainWindow(hotkey_service=GlobalHotkeyService(backend=backend))
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+    assert window._start_study_session() is True
+
+    flashcard = window._next_flashcard_for_display()
+    assert flashcard is not None
+    window.show_flashcard_popup(flashcard)
+
+    QApplication.clipboard().clear()
+    backend.trigger("ctrl+alt+c")
+
+    assert QApplication.clipboard().text() == "Q1?"
+    assert window.timer_page.copy_feedback_label.isHidden() is False
+
+
 def test_in_app_hotkeys_score_flashcards_through_existing_controls(
     app: QApplication, tmp_path: Path
 ) -> None:
@@ -1837,6 +1862,28 @@ def test_in_app_hotkeys_score_flashcards_through_existing_controls(
     assert window._pending_flashcard_score == "wrong"
 
 
+def test_in_app_copy_shortcut_copies_visible_flashcard_question(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify the local copy shortcut mirrors the flashcard copy action."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+    assert window._start_study_session() is True
+
+    flashcard = window._next_flashcard_for_display()
+    assert flashcard is not None
+    window.show_flashcard_popup(flashcard)
+
+    QApplication.clipboard().clear()
+    window._timer_page_copy_question_shortcut.activated.emit()
+
+    assert QApplication.clipboard().text() == "Q1?"
+    assert window.timer_page.copy_feedback_label.isHidden() is False
+
+
 def test_saving_settings_rebinds_active_global_hotkeys(
     app: QApplication, tmp_path: Path
 ) -> None:
@@ -1853,6 +1900,7 @@ def test_saving_settings_rebinds_active_global_hotkeys(
     window.settings_page.pause_resume_hotkey_edit.setKeySequence("Ctrl+Alt+P")
     window.settings_page.mark_correct_hotkey_edit.setKeySequence("Ctrl+Alt+Right")
     window.settings_page.mark_wrong_hotkey_edit.setKeySequence("Ctrl+Alt+Left")
+    window.settings_page.copy_question_hotkey_edit.setKeySequence("Ctrl+Alt+C")
 
     window.settings_page._handle_save_clicked()
 
@@ -1861,9 +1909,46 @@ def test_saving_settings_rebinds_active_global_hotkeys(
     assert persisted.pause_resume_hotkey == "Ctrl+Alt+P"
     assert persisted.mark_correct_hotkey == "Ctrl+Alt+Right"
     assert persisted.mark_wrong_hotkey == "Ctrl+Alt+Left"
+    assert persisted.copy_question_hotkey == "Ctrl+Alt+C"
 
     backend.trigger("ctrl+alt+s")
     assert window.timer_page.is_running is True
+
+
+def test_saving_settings_can_disable_hotkeys_and_in_app_shortcuts(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify cleared bindings unregister global hotkeys and disable app shortcuts."""
+    backend = _FakeHotkeyBackend()
+    window = MainWindow(hotkey_service=GlobalHotkeyService(backend=backend))
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+
+    window.switch_to_settings()
+    window.settings_page.start_stop_hotkey_edit.setKeySequence("")
+    window.settings_page.pause_resume_hotkey_edit.setKeySequence("")
+    window.settings_page.in_app_start_stop_shortcut_edit.setKeySequence("")
+    window.settings_page.in_app_pause_resume_shortcut_edit.setKeySequence("")
+
+    window.settings_page._handle_save_clicked()
+
+    persisted = load_app_settings()
+    assert persisted.start_stop_hotkey == ""
+    assert persisted.pause_resume_hotkey == ""
+    assert persisted.in_app_start_stop_shortcut == ""
+    assert persisted.in_app_pause_resume_shortcut == ""
+    assert {
+        shortcut.toString()
+        for shortcut in window._timer_page_start_stop_shortcut.keys()
+    } == {""}
+    assert window._timer_page_pause_resume_shortcut.key().toString() == ""
+
+    with pytest.raises(HotkeyRegistrationError, match="ctrl\\+alt\\+enter"):
+        backend.trigger("ctrl+alt+enter")
+    with pytest.raises(HotkeyRegistrationError, match="ctrl\\+alt\\+space"):
+        backend.trigger("ctrl+alt+space")
 
 
 def test_saving_settings_rebinds_active_in_app_shortcuts(
@@ -1881,10 +1966,7 @@ def test_saving_settings_rebinds_active_in_app_shortcuts(
     window.settings_page.in_app_pause_resume_shortcut_edit.setKeySequence("Ctrl+P")
     window.settings_page.in_app_mark_correct_shortcut_edit.setKeySequence("Ctrl+Right")
     window.settings_page.in_app_mark_wrong_shortcut_edit.setKeySequence("Ctrl+Left")
-    window.settings_page.in_app_toggle_fullscreen_shortcut_edit.setKeySequence("F10")
-    window.settings_page.in_app_exit_fullscreen_shortcut_edit.setKeySequence(
-        "Shift+Escape"
-    )
+    window.settings_page.in_app_copy_question_shortcut_edit.setKeySequence("Ctrl+C")
 
     window.settings_page._handle_save_clicked()
 
@@ -1893,15 +1975,15 @@ def test_saving_settings_rebinds_active_in_app_shortcuts(
     assert persisted.in_app_pause_resume_shortcut == "Ctrl+P"
     assert persisted.in_app_mark_correct_shortcut == "Ctrl+Right"
     assert persisted.in_app_mark_wrong_shortcut == "Ctrl+Left"
-    assert persisted.in_app_toggle_fullscreen_shortcut == "F10"
-    assert persisted.in_app_exit_fullscreen_shortcut == "Shift+Esc"
+    assert persisted.in_app_copy_question_shortcut == "Ctrl+C"
 
     assert window._timer_page_start_stop_shortcut.key().toString() == "Ctrl+S"
     assert window._timer_page_pause_resume_shortcut.key().toString() == "Ctrl+P"
     assert window._timer_page_mark_correct_shortcut.key().toString() == "Ctrl+Right"
     assert window._timer_page_mark_wrong_shortcut.key().toString() == "Ctrl+Left"
-    assert window._toggle_fullscreen_shortcut.key().toString() == "F10"
-    assert window._exit_fullscreen_shortcut.key().toString() == "Shift+Esc"
+    assert window._timer_page_copy_question_shortcut.key().toString() == "Ctrl+C"
+    assert window._toggle_fullscreen_shortcut.key().toString() == "F11"
+    assert window._exit_fullscreen_shortcut.key().toString() == "Esc"
 
     window.switch_to_timer()
     window._timer_page_start_stop_shortcut.activated.emit()

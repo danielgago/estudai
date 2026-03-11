@@ -272,8 +272,7 @@ class SettingsPage(QWidget):
         self.in_app_start_stop_shortcut_edit = self._create_shortcut_editor()
         self.in_app_mark_correct_shortcut_edit = self._create_shortcut_editor()
         self.in_app_mark_wrong_shortcut_edit = self._create_shortcut_editor()
-        self.in_app_toggle_fullscreen_shortcut_edit = self._create_shortcut_editor()
-        self.in_app_exit_fullscreen_shortcut_edit = self._create_shortcut_editor()
+        self.in_app_copy_question_shortcut_edit = self._create_shortcut_editor()
         in_app_form.addRow(
             "Pause / Resume:",
             self.in_app_pause_resume_shortcut_edit,
@@ -291,12 +290,8 @@ class SettingsPage(QWidget):
             self.in_app_mark_wrong_shortcut_edit,
         )
         in_app_form.addRow(
-            "Toggle fullscreen:",
-            self.in_app_toggle_fullscreen_shortcut_edit,
-        )
-        in_app_form.addRow(
-            "Exit fullscreen:",
-            self.in_app_exit_fullscreen_shortcut_edit,
+            "Copy question:",
+            self.in_app_copy_question_shortcut_edit,
         )
         self.in_app_shortcut_help_label = QLabel(
             "These only work while the app is focused. Start / Stop keeps "
@@ -314,10 +309,12 @@ class SettingsPage(QWidget):
         self.start_stop_hotkey_edit = self._create_shortcut_editor()
         self.mark_correct_hotkey_edit = self._create_shortcut_editor()
         self.mark_wrong_hotkey_edit = self._create_shortcut_editor()
+        self.copy_question_hotkey_edit = self._create_shortcut_editor()
         hotkey_form.addRow("Pause / Resume:", self.pause_resume_hotkey_edit)
         hotkey_form.addRow("Start / Stop:", self.start_stop_hotkey_edit)
         hotkey_form.addRow("Mark correct:", self.mark_correct_hotkey_edit)
         hotkey_form.addRow("Mark wrong:", self.mark_wrong_hotkey_edit)
+        hotkey_form.addRow("Copy question:", self.copy_question_hotkey_edit)
         self.hotkey_help_label = QLabel(
             "Bindings are system-wide. Choose single key combinations only."
         )
@@ -426,6 +423,9 @@ class SettingsPage(QWidget):
         self.mark_wrong_hotkey_edit.setKeySequence(
             QKeySequence(settings.mark_wrong_hotkey)
         )
+        self.copy_question_hotkey_edit.setKeySequence(
+            QKeySequence(settings.copy_question_hotkey)
+        )
         self.in_app_pause_resume_shortcut_edit.setKeySequence(
             QKeySequence(settings.in_app_pause_resume_shortcut)
         )
@@ -438,11 +438,8 @@ class SettingsPage(QWidget):
         self.in_app_mark_wrong_shortcut_edit.setKeySequence(
             QKeySequence(settings.in_app_mark_wrong_shortcut)
         )
-        self.in_app_toggle_fullscreen_shortcut_edit.setKeySequence(
-            QKeySequence(settings.in_app_toggle_fullscreen_shortcut)
-        )
-        self.in_app_exit_fullscreen_shortcut_edit.setKeySequence(
-            QKeySequence(settings.in_app_exit_fullscreen_shortcut)
+        self.in_app_copy_question_shortcut_edit.setKeySequence(
+            QKeySequence(settings.in_app_copy_question_shortcut)
         )
         self._update_wrong_answer_reinsert_after_enabled_state()
         self._update_sound_summary()
@@ -481,6 +478,7 @@ class SettingsPage(QWidget):
             start_stop_hotkey=self.start_stop_hotkey_edit.keySequence().toString(),
             mark_correct_hotkey=self.mark_correct_hotkey_edit.keySequence().toString(),
             mark_wrong_hotkey=self.mark_wrong_hotkey_edit.keySequence().toString(),
+            copy_question_hotkey=self.copy_question_hotkey_edit.keySequence().toString(),
             in_app_pause_resume_shortcut=(
                 self.in_app_pause_resume_shortcut_edit.keySequence().toString()
             ),
@@ -493,11 +491,8 @@ class SettingsPage(QWidget):
             in_app_mark_wrong_shortcut=(
                 self.in_app_mark_wrong_shortcut_edit.keySequence().toString()
             ),
-            in_app_toggle_fullscreen_shortcut=(
-                self.in_app_toggle_fullscreen_shortcut_edit.keySequence().toString()
-            ),
-            in_app_exit_fullscreen_shortcut=(
-                self.in_app_exit_fullscreen_shortcut_edit.keySequence().toString()
+            in_app_copy_question_shortcut=(
+                self.in_app_copy_question_shortcut_edit.keySequence().toString()
             ),
         )
 
@@ -643,7 +638,10 @@ class SettingsPage(QWidget):
                 in_app_shortcut_bindings_from_settings(settings),
                 group_label="In-app shortcuts",
             )
-            normalize_hotkey_bindings(hotkey_bindings_from_settings(settings))
+            normalize_hotkey_bindings(
+                hotkey_bindings_from_settings(settings),
+                allow_empty=True,
+            )
         except ValueError as error:
             return str(error)
 
@@ -663,7 +661,10 @@ class SettingsPage(QWidget):
         )
         for action, binding in bindings.items():
             try:
-                normalized_binding = normalize_hotkey_binding(binding)
+                normalized_binding = normalize_hotkey_binding(
+                    binding,
+                    allow_empty=True,
+                )
             except ValueError as error:
                 message = str(error)
                 if message.startswith("Hotkeys"):
@@ -671,6 +672,9 @@ class SettingsPage(QWidget):
                 elif message.startswith("Hotkey"):
                     message = message.replace("Hotkey", singular_group_label, 1)
                 raise ValueError(message) from error
+            normalized_bindings[action] = normalized_binding
+            if not normalized_binding:
+                continue
             owner = owners_by_binding.get(normalized_binding)
             if owner is not None:
                 msg = (
@@ -679,7 +683,6 @@ class SettingsPage(QWidget):
                     f"'{action.value}'."
                 )
                 raise ValueError(msg)
-            normalized_bindings[action] = normalized_binding
             owners_by_binding[normalized_binding] = action
         return normalized_bindings
 
