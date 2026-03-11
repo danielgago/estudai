@@ -12,6 +12,7 @@ from estudai.services.settings import (
     AppSettings,
     DEFAULT_IN_APP_SHORTCUT_BINDINGS,
     InAppShortcutAction,
+    MAX_TIMER_DURATION_SECONDS,
     SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_DISPLAY_NAME,
     SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_PATH,
     SETTINGS_KEY_LEGACY_NOTIFICATION_SOUND_PATH,
@@ -123,6 +124,15 @@ def test_settings_persist_zero_second_timer_value() -> None:
     restored = load_app_settings()
 
     assert restored.timer_duration_seconds == 0
+
+
+def test_settings_clamp_timer_duration_to_supported_maximum() -> None:
+    """Verify persisted timer duration never exceeds 59 minutes and 59 seconds."""
+    save_app_settings(AppSettings(timer_duration_seconds=MAX_TIMER_DURATION_SECONDS + 1))
+
+    restored = load_app_settings()
+
+    assert restored.timer_duration_seconds == MAX_TIMER_DURATION_SECONDS
 
 
 def test_settings_persist_empty_shortcuts() -> None:
@@ -386,6 +396,19 @@ def test_settings_page_reopens_with_zero_second_timer_value(
 
     assert page.timer_duration_spinbox.minimum() == 0
     assert page.timer_duration_spinbox.value() == 0
+
+
+def test_settings_page_disables_global_hotkeys_when_unavailable(
+    app: QApplication,
+) -> None:
+    """Verify unavailable global hotkeys are explained and not editable."""
+    page = SettingsPage(
+        global_hotkey_availability_error="Global hotkeys are unsupported here."
+    )
+
+    assert not page.pause_resume_hotkey_edit.isEnabled()
+    assert not page.start_stop_hotkey_edit.isEnabled()
+    assert "unsupported" in page.hotkey_help_label.text().lower()
 
 
 def test_settings_page_enables_after_x_only_for_matching_mode(

@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from estudai.services.settings import MAX_TIMER_DURATION_SECONDS
 from estudai.ui.utils import (
     blend_colors,
     format_card_count,
@@ -44,7 +45,10 @@ class TimerPage(QWidget):
 
     def __init__(self, default_duration_seconds: int = 25 * 60):
         super().__init__()
-        self._default_duration_seconds = max(0, int(default_duration_seconds))
+        self._default_duration_seconds = max(
+            0,
+            min(MAX_TIMER_DURATION_SECONDS, int(default_duration_seconds)),
+        )
         self.time = self._default_time()
         self.is_running = False
         self._flashcard_controls_active = False
@@ -545,7 +549,10 @@ class TimerPage(QWidget):
         Args:
             duration_seconds: New default countdown duration in seconds.
         """
-        self._default_duration_seconds = max(0, int(duration_seconds))
+        self._default_duration_seconds = max(
+            0,
+            min(MAX_TIMER_DURATION_SECONDS, int(duration_seconds)),
+        )
         if not self.is_running:
             self.time = self._default_time()
             self.timer_display.setText(self._idle_timer_display_text())
