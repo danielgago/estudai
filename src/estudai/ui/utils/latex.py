@@ -12,6 +12,16 @@ _SCRIPT_EXTRA_CHARS = {"+", "-", "=", "/", "(", ")"}
 _LATEX_TEXT_CONVERTER = LatexNodes2Text()
 
 
+def normalize_inline_latex_text(text: str) -> str:
+    """Decode HTML entities and normalize alternate inline-math delimiters."""
+    return html.unescape(text).replace(r"\(", "$").replace(r"\)", "$")
+
+
+def has_inline_latex(text: str) -> bool:
+    """Return whether text should be rendered through the rich-text LaTeX path."""
+    return "$" in normalize_inline_latex_text(text)
+
+
 def render_inline_latex_html(text: str) -> str:
     """Render inline `$...$` LaTeX snippets into Qt-compatible HTML.
 
@@ -21,9 +31,9 @@ def render_inline_latex_html(text: str) -> str:
     Returns:
         str: Rich text HTML string when LaTeX exists, otherwise original text.
     """
-    normalized = text.replace(r"\(", "$").replace(r"\)", "$")
+    normalized = normalize_inline_latex_text(text)
     if "$" not in normalized:
-        return text
+        return normalized
     rendered_chunks: list[str] = []
     cursor = 0
     for match in _INLINE_MATH_PATTERN.finditer(normalized):

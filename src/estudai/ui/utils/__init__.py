@@ -1,7 +1,7 @@
 """UI utility helpers."""
 
 from .colors import blend_colors, set_muted_label_color
-from .latex import render_inline_latex_html
+from .latex import has_inline_latex, render_inline_latex_html
 from .native_checkbox import (
     NativeCheckboxDelegate,
     NativeCheckboxHeaderView,
@@ -14,6 +14,7 @@ from .text import format_card_count
 __all__ = [
     "blend_colors",
     "create_checkable_table_item",
+    "has_inline_latex",
     "NativeCheckboxDelegate",
     "NativeCheckboxHeaderView",
     "render_inline_latex_html",

@@ -21,3 +21,10 @@ def test_render_inline_latex_html_supports_subscripts_superscripts_and_symbols()
     assert "GABA<sub>A</sub>" in rendered
     assert "Ca<sup>2+</sup>" in rendered
     assert "ERα" in rendered
+
+
+def test_render_inline_latex_html_decodes_html_entities_without_math() -> None:
+    """Verify HTML entities are decoded for plain flashcard text."""
+    rendered = render_inline_latex_html("A &gt; B and it&#x27;s correct.")
+
+    assert rendered == "A > B and it's correct."

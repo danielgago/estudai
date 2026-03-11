@@ -26,6 +26,7 @@ from estudai.services.settings import MAX_TIMER_DURATION_SECONDS
 from estudai.ui.utils import (
     blend_colors,
     format_card_count,
+    has_inline_latex,
     render_inline_latex_html,
     set_muted_label_color,
 )
@@ -475,7 +476,7 @@ class TimerPage(QWidget):
         )
         self.set_flashcard_scoring_actions_visible(True)
         self.set_flashcard_scoring_actions_enabled(True)
-        self.flashcard_answer_label.setText(render_inline_latex_html(answer))
+        self._set_flashcard_label_text(self.flashcard_answer_label, answer)
         self.flashcard_answer_label.setVisible(True)
         self._start_flashcard_progress(display_duration_seconds)
 
@@ -498,7 +499,7 @@ class TimerPage(QWidget):
         self.set_flashcard_scoring_actions_visible(False)
         self.set_flashcard_scoring_actions_enabled(False)
         self.flashcard_question_label.setVisible(True)
-        self.flashcard_question_label.setText(render_inline_latex_html(question))
+        self._set_flashcard_label_text(self.flashcard_question_label, question)
         self.flashcard_answer_label.setText("")
         self.flashcard_answer_label.setVisible(False)
         self._hide_copy_feedback()
@@ -524,9 +525,14 @@ class TimerPage(QWidget):
         """Refresh the currently shown flashcard text in place."""
         self._current_flashcard_question = question
         if not self.flashcard_question_label.isHidden():
-            self.flashcard_question_label.setText(render_inline_latex_html(question))
+            self._set_flashcard_label_text(self.flashcard_question_label, question)
         if not self.flashcard_answer_label.isHidden():
-            self.flashcard_answer_label.setText(render_inline_latex_html(answer))
+            self._set_flashcard_label_text(self.flashcard_answer_label, answer)
+
+    def _set_flashcard_label_text(self, label: QLabel, text: str) -> None:
+        """Render flashcard text as plain text unless inline LaTeX needs rich text."""
+        label.setTextFormat(Qt.RichText if has_inline_latex(text) else Qt.PlainText)
+        label.setText(render_inline_latex_html(text))
 
     def current_flashcard_question_text(self) -> str:
         """Return the raw question text for the currently visible flashcard."""
