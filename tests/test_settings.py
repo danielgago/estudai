@@ -268,10 +268,13 @@ def test_settings_page_checkbox_keeps_native_indicator_styles(
 
 
 def test_settings_page_uses_scrollable_tabs(app: QApplication) -> None:
-    """Verify settings sections are split into tabs with inner scrolling."""
+    """Verify settings sections use the merged tab layout with inner scrolling."""
     page = SettingsPage()
 
-    assert page.settings_tab_widget.count() == 4
+    assert page.settings_tab_widget.count() == 3
+    assert page.settings_tab_widget.tabText(0) == "Flashcards"
+    assert page.settings_tab_widget.tabText(1) == "Sound"
+    assert page.settings_tab_widget.tabText(2) == "Shortcuts"
 
     for index in range(page.settings_tab_widget.count()):
         tab = page.settings_tab_widget.widget(index)

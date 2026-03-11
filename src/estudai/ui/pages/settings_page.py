@@ -109,10 +109,6 @@ class SettingsPage(QWidget):
             QSizePolicy.Policy.Expanding,
         )
         self.settings_tab_widget.addTab(
-            self._build_scroll_tab(self._build_study_tab()),
-            "Study",
-        )
-        self.settings_tab_widget.addTab(
             self._build_scroll_tab(self._build_flashcards_tab()),
             "Flashcards",
         )
@@ -141,8 +137,8 @@ class SettingsPage(QWidget):
             self.hotkey_help_label,
         )
 
-    def _build_study_tab(self) -> QWidget:
-        """Build the tab that contains timer and popup timing settings."""
+    def _build_flashcards_tab(self) -> QWidget:
+        """Build the tab that contains flashcard session and retry settings."""
         content = self._create_tab_content_widget()
         content_layout = content.layout()
 
@@ -188,13 +184,6 @@ class SettingsPage(QWidget):
             self.answer_duration_spinbox,
         )
         content_layout.addWidget(flashcard_group)
-        content_layout.addStretch()
-        return content
-
-    def _build_flashcards_tab(self) -> QWidget:
-        """Build the tab that contains wrong-answer retry rules."""
-        content = self._create_tab_content_widget()
-        content_layout = content.layout()
 
         retry_group = QGroupBox("Wrong-Answer Retry Rules")
         retry_form = QFormLayout(retry_group)
