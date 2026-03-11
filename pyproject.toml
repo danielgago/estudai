@@ -24,7 +24,7 @@ executables = [
 
 [tool.cxfreeze.build_exe]
 include_msvcr = true
-include_files = ["data/alarm.mp3", "data/estudai.svg", "data/estudai.ico"]
+include_files = ["data/default.mp3", "data/estudai.svg", "data/estudai.ico"]
 excludes = ["tkinter", "unittest", "test", "pydoc"]
 
 [tool.cxfreeze.bdist_msi]
