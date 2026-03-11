@@ -305,6 +305,25 @@ def test_settings_save_clears_legacy_notification_sound_key() -> None:
     )
 
 
+def test_settings_upgrade_from_1_0_preserves_legacy_sound_path_on_save() -> None:
+    """Verify a 1.0-style sound setting survives the first 1.1 save."""
+    qsettings = _open_settings()
+    legacy_sound_path = "/tmp/notification-sound.wav"
+    qsettings.setValue(SETTINGS_KEY_LEGACY_NOTIFICATION_SOUND_PATH, legacy_sound_path)
+    qsettings.sync()
+
+    upgraded = load_app_settings()
+    save_app_settings(upgraded)
+
+    reloaded = load_app_settings()
+    qsettings = _open_settings()
+    assert qsettings.contains(SETTINGS_KEY_LEGACY_NOTIFICATION_SOUND_PATH) is False
+    assert reloaded.question_notification_sound_path == legacy_sound_path
+    assert reloaded.question_notification_sound_display_name == "notification-sound.wav"
+    assert reloaded.answer_notification_sound_path == legacy_sound_path
+    assert reloaded.answer_notification_sound_display_name == "notification-sound.wav"
+
+
 def test_settings_page_only_persists_changes_after_save(app: QApplication) -> None:
     """Verify editing spinbox values persists only when save is clicked."""
     save_app_settings(AppSettings())
