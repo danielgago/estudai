@@ -172,7 +172,7 @@ def _normalize_int(
     """
     try:
         value = int(raw_value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         value = default
     return max(minimum, min(maximum, value))
 

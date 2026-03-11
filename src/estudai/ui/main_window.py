@@ -217,6 +217,7 @@ class MainWindow(QMainWindow):
         )
         self.management_page.save_button.clicked.connect(self.save_management_changes)
         self.management_page.cancel_button.clicked.connect(self.switch_to_timer)
+        self.settings_page.cancel_requested.connect(self.switch_to_timer)
         self.settings_page.timer_duration_seconds_changed.connect(
             self.timer_page.set_timer_duration_seconds
         )
@@ -1628,7 +1629,7 @@ class MainWindow(QMainWindow):
         checked_ids = self._get_checked_folder_ids()
         try:
             persisted_folder = import_folder(folder_path)
-        except (FileNotFoundError, NotADirectoryError, OSError):
+        except FileNotFoundError, NotADirectoryError, OSError:
             return False
         checked_ids.add(persisted_folder.id)
         self.handle_management_data_changed(preferred_checked_ids=checked_ids)

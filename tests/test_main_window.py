@@ -1915,6 +1915,38 @@ def test_saving_settings_rebinds_active_global_hotkeys(
     assert window.timer_page.is_running is True
 
 
+def test_settings_cancel_returns_to_timer_without_saving(
+    app: QApplication,
+) -> None:
+    """Verify cancel discards edits and returns from settings to timer."""
+    save_app_settings(
+        AppSettings(
+            timer_duration_seconds=120,
+            flashcard_probability_percent=55,
+            flashcard_random_order_enabled=True,
+        )
+    )
+    window = MainWindow()
+
+    window.switch_to_settings()
+    window.settings_page.timer_duration_spinbox.setValue(999)
+    window.settings_page.flashcard_probability_spinbox.setValue(1)
+    window.settings_page.flashcard_random_order_checkbox.setChecked(False)
+
+    window.settings_page.cancel_button.click()
+
+    assert window.stacked_widget.currentWidget() is window.timer_page
+    persisted = load_app_settings()
+    assert persisted.timer_duration_seconds == 120
+    assert persisted.flashcard_probability_percent == 55
+    assert persisted.flashcard_random_order_enabled is True
+
+    window.switch_to_settings()
+    assert window.settings_page.timer_duration_spinbox.value() == 120
+    assert window.settings_page.flashcard_probability_spinbox.value() == 55
+    assert window.settings_page.flashcard_random_order_checkbox.isChecked() is True
+
+
 def test_saving_settings_can_disable_hotkeys_and_in_app_shortcuts(
     app: QApplication, tmp_path: Path
 ) -> None:

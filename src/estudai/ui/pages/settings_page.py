@@ -55,6 +55,7 @@ from estudai.ui.utils import set_muted_label_color
 class SettingsPage(QWidget):
     """Page that edits and persists app settings."""
 
+    cancel_requested = Signal()
     timer_duration_seconds_changed = Signal(int)
     settings_saved = Signal(object)
 
@@ -546,6 +547,7 @@ class SettingsPage(QWidget):
     def _handle_cancel_clicked(self) -> None:
         """Discard unsaved form edits and restore persisted settings."""
         self._load_persisted_settings()
+        self.cancel_requested.emit()
 
     def _handle_save_clicked(self) -> None:
         """Persist current form edits."""

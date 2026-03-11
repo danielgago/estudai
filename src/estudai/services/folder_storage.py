@@ -113,7 +113,7 @@ def list_persisted_folders() -> list[PersistedFolder]:
                 source_path=str(entry["source_path"]),
                 stored_path=str(entry["stored_path"]),
             )
-        except (KeyError, TypeError):
+        except KeyError, TypeError:
             continue
         if Path(persisted_folder.stored_path).exists():
             persisted_folders.append(persisted_folder)
