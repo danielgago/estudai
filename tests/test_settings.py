@@ -128,7 +128,9 @@ def test_settings_persist_zero_second_timer_value() -> None:
 
 def test_settings_clamp_timer_duration_to_supported_maximum() -> None:
     """Verify persisted timer duration never exceeds 59 minutes and 59 seconds."""
-    save_app_settings(AppSettings(timer_duration_seconds=MAX_TIMER_DURATION_SECONDS + 1))
+    save_app_settings(
+        AppSettings(timer_duration_seconds=MAX_TIMER_DURATION_SECONDS + 1)
+    )
 
     restored = load_app_settings()
 

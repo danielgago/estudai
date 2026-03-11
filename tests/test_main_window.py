@@ -18,7 +18,10 @@ from PySide6.QtWidgets import (
 )
 
 from estudai.services.csv_flashcards import Flashcard
-from estudai.services.folder_storage import create_managed_folder, list_persisted_folders
+from estudai.services.folder_storage import (
+    create_managed_folder,
+    list_persisted_folders,
+)
 from estudai.services.hotkeys import GlobalHotkeyService, HotkeyRegistrationError
 from estudai.services.settings import (
     AppSettings,
