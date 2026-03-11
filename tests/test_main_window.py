@@ -1668,11 +1668,10 @@ def test_in_app_timer_shortcuts_control_timer(
     assert window._timer_page_pause_resume_shortcut.key().toString() == "Space"
     assert len(window._timer_page_start_stop_shortcuts) == 2
     assert {
-        shortcut.key().toString() for shortcut in window._timer_page_start_stop_shortcuts
+        shortcut.key().toString()
+        for shortcut in window._timer_page_start_stop_shortcuts
     } == {"Return", "Enter"}
-    assert (
-        window._timer_page_mark_correct_shortcut.context() == Qt.ApplicationShortcut
-    )
+    assert window._timer_page_mark_correct_shortcut.context() == Qt.ApplicationShortcut
     assert window._timer_page_mark_correct_shortcut.key().toString() == "Up"
     assert window._timer_page_mark_wrong_shortcut.context() == Qt.ApplicationShortcut
     assert window._timer_page_mark_wrong_shortcut.key().toString() == "Down"

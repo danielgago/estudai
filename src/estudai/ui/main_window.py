@@ -340,9 +340,7 @@ class MainWindow(QMainWindow):
 
     def _configure_window_shortcuts(self) -> None:
         """Register app-scoped shortcuts that should work regardless of focus."""
-        self._timer_page_pause_resume_shortcut = QShortcut(
-            QKeySequence("Space"), self
-        )
+        self._timer_page_pause_resume_shortcut = QShortcut(QKeySequence("Space"), self)
         self._timer_page_pause_resume_shortcut.setContext(Qt.ApplicationShortcut)
         self._timer_page_pause_resume_shortcut.activated.connect(
             self._trigger_timer_page_pause_resume

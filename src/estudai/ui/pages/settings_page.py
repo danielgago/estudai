@@ -207,8 +207,7 @@ class SettingsPage(QWidget):
         hotkey_form.addRow("Mark correct:", self.mark_correct_hotkey_edit)
         hotkey_form.addRow("Mark wrong:", self.mark_wrong_hotkey_edit)
         self.hotkey_help_label = QLabel(
-            "Bindings are system-wide. "
-            "Choose single key combinations only."
+            "Bindings are system-wide. " "Choose single key combinations only."
         )
         self.hotkey_help_label.setWordWrap(True)
         set_muted_label_color(self.hotkey_help_label)
