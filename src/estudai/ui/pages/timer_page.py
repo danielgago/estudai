@@ -13,6 +13,7 @@ from PySide6.QtGui import QColor, QFont, QPalette
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
+    QGraphicsOpacityEffect,
     QProgressBar,
     QPushButton,
     QSizePolicy,
@@ -51,9 +52,11 @@ class TimerPage(QWidget):
         self._flashcard_phase_animation: QPropertyAnimation | None = None
         self._flashcard_progress_active = False
         self._selected_flashcard_score: str | None = None
+        self._current_flashcard_question: str = ""
         self._folder_name: str = "No folders selected"
         self._card_count: int = 0
         self._session_progress_text: str = ""
+        self._copy_feedback_animation: QPropertyAnimation | None = None
         self.init_ui()
 
     def init_ui(self):
@@ -84,6 +87,7 @@ class TimerPage(QWidget):
         self.content_stack.addWidget(timer_view)
 
         flashcard_view = QWidget()
+        self._flashcard_view = flashcard_view
         flashcard_layout = QVBoxLayout(flashcard_view)
         flashcard_layout.setContentsMargins(0, 0, 0, 0)
         flashcard_layout.setSpacing(14)
@@ -160,6 +164,27 @@ class TimerPage(QWidget):
         self.flashcard_question_label.setVisible(False)
         flashcard_layout.addWidget(self.flashcard_question_label)
 
+        self.copy_feedback_label = QLabel("Copied", flashcard_view)
+        self.copy_feedback_label.setAlignment(Qt.AlignCenter)
+        self.copy_feedback_label.setVisible(False)
+        self.copy_feedback_label.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents
+        )
+        self.copy_feedback_label.setStyleSheet(
+            "QLabel {"
+            " padding: 4px 10px;"
+            " border-radius: 10px;"
+            " background-color: rgba(60, 60, 60, 170);"
+            " color: white;"
+            " font-size: 12px;"
+            " font-weight: 700;"
+            "}"
+        )
+        self._copy_feedback_effect = QGraphicsOpacityEffect(self.copy_feedback_label)
+        self._copy_feedback_effect.setOpacity(0.0)
+        self.copy_feedback_label.setGraphicsEffect(self._copy_feedback_effect)
+        self.copy_feedback_label.raise_()
+
         self.flashcard_answer_label = QLabel("")
         self.flashcard_answer_label.setAlignment(Qt.AlignCenter)
         self.flashcard_answer_label.setWordWrap(True)
@@ -231,6 +256,11 @@ class TimerPage(QWidget):
             set_muted_label_color(self.folder_context_label)
             self._apply_palette_styles()
         super().changeEvent(event)
+
+    def resizeEvent(self, event: QEvent) -> None:  # noqa: N802
+        """Keep overlay feedback aligned without moving the flashcard layout."""
+        self._position_copy_feedback()
+        super().resizeEvent(event)
 
     def _apply_palette_styles(self) -> None:
         """Apply palette-aware styles for non-native progress visuals."""
@@ -460,20 +490,25 @@ class TimerPage(QWidget):
             True,
             pause_enabled=display_duration_seconds > 0,
         )
+        self._current_flashcard_question = question
         self.set_flashcard_scoring_actions_visible(False)
         self.set_flashcard_scoring_actions_enabled(False)
         self.flashcard_question_label.setVisible(True)
         self.flashcard_question_label.setText(render_inline_latex_html(question))
         self.flashcard_answer_label.setText("")
         self.flashcard_answer_label.setVisible(False)
+        self._hide_copy_feedback()
+        self._position_copy_feedback()
         self._start_flashcard_progress(display_duration_seconds)
 
     def clear_flashcard_display(self) -> None:
         """Hide flashcard question/answer and show timer display."""
+        self._current_flashcard_question = ""
         self.flashcard_question_label.setText("")
         self.flashcard_question_label.setVisible(False)
         self.flashcard_answer_label.setText("")
         self.flashcard_answer_label.setVisible(False)
+        self._hide_copy_feedback()
         self.content_stack.setCurrentIndex(0)
         self.set_flashcard_controls_active(False)
         self.clear_flashcard_score_selection()
@@ -483,10 +518,15 @@ class TimerPage(QWidget):
 
     def update_displayed_flashcard(self, question: str, answer: str) -> None:
         """Refresh the currently shown flashcard text in place."""
+        self._current_flashcard_question = question
         if not self.flashcard_question_label.isHidden():
             self.flashcard_question_label.setText(render_inline_latex_html(question))
         if not self.flashcard_answer_label.isHidden():
             self.flashcard_answer_label.setText(render_inline_latex_html(answer))
+
+    def current_flashcard_question_text(self) -> str:
+        """Return the raw question text for the currently visible flashcard."""
+        return self._current_flashcard_question
 
     def set_flashcard_context(self, folder_name: str, card_count: int) -> None:
         """Update selected folder summary shown on the timer page.
@@ -708,3 +748,54 @@ class TimerPage(QWidget):
         self.flashcard_progress_bar.style().unpolish(self.flashcard_progress_bar)
         self.flashcard_progress_bar.style().polish(self.flashcard_progress_bar)
         self.flashcard_progress_bar.update()
+
+    def show_copy_feedback(self) -> None:
+        """Show a small fade animation that confirms question copy."""
+        if (
+            not self._current_flashcard_question
+            or self.flashcard_question_label.isHidden()
+        ):
+            return
+        if self._copy_feedback_animation is not None:
+            self._copy_feedback_animation.stop()
+            self._copy_feedback_animation.deleteLater()
+            self._copy_feedback_animation = None
+        self._position_copy_feedback()
+        self.copy_feedback_label.setVisible(True)
+        self._copy_feedback_effect.setOpacity(0.0)
+        animation = QPropertyAnimation(self._copy_feedback_effect, b"opacity", self)
+        animation.setDuration(700)
+        animation.setStartValue(0.0)
+        animation.setKeyValueAt(0.2, 1.0)
+        animation.setKeyValueAt(0.7, 1.0)
+        animation.setEndValue(0.0)
+        animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        animation.finished.connect(self._hide_copy_feedback)
+        animation.start()
+        self._copy_feedback_animation = animation
+
+    def _hide_copy_feedback(self) -> None:
+        """Hide and reset the copied badge state."""
+        if self._copy_feedback_animation is not None:
+            self._copy_feedback_animation.stop()
+            self._copy_feedback_animation.deleteLater()
+            self._copy_feedback_animation = None
+        self.copy_feedback_label.setVisible(False)
+        self._copy_feedback_effect.setOpacity(0.0)
+
+    def _position_copy_feedback(self) -> None:
+        """Anchor the copy feedback above the question without affecting layout."""
+        flashcard_layout = self._flashcard_view.layout()
+        if flashcard_layout is not None:
+            flashcard_layout.activate()
+        self.copy_feedback_label.adjustSize()
+        badge_size = self.copy_feedback_label.sizeHint()
+        x_position = max(
+            0,
+            (self._flashcard_view.width() - badge_size.width()) // 2,
+        )
+        y_position = max(
+            16,
+            self.flashcard_question_label.y() - badge_size.height() - 12,
+        )
+        self.copy_feedback_label.move(x_position, y_position)

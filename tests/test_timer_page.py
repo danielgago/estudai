@@ -124,6 +124,7 @@ def test_flashcard_display_hides_timer_and_reveals_answer() -> None:
     assert not page.wrong_button.isVisible()
     assert not page.correct_button.isEnabled()
     assert not page.wrong_button.isEnabled()
+    assert page.current_flashcard_question_text() == "What is DNA?"
 
     page.show_flashcard_answer("Genetic material.")
     assert not page.flashcard_answer_label.isHidden()
@@ -141,6 +142,34 @@ def test_flashcard_display_hides_timer_and_reveals_answer() -> None:
     assert not page.wrong_button.isVisible()
     assert not page.correct_button.isEnabled()
     assert not page.wrong_button.isEnabled()
+    assert page.current_flashcard_question_text() == ""
+
+
+def test_copy_feedback_shows_only_while_flashcard_question_is_visible() -> None:
+    """Verify copy feedback only appears for an active flashcard question."""
+    _get_app()
+    page = TimerPage()
+
+    page.show_copy_feedback()
+    assert page.copy_feedback_label.isHidden()
+
+    page.show_flashcard_question("What is ATP?")
+    page.show_copy_feedback()
+
+    assert page.copy_feedback_label.isHidden() is False
+
+
+def test_copy_feedback_does_not_move_flashcard_question() -> None:
+    """Verify showing copy feedback does not shift the question layout."""
+    _get_app()
+    page = TimerPage()
+
+    page.show_flashcard_question("What is ATP?")
+    question_y_before = page.flashcard_question_label.y()
+
+    page.show_copy_feedback()
+
+    assert page.flashcard_question_label.y() == question_y_before
 
 
 def test_flashcard_progress_bar_updates_per_phase() -> None:

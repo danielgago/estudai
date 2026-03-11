@@ -4,10 +4,14 @@ import os
 from pathlib import Path
 
 import pytest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication, QScrollArea
 
+from estudai.services.hotkeys import DEFAULT_HOTKEY_BINDINGS, HotkeyAction
 from estudai.services.settings import (
     AppSettings,
+    DEFAULT_IN_APP_SHORTCUT_BINDINGS,
+    InAppShortcutAction,
     WrongAnswerCompletionMode,
     WrongAnswerReinsertionMode,
     copy_notification_sound_file,
@@ -52,6 +56,16 @@ def test_settings_defaults_and_persistence() -> None:
         ),
         wrong_answer_reinsertion_mode=(WrongAnswerReinsertionMode.AFTER_X_FLASHCARDS),
         wrong_answer_reinsert_after_count=5,
+        pause_resume_hotkey="Ctrl+Alt+P",
+        start_stop_hotkey="Ctrl+Alt+S",
+        mark_correct_hotkey="Ctrl+Alt+Right",
+        mark_wrong_hotkey="Ctrl+Alt+Left",
+        copy_question_hotkey="Ctrl+Alt+C",
+        in_app_pause_resume_shortcut="Ctrl+P",
+        in_app_start_stop_shortcut="Ctrl+Return",
+        in_app_mark_correct_shortcut="Ctrl+Up",
+        in_app_mark_wrong_shortcut="Ctrl+Down",
+        in_app_copy_question_shortcut="C",
     )
     save_app_settings(expected)
 
@@ -82,6 +96,69 @@ def test_settings_persist_zero_second_timer_value() -> None:
     restored = load_app_settings()
 
     assert restored.timer_duration_seconds == 0
+
+
+def test_settings_persist_empty_shortcuts() -> None:
+    """Verify cleared shortcut bindings remain disabled after reload."""
+    save_app_settings(
+        AppSettings(
+            pause_resume_hotkey="",
+            start_stop_hotkey="",
+            in_app_pause_resume_shortcut="",
+            in_app_start_stop_shortcut="",
+        )
+    )
+
+    restored = load_app_settings()
+
+    assert restored.pause_resume_hotkey == ""
+    assert restored.start_stop_hotkey == ""
+    assert restored.in_app_pause_resume_shortcut == ""
+    assert restored.in_app_start_stop_shortcut == ""
+
+
+def test_settings_default_hotkeys_match_expected_bindings() -> None:
+    """Verify new installs load the shipped global hotkey defaults."""
+    restored = load_app_settings()
+
+    assert (
+        restored.pause_resume_hotkey
+        == DEFAULT_HOTKEY_BINDINGS[HotkeyAction.PAUSE_RESUME]
+    )
+    assert (
+        restored.start_stop_hotkey == DEFAULT_HOTKEY_BINDINGS[HotkeyAction.START_STOP]
+    )
+    assert (
+        restored.mark_correct_hotkey
+        == DEFAULT_HOTKEY_BINDINGS[HotkeyAction.MARK_CORRECT]
+    )
+    assert (
+        restored.mark_wrong_hotkey == DEFAULT_HOTKEY_BINDINGS[HotkeyAction.MARK_WRONG]
+    )
+    assert (
+        restored.copy_question_hotkey
+        == DEFAULT_HOTKEY_BINDINGS[HotkeyAction.COPY_QUESTION]
+    )
+    assert (
+        restored.in_app_pause_resume_shortcut
+        == DEFAULT_IN_APP_SHORTCUT_BINDINGS[InAppShortcutAction.PAUSE_RESUME]
+    )
+    assert (
+        restored.in_app_start_stop_shortcut
+        == DEFAULT_IN_APP_SHORTCUT_BINDINGS[InAppShortcutAction.START_STOP]
+    )
+    assert (
+        restored.in_app_mark_correct_shortcut
+        == DEFAULT_IN_APP_SHORTCUT_BINDINGS[InAppShortcutAction.MARK_CORRECT]
+    )
+    assert (
+        restored.in_app_mark_wrong_shortcut
+        == DEFAULT_IN_APP_SHORTCUT_BINDINGS[InAppShortcutAction.MARK_WRONG]
+    )
+    assert (
+        restored.in_app_copy_question_shortcut
+        == DEFAULT_IN_APP_SHORTCUT_BINDINGS[InAppShortcutAction.COPY_QUESTION]
+    )
 
 
 def test_get_default_notification_sound_path_prefers_frozen_bundle(
@@ -138,6 +215,16 @@ def test_settings_page_only_persists_changes_after_save(app: QApplication) -> No
     page.wrong_answer_completion_mode_combo.setCurrentIndex(1)
     page.wrong_answer_reinsertion_mode_combo.setCurrentIndex(0)
     page.wrong_answer_reinsert_after_spinbox.setValue(6)
+    page.pause_resume_hotkey_edit.setKeySequence("Ctrl+Alt+P")
+    page.start_stop_hotkey_edit.setKeySequence("Ctrl+Alt+S")
+    page.mark_correct_hotkey_edit.setKeySequence("Ctrl+Alt+Right")
+    page.mark_wrong_hotkey_edit.setKeySequence("Ctrl+Alt+Left")
+    page.copy_question_hotkey_edit.setKeySequence("Ctrl+Alt+C")
+    page.in_app_pause_resume_shortcut_edit.setKeySequence("Ctrl+P")
+    page.in_app_start_stop_shortcut_edit.setKeySequence("Ctrl+Return")
+    page.in_app_mark_correct_shortcut_edit.setKeySequence("Ctrl+Up")
+    page.in_app_mark_wrong_shortcut_edit.setKeySequence("Ctrl+Down")
+    page.in_app_copy_question_shortcut_edit.setKeySequence("C")
 
     unchanged = load_app_settings()
     assert unchanged == AppSettings()
@@ -158,6 +245,16 @@ def test_settings_page_only_persists_changes_after_save(app: QApplication) -> No
         is WrongAnswerReinsertionMode.AFTER_X_FLASHCARDS
     )
     assert persisted.wrong_answer_reinsert_after_count == 6
+    assert persisted.pause_resume_hotkey == "Ctrl+Alt+P"
+    assert persisted.start_stop_hotkey == "Ctrl+Alt+S"
+    assert persisted.mark_correct_hotkey == "Ctrl+Alt+Right"
+    assert persisted.mark_wrong_hotkey == "Ctrl+Alt+Left"
+    assert persisted.copy_question_hotkey == "Ctrl+Alt+C"
+    assert persisted.in_app_pause_resume_shortcut == "Ctrl+P"
+    assert persisted.in_app_start_stop_shortcut == "Ctrl+Return"
+    assert persisted.in_app_mark_correct_shortcut == "Ctrl+Up"
+    assert persisted.in_app_mark_wrong_shortcut == "Ctrl+Down"
+    assert persisted.in_app_copy_question_shortcut == "C"
 
 
 def test_settings_page_checkbox_keeps_native_indicator_styles(
@@ -168,6 +265,22 @@ def test_settings_page_checkbox_keeps_native_indicator_styles(
     stylesheet = page.flashcard_random_order_checkbox.styleSheet()
 
     assert stylesheet == ""
+
+
+def test_settings_page_uses_scrollable_tabs(app: QApplication) -> None:
+    """Verify settings sections use the merged tab layout with inner scrolling."""
+    page = SettingsPage()
+
+    assert page.settings_tab_widget.count() == 3
+    assert page.settings_tab_widget.tabText(0) == "Flashcards"
+    assert page.settings_tab_widget.tabText(1) == "Sound"
+    assert page.settings_tab_widget.tabText(2) == "Shortcuts"
+
+    for index in range(page.settings_tab_widget.count()):
+        tab = page.settings_tab_widget.widget(index)
+        assert isinstance(tab, QScrollArea)
+        assert tab.widgetResizable() is True
+        assert tab.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
 
 
 def test_settings_page_reopens_with_zero_second_timer_value(
@@ -219,6 +332,76 @@ def test_settings_page_blocks_save_when_spinbox_text_is_out_of_range(
         "Probability of showing flashcard must be between 0 and 100 percent."
     ]
     assert load_app_settings().flashcard_probability_percent == 30
+
+
+def test_settings_page_blocks_duplicate_hotkeys(
+    app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify duplicate hotkey assignments warn and do not persist."""
+    save_app_settings(AppSettings())
+    page = SettingsPage()
+    warnings: list[str] = []
+    page.pause_resume_hotkey_edit.setKeySequence("Ctrl+Alt+Space")
+    page.start_stop_hotkey_edit.setKeySequence("Ctrl+Alt+Space")
+    monkeypatch.setattr(
+        "estudai.ui.pages.settings_page.QMessageBox.warning",
+        lambda _parent, _title, message: warnings.append(message),
+    )
+
+    page._handle_save_clicked()
+
+    assert warnings == [
+        "Hotkeys must be unique. 'Ctrl+Alt+Space' is assigned to both 'pause_resume' and 'start_stop'."
+    ]
+    assert load_app_settings() == AppSettings()
+
+
+def test_settings_page_allows_empty_shortcuts(
+    app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify clearing shortcut editors persists disabled bindings."""
+    save_app_settings(AppSettings())
+    page = SettingsPage()
+    warnings: list[str] = []
+    page.pause_resume_hotkey_edit.setKeySequence("")
+    page.start_stop_hotkey_edit.setKeySequence("")
+    page.in_app_pause_resume_shortcut_edit.setKeySequence("")
+    page.in_app_start_stop_shortcut_edit.setKeySequence("")
+    monkeypatch.setattr(
+        "estudai.ui.pages.settings_page.QMessageBox.warning",
+        lambda _parent, _title, message: warnings.append(message),
+    )
+
+    page._handle_save_clicked()
+
+    persisted = load_app_settings()
+    assert warnings == []
+    assert persisted.pause_resume_hotkey == ""
+    assert persisted.start_stop_hotkey == ""
+    assert persisted.in_app_pause_resume_shortcut == ""
+    assert persisted.in_app_start_stop_shortcut == ""
+
+
+def test_settings_page_blocks_duplicate_in_app_shortcuts(
+    app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify duplicate in-app shortcuts warn and do not persist."""
+    save_app_settings(AppSettings())
+    page = SettingsPage()
+    warnings: list[str] = []
+    page.in_app_pause_resume_shortcut_edit.setKeySequence("Ctrl+Space")
+    page.in_app_start_stop_shortcut_edit.setKeySequence("Ctrl+Space")
+    monkeypatch.setattr(
+        "estudai.ui.pages.settings_page.QMessageBox.warning",
+        lambda _parent, _title, message: warnings.append(message),
+    )
+
+    page._handle_save_clicked()
+
+    assert warnings == [
+        "In-app shortcuts must be unique. 'Ctrl+Space' is assigned to both 'pause_resume' and 'start_stop'."
+    ]
+    assert load_app_settings() == AppSettings()
 
 
 def test_settings_page_uploads_sound_and_plays_test(

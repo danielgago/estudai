@@ -16,7 +16,9 @@ from PySide6.QtCore import (
 from PySide6.QtGui import (
     QColor,
     QFont,
+    QKeySequence,
     QPalette,
+    QShortcut,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -59,9 +61,21 @@ from estudai.services.folder_storage import (
     move_persisted_folder,
     rename_persisted_folder,
 )
+from estudai.services.hotkeys import (
+    DEFAULT_HOTKEY_BINDINGS,
+    GlobalHotkeyService,
+    HotkeyAction,
+    HotkeyRegistrationError,
+    normalize_hotkey_binding,
+)
 from estudai.services.settings import (
+    AppSettings,
+    InAppShortcutAction,
     get_default_notification_sound_path,
+    hotkey_bindings_from_settings,
+    in_app_shortcut_bindings_from_settings,
     load_app_settings,
+    save_app_settings,
 )
 from estudai.ui.utils import (
     NativeCheckboxDelegate,
@@ -122,9 +136,10 @@ class MainWindow(QMainWindow):
     """Main application window with page navigation."""
 
     show_flashcard_requested = Signal(object)
+    global_hotkey_action_requested = Signal(str)
     FOLDER_NAME_ROLE = Qt.UserRole + 1
 
-    def __init__(self) -> None:
+    def __init__(self, hotkey_service: GlobalHotkeyService | None = None) -> None:
         super().__init__()
         self.flashcards_by_folder: dict[str, list[Flashcard]] = {}
         self.persisted_folder_paths: dict[str, Path] = {}
@@ -139,6 +154,7 @@ class MainWindow(QMainWindow):
         self._visible_flashcard: Flashcard | None = None
         self._flashcard_sound_output: object | None = None
         self._flashcard_sound_player: object | None = None
+        self._hotkey_service = hotkey_service or GlobalHotkeyService()
         flashcard_phase_timer = QTimer(self)
         flashcard_phase_timer.setSingleShot(True)
         flashcard_phase_timer.timeout.connect(self._handle_flashcard_phase_timeout)
@@ -149,6 +165,7 @@ class MainWindow(QMainWindow):
             self._flashcard_sound_player.setAudioOutput(self._flashcard_sound_output)
         self.setWindowTitle("Estudai!")
         self.setGeometry(100, 100, 900, 650)
+        app_settings = load_app_settings()
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -158,13 +175,15 @@ class MainWindow(QMainWindow):
 
         self._build_sidebar(root_layout)
         self._build_content_area(root_layout)
-
-        app_settings = load_app_settings()
+        self._configure_window_shortcuts()
+        self._apply_in_app_shortcut_bindings(app_settings)
         self.timer_page = TimerPage(
             default_duration_seconds=app_settings.timer_duration_seconds
         )
         self.management_page = ManagementPage()
-        self.settings_page = SettingsPage()
+        self.settings_page = SettingsPage(
+            save_settings_callback=self._save_settings_from_page
+        )
         self.stacked_widget.addWidget(self.timer_page)
         self.stacked_widget.addWidget(self.management_page)
         self.stacked_widget.addWidget(self.settings_page)
@@ -187,6 +206,9 @@ class MainWindow(QMainWindow):
         )
         self.timer_page.stop_requested.connect(self.handle_timer_stop_requested)
         self.show_flashcard_requested.connect(self.show_flashcard_popup)
+        self.global_hotkey_action_requested.connect(
+            self._handle_global_hotkey_action_requested
+        )
         self.management_page.add_flashcard_button.clicked.connect(
             self.management_page.add_empty_flashcard_row
         )
@@ -195,15 +217,17 @@ class MainWindow(QMainWindow):
         )
         self.management_page.save_button.clicked.connect(self.save_management_changes)
         self.management_page.cancel_button.clicked.connect(self.switch_to_timer)
+        self.settings_page.cancel_requested.connect(self.switch_to_timer)
         self.settings_page.timer_duration_seconds_changed.connect(
             self.timer_page.set_timer_duration_seconds
         )
-        self.settings_page.save_button.clicked.connect(self.switch_to_timer)
+        self.settings_page.settings_saved.connect(self._handle_settings_saved)
 
         self.stacked_widget.setCurrentWidget(self.timer_page)
         self.timer_page.set_flashcard_context(self.current_folder_name, 0)
         self.handle_management_data_changed()
         self._update_sidebar_width()
+        self._apply_initial_hotkey_bindings(app_settings)
         app = QApplication.instance()
         if app is not None:
             app.installEventFilter(self)
@@ -318,6 +342,78 @@ class MainWindow(QMainWindow):
         content_layout.addWidget(self.stacked_widget)
         root_layout.addWidget(content_container)
 
+    def _configure_window_shortcuts(self) -> None:
+        """Register app-scoped shortcuts that should work regardless of focus."""
+        self._timer_page_pause_resume_shortcut = self._create_application_shortcut(
+            self._trigger_timer_page_pause_resume
+        )
+        self._timer_page_start_stop_shortcut = self._create_application_shortcut(
+            self._trigger_timer_page_start_stop
+        )
+        self._timer_page_mark_correct_shortcut = self._create_application_shortcut(
+            self._trigger_timer_page_mark_correct
+        )
+        self._timer_page_mark_wrong_shortcut = self._create_application_shortcut(
+            self._trigger_timer_page_mark_wrong
+        )
+        self._timer_page_copy_question_shortcut = self._create_application_shortcut(
+            self._trigger_timer_page_copy_question
+        )
+        self._toggle_fullscreen_shortcut = self._create_application_shortcut(
+            self.toggle_fullscreen
+        )
+        self._toggle_fullscreen_shortcut.setKey(QKeySequence("F11"))
+        self._exit_fullscreen_shortcut = self._create_application_shortcut(
+            self.exit_fullscreen
+        )
+        self._exit_fullscreen_shortcut.setKey(QKeySequence("Escape"))
+
+    def _create_application_shortcut(self, callback: object) -> QShortcut:
+        """Create one app-scoped shortcut with no binding assigned yet."""
+        shortcut = QShortcut(QKeySequence(), self)
+        shortcut.setContext(Qt.ApplicationShortcut)
+        shortcut.activated.connect(callback)
+        return shortcut
+
+    def _apply_in_app_shortcut_bindings(self, settings: AppSettings) -> None:
+        """Apply persisted in-app shortcut bindings to the active window."""
+        bindings = in_app_shortcut_bindings_from_settings(settings)
+        self._timer_page_pause_resume_shortcut.setKey(
+            QKeySequence(bindings[InAppShortcutAction.PAUSE_RESUME])
+        )
+        self._timer_page_start_stop_shortcut.setKeys(
+            self._start_stop_shortcut_sequences(
+                bindings[InAppShortcutAction.START_STOP]
+            )
+        )
+        self._timer_page_mark_correct_shortcut.setKey(
+            QKeySequence(bindings[InAppShortcutAction.MARK_CORRECT])
+        )
+        self._timer_page_mark_wrong_shortcut.setKey(
+            QKeySequence(bindings[InAppShortcutAction.MARK_WRONG])
+        )
+        self._timer_page_copy_question_shortcut.setKey(
+            QKeySequence(bindings[InAppShortcutAction.COPY_QUESTION])
+        )
+
+    def _start_stop_shortcut_sequences(self, binding: str) -> list[QKeySequence]:
+        """Return the start/stop shortcut list, keeping Enter and Return aligned."""
+        normalized_binding = normalize_hotkey_binding(binding, allow_empty=True)
+        if not normalized_binding:
+            return [QKeySequence()]
+        primary_sequence = QKeySequence(binding)
+        primary_binding = primary_sequence.toString()
+        sequences = [primary_sequence]
+        if normalized_binding.endswith("enter"):
+            if "+" in primary_binding:
+                prefix, _separator, key_name = primary_binding.rpartition("+")
+                alias_key_name = "Return" if key_name == "Enter" else "Enter"
+                alias_binding = f"{prefix}+{alias_key_name}"
+            else:
+                alias_binding = "Return" if primary_binding == "Enter" else "Enter"
+            sequences.append(QKeySequence(alias_binding))
+        return sequences
+
     def resizeEvent(self, event) -> None:  # noqa: N802
         """Resize sidebar width proportionally with window size."""
         super().resizeEvent(event)
@@ -424,6 +520,10 @@ class MainWindow(QMainWindow):
         """Show a warning dialog using the main window as parent."""
         QMessageBox.warning(self, title, message)
 
+    def _handle_settings_saved(self, _settings: AppSettings) -> None:
+        """Return to the timer page after a successful settings save."""
+        self.switch_to_timer()
+
     def handle_timer_running_changed(self, is_running: bool) -> None:
         """Hide editing/navigation controls while timer is active.
 
@@ -465,6 +565,120 @@ class MainWindow(QMainWindow):
     def handle_timer_stop_requested(self) -> None:
         """Abort the current study session when user clicks Stop."""
         self._reset_study_session_state()
+
+    def _hotkey_action_callbacks(self) -> dict[HotkeyAction, object]:
+        """Return thread-safe callbacks that marshal hotkeys into the UI thread."""
+        return {
+            action: (
+                lambda action_value=action.value: self.global_hotkey_action_requested.emit(
+                    action_value
+                )
+            )
+            for action in HotkeyAction
+        }
+
+    def _apply_initial_hotkey_bindings(self, settings: AppSettings) -> None:
+        """Apply persisted hotkeys on startup and fall back to defaults on failure."""
+        if self._hotkey_service.availability_error is not None:
+            return
+        try:
+            self._hotkey_service.apply_bindings(
+                hotkey_bindings_from_settings(settings),
+                self._hotkey_action_callbacks(),
+            )
+            return
+        except HotkeyRegistrationError as error:
+            self._show_warning_message("Global hotkeys", str(error))
+
+        fallback_bindings = DEFAULT_HOTKEY_BINDINGS
+        try:
+            self._hotkey_service.apply_bindings(
+                fallback_bindings,
+                self._hotkey_action_callbacks(),
+            )
+        except HotkeyRegistrationError:
+            return
+
+    def _save_settings_from_page(self, settings: AppSettings) -> None:
+        """Apply live hotkeys before persisting settings to disk."""
+        if self._hotkey_service.availability_error is None:
+            self._hotkey_service.apply_bindings(
+                hotkey_bindings_from_settings(settings),
+                self._hotkey_action_callbacks(),
+            )
+        self._apply_in_app_shortcut_bindings(settings)
+        save_app_settings(settings)
+
+    def _handle_global_hotkey_action_requested(self, action_value: str) -> None:
+        """Dispatch a hotkey action onto the same UI paths as button clicks."""
+        try:
+            action = HotkeyAction(action_value)
+        except ValueError:
+            return
+
+        if action is HotkeyAction.PAUSE_RESUME:
+            self._trigger_timer_page_pause_resume()
+            return
+        if action is HotkeyAction.START_STOP:
+            self._trigger_timer_page_start_stop()
+            return
+        if action is HotkeyAction.MARK_CORRECT:
+            self._trigger_timer_page_mark_correct()
+            return
+        if action is HotkeyAction.MARK_WRONG:
+            self._trigger_timer_page_mark_wrong()
+            return
+        if action is HotkeyAction.COPY_QUESTION:
+            self._trigger_timer_page_copy_question()
+
+    def _timer_page_is_active(self) -> bool:
+        """Return whether timer hotkeys should be active for the current page."""
+        return self.stacked_widget.currentWidget() is self.timer_page
+
+    def _trigger_timer_page_pause_resume(self) -> None:
+        """Mirror the pause/resume button path for local and global shortcuts."""
+        if not self._timer_page_is_active():
+            return
+        if self.timer_page.pause_button.isEnabled():
+            self.timer_page.pause_button.click()
+
+    def _trigger_timer_page_start_stop(self) -> None:
+        """Mirror the start/stop button path for local and global shortcuts."""
+        if not self._timer_page_is_active():
+            return
+        if self.timer_page.start_button.isEnabled():
+            self.timer_page.start_button.click()
+        elif self.timer_page.stop_button.isEnabled():
+            self.timer_page.stop_button.click()
+
+    def _trigger_timer_page_mark_correct(self) -> None:
+        """Mirror the correct button path for local and global shortcuts."""
+        if not self._timer_page_is_active():
+            return
+        if self.timer_page.correct_button.isEnabled():
+            self.timer_page.correct_button.click()
+
+    def _trigger_timer_page_mark_wrong(self) -> None:
+        """Mirror the wrong button path for local and global shortcuts."""
+        if not self._timer_page_is_active():
+            return
+        if self.timer_page.wrong_button.isEnabled():
+            self.timer_page.wrong_button.click()
+
+    def _trigger_timer_page_copy_question(self) -> None:
+        """Copy the current flashcard question and show transient feedback."""
+        if not self._timer_page_is_active():
+            return
+        if self.timer_page.flashcard_question_label.isHidden():
+            return
+        question = self.timer_page.current_flashcard_question_text().strip()
+        if not question:
+            return
+        clipboard = QApplication.clipboard()
+        if clipboard is None:
+            return
+        clipboard.setText(question)
+        self.timer_page.show_copy_feedback()
 
     def _start_flashcard_phase_timer(
         self, duration_milliseconds: int, callback
@@ -906,23 +1120,17 @@ class MainWindow(QMainWindow):
             return
         self.sidebar.setVisible(False)
 
-    def keyPressEvent(self, event) -> None:  # noqa: N802
-        """Handle keyboard shortcuts scoped to the main window.
-
-        Args:
-            event: Key event to process.
-        """
-        if (
-            event.key() == Qt.Key_Space
-            and self.stacked_widget.currentWidget() is self.timer_page
-        ):
-            if self.timer_page.start_button.isEnabled():
-                self.timer_page.start_timer()
-            elif self.timer_page.pause_button.isEnabled():
-                self.timer_page.pause_timer()
-            event.accept()
+    def toggle_fullscreen(self) -> None:
+        """Toggle between fullscreen and normal window modes."""
+        if self.isFullScreen():
+            self.showNormal()
             return
-        super().keyPressEvent(event)
+        self.showFullScreen()
+
+    def exit_fullscreen(self) -> None:
+        """Leave fullscreen mode when currently active."""
+        if self.isFullScreen():
+            self.showNormal()
 
     def _widget_contains_global_position(
         self, widget: QWidget, global_position: QPoint
@@ -975,6 +1183,14 @@ class MainWindow(QMainWindow):
             if callable(global_position_getter):
                 self._handle_global_click(event.globalPosition().toPoint())
         return super().eventFilter(watched, event)
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        """Release global hotkeys and app-wide filters when closing the window."""
+        self._hotkey_service.clear()
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
+        super().closeEvent(event)
 
     def _is_folder_item(self, item: QListWidgetItem | None) -> bool:
         """Return whether a sidebar item maps to a persisted folder.
@@ -1413,7 +1629,7 @@ class MainWindow(QMainWindow):
         checked_ids = self._get_checked_folder_ids()
         try:
             persisted_folder = import_folder(folder_path)
-        except (FileNotFoundError, NotADirectoryError, OSError):
+        except FileNotFoundError, NotADirectoryError, OSError:
             return False
         checked_ids.add(persisted_folder.id)
         self.handle_management_data_changed(preferred_checked_ids=checked_ids)
