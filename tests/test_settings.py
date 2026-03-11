@@ -12,8 +12,12 @@ from estudai.services.settings import (
     AppSettings,
     DEFAULT_IN_APP_SHORTCUT_BINDINGS,
     InAppShortcutAction,
+    SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_PATH,
+    SETTINGS_KEY_LEGACY_NOTIFICATION_SOUND_PATH,
+    SETTINGS_KEY_QUESTION_NOTIFICATION_SOUND_PATH,
     WrongAnswerCompletionMode,
     WrongAnswerReinsertionMode,
+    _open_settings,
     copy_notification_sound_file,
     get_default_notification_sound_path,
     load_app_settings,
@@ -50,7 +54,8 @@ def test_settings_defaults_and_persistence() -> None:
         flashcard_random_order_enabled=True,
         question_display_duration_seconds=4,
         answer_display_duration_seconds=7,
-        notification_sound_path="/tmp/sound.wav",
+        question_notification_sound_path="/tmp/question-sound.wav",
+        answer_notification_sound_path="/tmp/answer-sound.wav",
         wrong_answer_completion_mode=(
             WrongAnswerCompletionMode.UNTIL_CORRECT_MORE_THAN_WRONG
         ),
@@ -164,8 +169,8 @@ def test_settings_default_hotkeys_match_expected_bindings() -> None:
 def test_get_default_notification_sound_path_prefers_frozen_bundle(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Verify packaged installs resolve bundled alarm before repository fallback."""
-    bundle_sound = tmp_path / "bundle" / "data" / "alarm.mp3"
+    """Verify packaged installs resolve bundled default sound before repository fallback."""
+    bundle_sound = tmp_path / "bundle" / "data" / "default.mp3"
     bundle_sound.parent.mkdir(parents=True)
     bundle_sound.write_bytes(b"ID3")
     fake_executable = tmp_path / "bundle" / "Estudai.exe"
@@ -185,10 +190,29 @@ def test_copy_notification_sound_file_accepts_supported_extensions(
     source_sound = tmp_path / "beep.wav"
     source_sound.write_bytes(b"RIFF....WAVEfmt ")
 
-    copied_path = Path(copy_notification_sound_file(source_sound))
+    copied_path = Path(copy_notification_sound_file(source_sound, slot_name="question"))
     assert copied_path.exists()
     assert copied_path.suffix == ".wav"
-    assert copied_path.name == "notification-sound.wav"
+    assert copied_path.name == "question-notification-sound.wav"
+
+
+def test_copy_notification_sound_file_uses_independent_slot_filenames(
+    tmp_path: Path,
+) -> None:
+    """Verify question and answer uploads do not overwrite each other."""
+    question_sound = tmp_path / "question.mp3"
+    answer_sound = tmp_path / "answer.wav"
+    question_sound.write_bytes(b"ID3")
+    answer_sound.write_bytes(b"RIFF....WAVEfmt ")
+
+    question_path = Path(
+        copy_notification_sound_file(question_sound, slot_name="question")
+    )
+    answer_path = Path(copy_notification_sound_file(answer_sound, slot_name="answer"))
+
+    assert question_path.exists()
+    assert answer_path.exists()
+    assert question_path != answer_path
 
 
 def test_copy_notification_sound_file_rejects_unsupported_extension(
@@ -199,7 +223,44 @@ def test_copy_notification_sound_file_rejects_unsupported_extension(
     source_sound.write_bytes(b"OggS")
 
     with pytest.raises(ValueError, match="Unsupported sound file type"):
-        copy_notification_sound_file(source_sound)
+        copy_notification_sound_file(source_sound, slot_name="question")
+
+
+def test_settings_migrates_legacy_notification_sound_to_both_slots() -> None:
+    """Verify the pre-split sound setting populates both new sound slots."""
+    qsettings = _open_settings()
+    qsettings.setValue(SETTINGS_KEY_LEGACY_NOTIFICATION_SOUND_PATH, "/tmp/legacy.wav")
+    qsettings.sync()
+
+    restored = load_app_settings()
+
+    assert restored.question_notification_sound_path == "/tmp/legacy.wav"
+    assert restored.answer_notification_sound_path == "/tmp/legacy.wav"
+
+
+def test_settings_save_clears_legacy_notification_sound_key() -> None:
+    """Verify saving new settings removes the stale legacy sound key."""
+    qsettings = _open_settings()
+    qsettings.setValue(SETTINGS_KEY_LEGACY_NOTIFICATION_SOUND_PATH, "/tmp/legacy.wav")
+    qsettings.sync()
+
+    save_app_settings(
+        AppSettings(
+            question_notification_sound_path="/tmp/question.wav",
+            answer_notification_sound_path="/tmp/answer.wav",
+        )
+    )
+
+    qsettings = _open_settings()
+    assert qsettings.contains(SETTINGS_KEY_LEGACY_NOTIFICATION_SOUND_PATH) is False
+    assert (
+        qsettings.value(SETTINGS_KEY_QUESTION_NOTIFICATION_SOUND_PATH)
+        == "/tmp/question.wav"
+    )
+    assert (
+        qsettings.value(SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_PATH)
+        == "/tmp/answer.wav"
+    )
 
 
 def test_settings_page_only_persists_changes_after_save(app: QApplication) -> None:
@@ -409,9 +470,11 @@ def test_settings_page_uploads_sound_and_plays_test(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify upload sets pending sound and save persists it."""
-    selected_sound = tmp_path / "notification.mp3"
-    selected_sound.write_bytes(b"ID3")
+    """Verify question and answer uploads persist and test independently."""
+    question_sound = tmp_path / "question.mp3"
+    answer_sound = tmp_path / "answer.wav"
+    question_sound.write_bytes(b"ID3")
+    answer_sound.write_bytes(b"RIFF....WAVEfmt ")
     save_app_settings(AppSettings())
     page = SettingsPage()
     played: list[str] = []
@@ -426,21 +489,37 @@ def test_settings_page_uploads_sound_and_plays_test(
 
     monkeypatch.setattr(page, "_sound_player", _FakePlayer())
 
+    selected_paths = iter(
+        [
+            (str(question_sound), "Sound files (*.mp3 *.wav)"),
+            (str(answer_sound), "Sound files (*.mp3 *.wav)"),
+        ]
+    )
     monkeypatch.setattr(
         "estudai.ui.pages.settings_page.QFileDialog.getOpenFileName",
-        lambda *_args, **_kwargs: (str(selected_sound), "Sound files (*.mp3 *.wav)"),
+        lambda *_args, **_kwargs: next(selected_paths),
     )
-    page._handle_upload_sound_clicked()
-    assert page.test_sound_button.isEnabled()
-    assert load_app_settings().notification_sound_path == ""
+    page._handle_upload_question_sound_clicked()
+    page._handle_upload_answer_sound_clicked()
+    assert page.test_question_sound_button.isEnabled()
+    assert page.test_answer_sound_button.isEnabled()
+    assert load_app_settings().question_notification_sound_path == ""
+    assert load_app_settings().answer_notification_sound_path == ""
 
     page._handle_save_clicked()
-    persisted_sound = Path(load_app_settings().notification_sound_path)
-    assert page.test_sound_button.isEnabled()
+    persisted_settings = load_app_settings()
+    persisted_question_sound = Path(persisted_settings.question_notification_sound_path)
+    persisted_answer_sound = Path(persisted_settings.answer_notification_sound_path)
+    assert page.test_question_sound_button.isEnabled()
+    assert page.test_answer_sound_button.isEnabled()
 
-    page._handle_test_sound_clicked()
-    assert played == ["played"]
-    assert source_values == [str(persisted_sound)]
+    page._handle_test_question_sound_clicked()
+    page._handle_test_answer_sound_clicked()
+    assert played == ["played", "played"]
+    assert source_values == [
+        str(persisted_question_sound),
+        str(persisted_answer_sound),
+    ]
 
 
 def test_settings_page_cancel_restores_persisted_values(app: QApplication) -> None:
@@ -488,11 +567,12 @@ def test_settings_page_warns_and_tests_default_sound(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify default sound warning is shown and test button plays default."""
-    default_sound = tmp_path / "alarm-default.wav"
+    """Verify both sound slots fall back to the bundled default when unset."""
+    default_sound = tmp_path / "default.wav"
     default_sound.write_bytes(b"RIFF....WAVEfmt ")
     page = SettingsPage()
-    page._notification_sound_path = ""
+    page._question_notification_sound_path = ""
+    page._answer_notification_sound_path = ""
     page._default_notification_sound_path = str(default_sound)
     played: list[str] = []
     source_values: list[str] = []
@@ -507,10 +587,17 @@ def test_settings_page_warns_and_tests_default_sound(
     monkeypatch.setattr(page, "_sound_player", _FakePlayer())
 
     page._update_sound_summary()
-    assert "Selected sound: None." in page.notification_sound_label.text()
-    assert "Default sound" in page.notification_sound_label.text()
-    assert page.test_sound_button.isEnabled()
+    assert (
+        "Selected question sound: None."
+        in page.question_notification_sound_label.text()
+    )
+    assert "Default sound" in page.question_notification_sound_label.text()
+    assert "Selected answer sound: None." in page.answer_notification_sound_label.text()
+    assert "Default sound" in page.answer_notification_sound_label.text()
+    assert page.test_question_sound_button.isEnabled()
+    assert page.test_answer_sound_button.isEnabled()
 
-    page._handle_test_sound_clicked()
-    assert played == ["played"]
-    assert source_values == [str(default_sound)]
+    page._handle_test_question_sound_clicked()
+    page._handle_test_answer_sound_clicked()
+    assert played == ["played", "played"]
+    assert source_values == [str(default_sound), str(default_sound)]

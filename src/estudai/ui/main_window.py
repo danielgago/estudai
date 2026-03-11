@@ -870,13 +870,18 @@ class MainWindow(QMainWindow):
             replacements[previous_flashcard] = updated_folder_flashcards[updated_index]
         self._study_session.replace_flashcards(replacements)
 
-    def _play_flashcard_notification_sound(self) -> None:
-        """Play notification sound configured in settings when available."""
+    def _play_flashcard_notification_sound(self, *, question_phase: bool) -> None:
+        """Play the configured flashcard sound for the current phase."""
         if self._flashcard_sound_player is None:
             return
         settings = load_app_settings()
+        configured_sound_path = (
+            settings.question_notification_sound_path
+            if question_phase
+            else settings.answer_notification_sound_path
+        )
         sound_path_value = (
-            settings.notification_sound_path or get_default_notification_sound_path()
+            configured_sound_path or get_default_notification_sound_path()
         )
         if not sound_path_value:
             return
@@ -917,7 +922,7 @@ class MainWindow(QMainWindow):
         ):
             return
         self.timer_page.show_flashcard_answer(answer, answer_display_duration_seconds)
-        self._play_flashcard_notification_sound()
+        self._play_flashcard_notification_sound(question_phase=False)
         self._start_flashcard_phase_timer(
             answer_display_duration_seconds * 1000,
             lambda: self._finish_flashcard_answer_phase(sequence_id),
@@ -957,7 +962,7 @@ class MainWindow(QMainWindow):
             flashcard.question,
             app_settings.question_display_duration_seconds,
         )
-        self._play_flashcard_notification_sound()
+        self._play_flashcard_notification_sound(question_phase=True)
         self._start_flashcard_phase_timer(
             app_settings.question_display_duration_seconds * 1000,
             lambda: self._show_current_flashcard_answer(

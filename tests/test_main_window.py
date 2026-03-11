@@ -940,9 +940,11 @@ def test_timer_completion_uses_random_choice_when_setting_enabled(
 def test_flashcard_sequence_plays_sound_for_question_and_answer(
     app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Verify flashcard flow plays notification sound at both phases."""
-    sound_path = tmp_path / "alert.wav"
-    sound_path.write_bytes(b"RIFF....WAVEfmt ")
+    """Verify flashcard flow uses separate question and answer sounds."""
+    question_sound_path = tmp_path / "question.wav"
+    answer_sound_path = tmp_path / "answer.wav"
+    question_sound_path.write_bytes(b"RIFF....WAVEfmt ")
+    answer_sound_path.write_bytes(b"RIFF....WAVEfmt ")
     callbacks: list[object] = []
     source_values: list[str] = []
     plays: list[str] = []
@@ -976,7 +978,8 @@ def test_flashcard_sequence_plays_sound_for_question_and_answer(
             flashcard_probability_percent=30,
             question_display_duration_seconds=2,
             answer_display_duration_seconds=3,
-            notification_sound_path=str(sound_path),
+            question_notification_sound_path=str(question_sound_path),
+            answer_notification_sound_path=str(answer_sound_path),
         ),
     )
     monkeypatch.setattr(
@@ -990,6 +993,7 @@ def test_flashcard_sequence_plays_sound_for_question_and_answer(
     assert window.sidebar_toggle_button.isHidden()
     assert window.settings_button.isHidden()
     assert plays == ["play"]
+    assert source_values == [str(question_sound_path)]
     assert len(callbacks) == 1
 
     callbacks.pop(0)()
@@ -997,6 +1001,7 @@ def test_flashcard_sequence_plays_sound_for_question_and_answer(
     assert window.sidebar_toggle_button.isHidden()
     assert window.settings_button.isHidden()
     assert plays == ["play", "play"]
+    assert source_values == [str(question_sound_path), str(answer_sound_path)]
     assert len(callbacks) == 1
 
     window.timer_page.correct_button.click()
@@ -1004,6 +1009,57 @@ def test_flashcard_sequence_plays_sound_for_question_and_answer(
     assert restart_calls == []
     callbacks.pop(0)()
     assert restart_calls == ["restart"]
+
+
+def test_flashcard_sequence_uses_default_sound_for_both_phases_when_unset(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify the bundled default sound is used for both phases when unset."""
+    default_sound_path = tmp_path / "default.wav"
+    default_sound_path.write_bytes(b"RIFF....WAVEfmt ")
+    callbacks: list[object] = []
+    source_values: list[str] = []
+    plays: list[str] = []
+    window = MainWindow()
+    flashcard = Flashcard(
+        question="Q?",
+        answer="A.",
+        source_file=tmp_path / "cards.csv",
+        source_line=1,
+    )
+
+    class _FakePlayer:
+        def setSource(self, url) -> None:  # noqa: N802
+            source_values.append(url.toLocalFile())
+
+        def play(self) -> None:
+            plays.append("play")
+
+    monkeypatch.setattr(window, "_flashcard_sound_player", _FakePlayer())
+    monkeypatch.setattr(
+        "estudai.ui.main_window.get_default_notification_sound_path",
+        lambda: str(default_sound_path),
+    )
+    monkeypatch.setattr(
+        "estudai.ui.main_window.load_app_settings",
+        lambda: AppSettings(
+            timer_duration_seconds=1500,
+            flashcard_probability_percent=30,
+            question_display_duration_seconds=2,
+            answer_display_duration_seconds=3,
+        ),
+    )
+    monkeypatch.setattr(
+        window,
+        "_start_flashcard_phase_timer",
+        lambda _delay, callback: callbacks.append(callback),
+    )
+
+    window.show_flashcard_popup(flashcard)
+    callbacks.pop(0)()
+
+    assert plays == ["play", "play"]
+    assert source_values == [str(default_sound_path), str(default_sound_path)]
 
 
 def test_unanswered_flashcard_returns_after_other_cards(
