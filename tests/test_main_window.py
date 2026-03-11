@@ -105,6 +105,24 @@ class _FullscreenSpyWindow(MainWindow):
         super().exit_fullscreen()
 
 
+class _FakePlayer:
+    """Minimal sound player used to observe flashcard playback behavior."""
+
+    def __init__(self) -> None:
+        self.source_values: list[str] = []
+        self.play_calls = 0
+        self.stop_calls = 0
+
+    def setSource(self, url) -> None:  # noqa: N802
+        self.source_values.append(url.toLocalFile())
+
+    def play(self) -> None:
+        self.play_calls += 1
+
+    def stop(self) -> None:
+        self.stop_calls += 1
+
+
 def test_main_window_registers_all_pages(app: QApplication) -> None:
     """Verify that all expected pages are present in the stack."""
     window = MainWindow()
@@ -946,25 +964,16 @@ def test_flashcard_sequence_plays_sound_for_question_and_answer(
     question_sound_path.write_bytes(b"RIFF....WAVEfmt ")
     answer_sound_path.write_bytes(b"RIFF....WAVEfmt ")
     callbacks: list[object] = []
-    source_values: list[str] = []
-    plays: list[str] = []
     restart_calls: list[str] = []
     window = MainWindow()
+    player = _FakePlayer()
+    window._flashcard_sound_controller.set_player(player)
     flashcard = Flashcard(
         question="Q?",
         answer="A.",
         source_file=tmp_path / "cards.csv",
         source_line=1,
     )
-
-    class _FakePlayer:
-        def setSource(self, url) -> None:  # noqa: N802
-            source_values.append(url.toLocalFile())
-
-        def play(self) -> None:
-            plays.append("play")
-
-    monkeypatch.setattr(window, "_flashcard_sound_player", _FakePlayer())
 
     monkeypatch.setattr(
         window,
@@ -992,16 +1001,16 @@ def test_flashcard_sequence_plays_sound_for_question_and_answer(
     assert window.timer_page.flashcard_question_label.text() == "Q?"
     assert window.sidebar_toggle_button.isHidden()
     assert window.settings_button.isHidden()
-    assert plays == ["play"]
-    assert source_values == [str(question_sound_path)]
+    assert player.play_calls == 1
+    assert player.source_values == [str(question_sound_path)]
     assert len(callbacks) == 1
 
     callbacks.pop(0)()
     assert window.timer_page.flashcard_answer_label.text() == "A."
     assert window.sidebar_toggle_button.isHidden()
     assert window.settings_button.isHidden()
-    assert plays == ["play", "play"]
-    assert source_values == [str(question_sound_path), str(answer_sound_path)]
+    assert player.play_calls == 2
+    assert player.source_values == [str(question_sound_path), str(answer_sound_path)]
     assert len(callbacks) == 1
 
     window.timer_page.correct_button.click()
@@ -1018,24 +1027,15 @@ def test_flashcard_sequence_uses_default_sound_for_both_phases_when_unset(
     default_sound_path = tmp_path / "default.wav"
     default_sound_path.write_bytes(b"RIFF....WAVEfmt ")
     callbacks: list[object] = []
-    source_values: list[str] = []
-    plays: list[str] = []
     window = MainWindow()
+    player = _FakePlayer()
+    window._flashcard_sound_controller.set_player(player)
     flashcard = Flashcard(
         question="Q?",
         answer="A.",
         source_file=tmp_path / "cards.csv",
         source_line=1,
     )
-
-    class _FakePlayer:
-        def setSource(self, url) -> None:  # noqa: N802
-            source_values.append(url.toLocalFile())
-
-        def play(self) -> None:
-            plays.append("play")
-
-    monkeypatch.setattr(window, "_flashcard_sound_player", _FakePlayer())
     monkeypatch.setattr(
         "estudai.ui.main_window.get_default_notification_sound_path",
         lambda: str(default_sound_path),
@@ -1058,8 +1058,95 @@ def test_flashcard_sequence_uses_default_sound_for_both_phases_when_unset(
     window.show_flashcard_popup(flashcard)
     callbacks.pop(0)()
 
-    assert plays == ["play", "play"]
-    assert source_values == [str(default_sound_path), str(default_sound_path)]
+    assert player.play_calls == 2
+    assert player.source_values == [str(default_sound_path), str(default_sound_path)]
+
+
+def test_flashcard_sequence_stops_sound_when_question_phase_ends(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify the question sound is cleaned up before answer playback begins."""
+    question_sound_path = tmp_path / "question.wav"
+    answer_sound_path = tmp_path / "answer.wav"
+    question_sound_path.write_bytes(b"RIFF....WAVEfmt ")
+    answer_sound_path.write_bytes(b"RIFF....WAVEfmt ")
+    callbacks: list[object] = []
+    window = MainWindow()
+    player = _FakePlayer()
+    window._flashcard_sound_controller.set_player(player)
+    flashcard = Flashcard(
+        question="Q?",
+        answer="A.",
+        source_file=tmp_path / "cards.csv",
+        source_line=1,
+    )
+
+    monkeypatch.setattr(
+        window,
+        "_start_flashcard_phase_timer",
+        lambda _delay, callback: callbacks.append(callback),
+    )
+    monkeypatch.setattr(
+        "estudai.ui.main_window.load_app_settings",
+        lambda: AppSettings(
+            timer_duration_seconds=1500,
+            flashcard_probability_percent=30,
+            question_display_duration_seconds=2,
+            answer_display_duration_seconds=3,
+            question_notification_sound_path=str(question_sound_path),
+            answer_notification_sound_path=str(answer_sound_path),
+        ),
+    )
+
+    window.show_flashcard_popup(flashcard)
+
+    assert player.play_calls == 1
+    assert player.stop_calls == 0
+
+    callbacks.pop(0)()
+
+    assert player.stop_calls == 1
+    assert player.play_calls == 2
+    assert player.source_values == [str(question_sound_path), str(answer_sound_path)]
+
+
+def test_stop_button_stops_active_flashcard_sound(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify stopping the session also stops the active flashcard sound."""
+    question_sound_path = tmp_path / "question.wav"
+    question_sound_path.write_bytes(b"RIFF....WAVEfmt ")
+    window = MainWindow()
+    player = _FakePlayer()
+    window._flashcard_sound_controller.set_player(player)
+    flashcard = Flashcard(
+        question="Q?",
+        answer="A.",
+        source_file=tmp_path / "cards.csv",
+        source_line=1,
+    )
+
+    monkeypatch.setattr(
+        window,
+        "_start_flashcard_phase_timer",
+        lambda _delay, callback: None,
+    )
+    monkeypatch.setattr(
+        "estudai.ui.main_window.load_app_settings",
+        lambda: AppSettings(
+            timer_duration_seconds=1500,
+            flashcard_probability_percent=30,
+            question_display_duration_seconds=2,
+            answer_display_duration_seconds=3,
+            question_notification_sound_path=str(question_sound_path),
+        ),
+    )
+
+    window.show_flashcard_popup(flashcard)
+    window.handle_timer_stop_requested()
+
+    assert player.play_calls == 1
+    assert player.stop_calls == 1
 
 
 def test_unanswered_flashcard_returns_after_other_cards(

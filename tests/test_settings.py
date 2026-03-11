@@ -23,7 +23,7 @@ from estudai.services.settings import (
     load_app_settings,
     save_app_settings,
 )
-from estudai.ui.pages.settings_page import SettingsPage
+from estudai.ui.pages.settings_page import SOUND_PREVIEW_LIMIT_MS, SettingsPage
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -41,6 +41,24 @@ def app() -> QApplication:
 def isolated_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Use an isolated app data directory for each test."""
     monkeypatch.setenv("ESTUDAI_DATA_DIR", str(tmp_path / "app-data"))
+
+
+class _FakePlayer:
+    """Minimal sound player used to observe preview playback behavior."""
+
+    def __init__(self) -> None:
+        self.source_values: list[str] = []
+        self.play_calls = 0
+        self.stop_calls = 0
+
+    def setSource(self, url) -> None:  # noqa: N802
+        self.source_values.append(url.toLocalFile())
+
+    def play(self) -> None:
+        self.play_calls += 1
+
+    def stop(self) -> None:
+        self.stop_calls += 1
 
 
 def test_settings_defaults_and_persistence() -> None:
@@ -477,17 +495,9 @@ def test_settings_page_uploads_sound_and_plays_test(
     answer_sound.write_bytes(b"RIFF....WAVEfmt ")
     save_app_settings(AppSettings())
     page = SettingsPage()
-    played: list[str] = []
-    source_values: list[str] = []
-
-    class _FakePlayer:
-        def setSource(self, url) -> None:  # noqa: N802
-            source_values.append(url.toLocalFile())
-
-        def play(self) -> None:
-            played.append("played")
-
-    monkeypatch.setattr(page, "_sound_player", _FakePlayer())
+    player = _FakePlayer()
+    page._preview_sound_controller.set_player(player)
+    page._update_sound_summary()
 
     selected_paths = iter(
         [
@@ -515,8 +525,8 @@ def test_settings_page_uploads_sound_and_plays_test(
 
     page._handle_test_question_sound_clicked()
     page._handle_test_answer_sound_clicked()
-    assert played == ["played", "played"]
-    assert source_values == [
+    assert player.play_calls == 2
+    assert player.source_values == [
         str(persisted_question_sound),
         str(persisted_answer_sound),
     ]
@@ -574,17 +584,8 @@ def test_settings_page_warns_and_tests_default_sound(
     page._question_notification_sound_path = ""
     page._answer_notification_sound_path = ""
     page._default_notification_sound_path = str(default_sound)
-    played: list[str] = []
-    source_values: list[str] = []
-
-    class _FakePlayer:
-        def setSource(self, url) -> None:  # noqa: N802
-            source_values.append(url.toLocalFile())
-
-        def play(self) -> None:
-            played.append("played")
-
-    monkeypatch.setattr(page, "_sound_player", _FakePlayer())
+    player = _FakePlayer()
+    page._preview_sound_controller.set_player(player)
 
     page._update_sound_summary()
     assert (
@@ -596,8 +597,64 @@ def test_settings_page_warns_and_tests_default_sound(
     assert "Default sound" in page.answer_notification_sound_label.text()
     assert page.test_question_sound_button.isEnabled()
     assert page.test_answer_sound_button.isEnabled()
+    assert page.stop_question_sound_button.isHidden() is True
+    assert page.stop_answer_sound_button.isHidden() is True
 
     page._handle_test_question_sound_clicked()
     page._handle_test_answer_sound_clicked()
-    assert played == ["played", "played"]
-    assert source_values == [str(default_sound), str(default_sound)]
+    assert player.play_calls == 2
+    assert player.source_values == [str(default_sound), str(default_sound)]
+
+
+def test_settings_page_preview_auto_stops_after_timeout(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify preview playback is trimmed by the shared 5-second limit."""
+    question_sound = tmp_path / "question.wav"
+    question_sound.write_bytes(b"RIFF....WAVEfmt ")
+    page = SettingsPage()
+    player = _FakePlayer()
+    page._preview_sound_controller.set_player(player)
+    page._question_notification_sound_path = str(question_sound)
+    page._update_sound_summary()
+
+    page._handle_test_question_sound_clicked()
+
+    assert player.play_calls == 1
+    assert page.stop_question_sound_button.isHidden() is False
+    assert page.stop_answer_sound_button.isHidden() is True
+    assert page.stop_question_sound_button.isEnabled() is True
+    assert page._preview_sound_controller._stop_timer.interval() == (
+        SOUND_PREVIEW_LIMIT_MS
+    )
+    page._preview_sound_controller._stop_timer.timeout.emit()
+
+    assert player.stop_calls == 1
+    assert page.stop_question_sound_button.isHidden() is True
+    assert page.stop_question_sound_button.isEnabled() is False
+
+
+def test_settings_page_stop_button_stops_active_preview(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify the Stop button ends the currently playing preview immediately."""
+    answer_sound = tmp_path / "answer.wav"
+    answer_sound.write_bytes(b"RIFF....WAVEfmt ")
+    page = SettingsPage()
+    player = _FakePlayer()
+    page._preview_sound_controller.set_player(player)
+    page._answer_notification_sound_path = str(answer_sound)
+    page._update_sound_summary()
+
+    page._handle_test_answer_sound_clicked()
+
+    assert page.stop_answer_sound_button.isHidden() is False
+    assert page.stop_question_sound_button.isHidden() is True
+    assert page.stop_answer_sound_button.isEnabled() is True
+    assert page.stop_question_sound_button.isEnabled() is False
+
+    page.stop_answer_sound_button.click()
+
+    assert player.stop_calls == 1
+    assert page.stop_answer_sound_button.isHidden() is True
+    assert page.stop_answer_sound_button.isEnabled() is False
