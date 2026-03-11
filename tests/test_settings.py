@@ -542,9 +542,7 @@ def test_settings_page_uploads_sound_and_plays_test(
     persisted_settings = load_app_settings()
     persisted_question_sound = Path(persisted_settings.question_notification_sound_path)
     persisted_answer_sound = Path(persisted_settings.answer_notification_sound_path)
-    assert (
-        persisted_settings.question_notification_sound_display_name == "question.mp3"
-    )
+    assert persisted_settings.question_notification_sound_display_name == "question.mp3"
     assert persisted_settings.answer_notification_sound_display_name == "answer.wav"
     assert page.test_question_sound_button.isEnabled()
     assert page.test_answer_sound_button.isEnabled()

@@ -348,7 +348,10 @@ def load_app_settings() -> AppSettings:
         default="",
         allow_empty=True,
     )
-    if question_notification_sound_path and not question_notification_sound_display_name:
+    if (
+        question_notification_sound_path
+        and not question_notification_sound_display_name
+    ):
         question_notification_sound_display_name = (
             _default_notification_sound_display_name(question_notification_sound_path)
         )
