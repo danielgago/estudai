@@ -1666,17 +1666,16 @@ def test_in_app_timer_shortcuts_control_timer(
 
     assert window._timer_page_pause_resume_shortcut.context() == Qt.ApplicationShortcut
     assert window._timer_page_pause_resume_shortcut.key().toString() == "Space"
-    assert len(window._timer_page_start_stop_shortcuts) == 2
     assert {
-        shortcut.key().toString()
-        for shortcut in window._timer_page_start_stop_shortcuts
+        shortcut.toString()
+        for shortcut in window._timer_page_start_stop_shortcut.keys()
     } == {"Return", "Enter"}
     assert window._timer_page_mark_correct_shortcut.context() == Qt.ApplicationShortcut
     assert window._timer_page_mark_correct_shortcut.key().toString() == "Up"
     assert window._timer_page_mark_wrong_shortcut.context() == Qt.ApplicationShortcut
     assert window._timer_page_mark_wrong_shortcut.key().toString() == "Down"
 
-    window._timer_page_start_stop_shortcuts[0].activated.emit()
+    window._timer_page_start_stop_shortcut.activated.emit()
     assert window.timer_page.is_running is True
 
     window._timer_page_pause_resume_shortcut.activated.emit()
@@ -1685,7 +1684,7 @@ def test_in_app_timer_shortcuts_control_timer(
     window._timer_page_pause_resume_shortcut.activated.emit()
     assert window.timer_page.is_running is True
 
-    window._timer_page_start_stop_shortcuts[1].activated.emit()
+    window._timer_page_start_stop_shortcut.activated.emit()
     assert window.timer_page.is_running is False
     assert window.timer_page.start_button.isEnabled() is True
     assert window.timer_page.stop_button.isEnabled() is False
@@ -1702,7 +1701,7 @@ def test_modified_global_binding_does_not_trigger_local_space_shortcut(
     (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
     assert window.add_folder(biology_folder) is True
 
-    window._timer_page_start_stop_shortcuts[0].activated.emit()
+    window._timer_page_start_stop_shortcut.activated.emit()
     assert window.timer_page.is_running is True
 
     modified_space_event = QKeyEvent(
@@ -1865,6 +1864,50 @@ def test_saving_settings_rebinds_active_global_hotkeys(
 
     backend.trigger("ctrl+alt+s")
     assert window.timer_page.is_running is True
+
+
+def test_saving_settings_rebinds_active_in_app_shortcuts(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify saving new in-app bindings updates the active shortcut objects."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+
+    window.switch_to_settings()
+    window.settings_page.in_app_start_stop_shortcut_edit.setKeySequence("Ctrl+S")
+    window.settings_page.in_app_pause_resume_shortcut_edit.setKeySequence("Ctrl+P")
+    window.settings_page.in_app_mark_correct_shortcut_edit.setKeySequence("Ctrl+Right")
+    window.settings_page.in_app_mark_wrong_shortcut_edit.setKeySequence("Ctrl+Left")
+    window.settings_page.in_app_toggle_fullscreen_shortcut_edit.setKeySequence("F10")
+    window.settings_page.in_app_exit_fullscreen_shortcut_edit.setKeySequence(
+        "Shift+Escape"
+    )
+
+    window.settings_page._handle_save_clicked()
+
+    persisted = load_app_settings()
+    assert persisted.in_app_start_stop_shortcut == "Ctrl+S"
+    assert persisted.in_app_pause_resume_shortcut == "Ctrl+P"
+    assert persisted.in_app_mark_correct_shortcut == "Ctrl+Right"
+    assert persisted.in_app_mark_wrong_shortcut == "Ctrl+Left"
+    assert persisted.in_app_toggle_fullscreen_shortcut == "F10"
+    assert persisted.in_app_exit_fullscreen_shortcut == "Shift+Esc"
+
+    assert window._timer_page_start_stop_shortcut.key().toString() == "Ctrl+S"
+    assert window._timer_page_pause_resume_shortcut.key().toString() == "Ctrl+P"
+    assert window._timer_page_mark_correct_shortcut.key().toString() == "Ctrl+Right"
+    assert window._timer_page_mark_wrong_shortcut.key().toString() == "Ctrl+Left"
+    assert window._toggle_fullscreen_shortcut.key().toString() == "F10"
+    assert window._exit_fullscreen_shortcut.key().toString() == "Shift+Esc"
+
+    window.switch_to_timer()
+    window._timer_page_start_stop_shortcut.activated.emit()
+    assert window.timer_page.is_running is True
+    window._timer_page_pause_resume_shortcut.activated.emit()
+    assert window.timer_page.is_running is False
 
 
 def test_management_save_validates_non_empty_fields(

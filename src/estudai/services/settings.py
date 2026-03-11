@@ -30,6 +30,12 @@ SETTINGS_KEY_HOTKEY_PAUSE_RESUME = "hotkeys/pause_resume"
 SETTINGS_KEY_HOTKEY_START_STOP = "hotkeys/start_stop"
 SETTINGS_KEY_HOTKEY_MARK_CORRECT = "hotkeys/mark_correct"
 SETTINGS_KEY_HOTKEY_MARK_WRONG = "hotkeys/mark_wrong"
+SETTINGS_KEY_IN_APP_SHORTCUT_PAUSE_RESUME = "app_shortcuts/pause_resume"
+SETTINGS_KEY_IN_APP_SHORTCUT_START_STOP = "app_shortcuts/start_stop"
+SETTINGS_KEY_IN_APP_SHORTCUT_MARK_CORRECT = "app_shortcuts/mark_correct"
+SETTINGS_KEY_IN_APP_SHORTCUT_MARK_WRONG = "app_shortcuts/mark_wrong"
+SETTINGS_KEY_IN_APP_SHORTCUT_TOGGLE_FULLSCREEN = "app_shortcuts/toggle_fullscreen"
+SETTINGS_KEY_IN_APP_SHORTCUT_EXIT_FULLSCREEN = "app_shortcuts/exit_fullscreen"
 ALLOWED_SOUND_EXTENSIONS = {".mp3", ".wav"}
 
 
@@ -45,6 +51,27 @@ class WrongAnswerReinsertionMode(StrEnum):
 
     AFTER_X_FLASHCARDS = "after_x_flashcards"
     PUSH_TO_END = "push_to_end"
+
+
+class InAppShortcutAction(StrEnum):
+    """Supported app-scoped shortcut actions handled inside the window."""
+
+    PAUSE_RESUME = "pause_resume"
+    START_STOP = "start_stop"
+    MARK_CORRECT = "mark_correct"
+    MARK_WRONG = "mark_wrong"
+    TOGGLE_FULLSCREEN = "toggle_fullscreen"
+    EXIT_FULLSCREEN = "exit_fullscreen"
+
+
+DEFAULT_IN_APP_SHORTCUT_BINDINGS: dict[InAppShortcutAction, str] = {
+    InAppShortcutAction.PAUSE_RESUME: "Space",
+    InAppShortcutAction.START_STOP: "Enter",
+    InAppShortcutAction.MARK_CORRECT: "Up",
+    InAppShortcutAction.MARK_WRONG: "Down",
+    InAppShortcutAction.TOGGLE_FULLSCREEN: "F11",
+    InAppShortcutAction.EXIT_FULLSCREEN: "Escape",
+}
 
 
 @dataclass(frozen=True)
@@ -68,6 +95,24 @@ class AppSettings:
     start_stop_hotkey: str = DEFAULT_HOTKEY_BINDINGS[HotkeyAction.START_STOP]
     mark_correct_hotkey: str = DEFAULT_HOTKEY_BINDINGS[HotkeyAction.MARK_CORRECT]
     mark_wrong_hotkey: str = DEFAULT_HOTKEY_BINDINGS[HotkeyAction.MARK_WRONG]
+    in_app_pause_resume_shortcut: str = DEFAULT_IN_APP_SHORTCUT_BINDINGS[
+        InAppShortcutAction.PAUSE_RESUME
+    ]
+    in_app_start_stop_shortcut: str = DEFAULT_IN_APP_SHORTCUT_BINDINGS[
+        InAppShortcutAction.START_STOP
+    ]
+    in_app_mark_correct_shortcut: str = DEFAULT_IN_APP_SHORTCUT_BINDINGS[
+        InAppShortcutAction.MARK_CORRECT
+    ]
+    in_app_mark_wrong_shortcut: str = DEFAULT_IN_APP_SHORTCUT_BINDINGS[
+        InAppShortcutAction.MARK_WRONG
+    ]
+    in_app_toggle_fullscreen_shortcut: str = DEFAULT_IN_APP_SHORTCUT_BINDINGS[
+        InAppShortcutAction.TOGGLE_FULLSCREEN
+    ]
+    in_app_exit_fullscreen_shortcut: str = DEFAULT_IN_APP_SHORTCUT_BINDINGS[
+        InAppShortcutAction.EXIT_FULLSCREEN
+    ]
 
 
 def get_default_notification_sound_path() -> str:
@@ -201,6 +246,22 @@ def hotkey_bindings_from_settings(settings: AppSettings) -> dict[HotkeyAction, s
     }
 
 
+def in_app_shortcut_bindings_from_settings(
+    settings: AppSettings,
+) -> dict[InAppShortcutAction, str]:
+    """Return the persisted in-app shortcut bindings keyed by action."""
+    return {
+        InAppShortcutAction.PAUSE_RESUME: settings.in_app_pause_resume_shortcut,
+        InAppShortcutAction.START_STOP: settings.in_app_start_stop_shortcut,
+        InAppShortcutAction.MARK_CORRECT: settings.in_app_mark_correct_shortcut,
+        InAppShortcutAction.MARK_WRONG: settings.in_app_mark_wrong_shortcut,
+        InAppShortcutAction.TOGGLE_FULLSCREEN: (
+            settings.in_app_toggle_fullscreen_shortcut
+        ),
+        InAppShortcutAction.EXIT_FULLSCREEN: settings.in_app_exit_fullscreen_shortcut,
+    }
+
+
 def load_app_settings() -> AppSettings:
     """Load current app settings from QSettings.
 
@@ -312,6 +373,48 @@ def load_app_settings() -> AppSettings:
             ),
             default=AppSettings.mark_wrong_hotkey,
         ),
+        in_app_pause_resume_shortcut=_normalize_text(
+            qsettings.value(
+                SETTINGS_KEY_IN_APP_SHORTCUT_PAUSE_RESUME,
+                AppSettings.in_app_pause_resume_shortcut,
+            ),
+            default=AppSettings.in_app_pause_resume_shortcut,
+        ),
+        in_app_start_stop_shortcut=_normalize_text(
+            qsettings.value(
+                SETTINGS_KEY_IN_APP_SHORTCUT_START_STOP,
+                AppSettings.in_app_start_stop_shortcut,
+            ),
+            default=AppSettings.in_app_start_stop_shortcut,
+        ),
+        in_app_mark_correct_shortcut=_normalize_text(
+            qsettings.value(
+                SETTINGS_KEY_IN_APP_SHORTCUT_MARK_CORRECT,
+                AppSettings.in_app_mark_correct_shortcut,
+            ),
+            default=AppSettings.in_app_mark_correct_shortcut,
+        ),
+        in_app_mark_wrong_shortcut=_normalize_text(
+            qsettings.value(
+                SETTINGS_KEY_IN_APP_SHORTCUT_MARK_WRONG,
+                AppSettings.in_app_mark_wrong_shortcut,
+            ),
+            default=AppSettings.in_app_mark_wrong_shortcut,
+        ),
+        in_app_toggle_fullscreen_shortcut=_normalize_text(
+            qsettings.value(
+                SETTINGS_KEY_IN_APP_SHORTCUT_TOGGLE_FULLSCREEN,
+                AppSettings.in_app_toggle_fullscreen_shortcut,
+            ),
+            default=AppSettings.in_app_toggle_fullscreen_shortcut,
+        ),
+        in_app_exit_fullscreen_shortcut=_normalize_text(
+            qsettings.value(
+                SETTINGS_KEY_IN_APP_SHORTCUT_EXIT_FULLSCREEN,
+                AppSettings.in_app_exit_fullscreen_shortcut,
+            ),
+            default=AppSettings.in_app_exit_fullscreen_shortcut,
+        ),
     )
 
 
@@ -417,6 +520,48 @@ def save_app_settings(settings: AppSettings) -> None:
         _normalize_text(
             settings.mark_wrong_hotkey,
             default=AppSettings.mark_wrong_hotkey,
+        ),
+    )
+    qsettings.setValue(
+        SETTINGS_KEY_IN_APP_SHORTCUT_PAUSE_RESUME,
+        _normalize_text(
+            settings.in_app_pause_resume_shortcut,
+            default=AppSettings.in_app_pause_resume_shortcut,
+        ),
+    )
+    qsettings.setValue(
+        SETTINGS_KEY_IN_APP_SHORTCUT_START_STOP,
+        _normalize_text(
+            settings.in_app_start_stop_shortcut,
+            default=AppSettings.in_app_start_stop_shortcut,
+        ),
+    )
+    qsettings.setValue(
+        SETTINGS_KEY_IN_APP_SHORTCUT_MARK_CORRECT,
+        _normalize_text(
+            settings.in_app_mark_correct_shortcut,
+            default=AppSettings.in_app_mark_correct_shortcut,
+        ),
+    )
+    qsettings.setValue(
+        SETTINGS_KEY_IN_APP_SHORTCUT_MARK_WRONG,
+        _normalize_text(
+            settings.in_app_mark_wrong_shortcut,
+            default=AppSettings.in_app_mark_wrong_shortcut,
+        ),
+    )
+    qsettings.setValue(
+        SETTINGS_KEY_IN_APP_SHORTCUT_TOGGLE_FULLSCREEN,
+        _normalize_text(
+            settings.in_app_toggle_fullscreen_shortcut,
+            default=AppSettings.in_app_toggle_fullscreen_shortcut,
+        ),
+    )
+    qsettings.setValue(
+        SETTINGS_KEY_IN_APP_SHORTCUT_EXIT_FULLSCREEN,
+        _normalize_text(
+            settings.in_app_exit_fullscreen_shortcut,
+            default=AppSettings.in_app_exit_fullscreen_shortcut,
         ),
     )
     qsettings.sync()

@@ -5,12 +5,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QUrl, Signal
+from PySide6.QtCore import QEvent, Qt, QUrl, Signal
 from PySide6.QtGui import QFont, QKeySequence
 from PySide6.QtWidgets import (
     QComboBox,
     QCheckBox,
     QFileDialog,
+    QFrame,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -18,7 +19,10 @@ from PySide6.QtWidgets import (
     QKeySequenceEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QSpinBox,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -29,14 +33,19 @@ except ImportError:  # pragma: no cover - depends on system multimedia libraries
     QAudioOutput = None  # type: ignore[assignment]
     QMediaPlayer = None  # type: ignore[assignment]
 
-from estudai.services.hotkeys import normalize_hotkey_bindings
+from estudai.services.hotkeys import (
+    normalize_hotkey_binding,
+    normalize_hotkey_bindings,
+)
 from estudai.services.settings import (
     AppSettings,
+    InAppShortcutAction,
     WrongAnswerCompletionMode,
     WrongAnswerReinsertionMode,
     copy_notification_sound_file,
     get_default_notification_sound_path,
     hotkey_bindings_from_settings,
+    in_app_shortcut_bindings_from_settings,
     load_app_settings,
     save_app_settings,
 )
@@ -72,6 +81,7 @@ class SettingsPage(QWidget):
 
     def _build_ui(self) -> None:
         """Build the settings UI layout."""
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(12)
@@ -84,38 +94,88 @@ class SettingsPage(QWidget):
         layout.addWidget(title)
 
         self.description_label = QLabel(
-            "Configure timer behavior and flashcard popup defaults. "
-            "Use Save to apply changes or Cancel to discard edits."
+            "Configure study behavior, notification audio, and both in-app and "
+            "global shortcuts. Use Save to apply changes or Cancel to discard edits."
         )
         self.description_label.setWordWrap(True)
         set_muted_label_color(self.description_label)
         layout.addWidget(self.description_label)
 
-        timer_group = QGroupBox("Timer and Flashcard Settings")
+        self.settings_tab_widget = QTabWidget()
+        self.settings_tab_widget.setDocumentMode(True)
+        self.settings_tab_widget.setMinimumSize(0, 0)
+        self.settings_tab_widget.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+        self.settings_tab_widget.addTab(
+            self._build_scroll_tab(self._build_study_tab()),
+            "Study",
+        )
+        self.settings_tab_widget.addTab(
+            self._build_scroll_tab(self._build_flashcards_tab()),
+            "Flashcards",
+        )
+        self.settings_tab_widget.addTab(
+            self._build_scroll_tab(self._build_sound_tab()),
+            "Sound",
+        )
+        self.settings_tab_widget.addTab(
+            self._build_scroll_tab(self._build_shortcuts_tab()),
+            "Shortcuts",
+        )
+        layout.addWidget(self.settings_tab_widget, 1)
+
+        footer_layout = QHBoxLayout()
+        footer_layout.addStretch()
+        self.cancel_button = QPushButton("Cancel")
+        self.save_button = QPushButton("Save")
+        footer_layout.addWidget(self.cancel_button)
+        footer_layout.addWidget(self.save_button)
+        layout.addLayout(footer_layout)
+
+        self._muted_labels = (
+            self.description_label,
+            self.notification_sound_label,
+            self.in_app_shortcut_help_label,
+            self.hotkey_help_label,
+        )
+
+    def _build_study_tab(self) -> QWidget:
+        """Build the tab that contains timer and popup timing settings."""
+        content = self._create_tab_content_widget()
+        content_layout = content.layout()
+
+        timer_group = QGroupBox("Timer")
         timer_form = QFormLayout(timer_group)
+        self._configure_form_layout(timer_form)
 
         self.timer_duration_spinbox = QSpinBox()
         self.timer_duration_spinbox.setRange(0, 99 * 3600)
         self.timer_duration_spinbox.setSuffix(" s")
         timer_form.addRow("Timer duration:", self.timer_duration_spinbox)
+        content_layout.addWidget(timer_group)
+
+        flashcard_group = QGroupBox("Flashcard Display")
+        flashcard_form = QFormLayout(flashcard_group)
+        self._configure_form_layout(flashcard_form)
 
         self.flashcard_probability_spinbox = QSpinBox()
         self.flashcard_probability_spinbox.setRange(0, 100)
         self.flashcard_probability_spinbox.setSuffix(" %")
-        timer_form.addRow(
-            "Probability of showing flashcard:",
+        flashcard_form.addRow(
+            "Show flashcard probability:",
             self.flashcard_probability_spinbox,
         )
-
         self.flashcard_random_order_checkbox = QCheckBox(
             "Show flashcards in random order"
         )
-        timer_form.addRow("", self.flashcard_random_order_checkbox)
+        flashcard_form.addRow("", self.flashcard_random_order_checkbox)
 
         self.question_duration_spinbox = QSpinBox()
         self.question_duration_spinbox.setRange(1, 3600)
         self.question_duration_spinbox.setSuffix(" s")
-        timer_form.addRow(
+        flashcard_form.addRow(
             "Question display duration:",
             self.question_duration_spinbox,
         )
@@ -123,14 +183,22 @@ class SettingsPage(QWidget):
         self.answer_duration_spinbox = QSpinBox()
         self.answer_duration_spinbox.setRange(1, 3600)
         self.answer_duration_spinbox.setSuffix(" s")
-        timer_form.addRow(
+        flashcard_form.addRow(
             "Answer display duration:",
             self.answer_duration_spinbox,
         )
-        layout.addWidget(timer_group)
+        content_layout.addWidget(flashcard_group)
+        content_layout.addStretch()
+        return content
+
+    def _build_flashcards_tab(self) -> QWidget:
+        """Build the tab that contains wrong-answer retry rules."""
+        content = self._create_tab_content_widget()
+        content_layout = content.layout()
 
         retry_group = QGroupBox("Wrong-Answer Retry Rules")
         retry_form = QFormLayout(retry_group)
+        self._configure_form_layout(retry_form)
 
         self.wrong_answer_completion_mode_combo = QComboBox()
         self.wrong_answer_completion_mode_combo.addItem(
@@ -166,7 +234,14 @@ class SettingsPage(QWidget):
             "After X value:",
             self.wrong_answer_reinsert_after_spinbox,
         )
-        layout.addWidget(retry_group)
+        content_layout.addWidget(retry_group)
+        content_layout.addStretch()
+        return content
+
+    def _build_sound_tab(self) -> QWidget:
+        """Build the tab that contains notification sound controls."""
+        content = self._create_tab_content_widget()
+        content_layout = content.layout()
 
         sound_group = QGroupBox("Notification Sound")
         sound_layout = QVBoxLayout(sound_group)
@@ -181,54 +256,126 @@ class SettingsPage(QWidget):
         sound_buttons_layout.addWidget(self.test_sound_button)
         sound_buttons_layout.addStretch()
         sound_layout.addLayout(sound_buttons_layout)
-        layout.addWidget(sound_group)
+        content_layout.addWidget(sound_group)
+        content_layout.addStretch()
+        return content
+
+    def _build_shortcuts_tab(self) -> QWidget:
+        """Build the tab that contains local and global shortcut controls."""
+        content = self._create_tab_content_widget()
+        content_layout = content.layout()
+
+        in_app_group = QGroupBox("In-App Shortcuts")
+        in_app_form = QFormLayout(in_app_group)
+        self._configure_form_layout(in_app_form)
+        self.in_app_pause_resume_shortcut_edit = self._create_shortcut_editor()
+        self.in_app_start_stop_shortcut_edit = self._create_shortcut_editor()
+        self.in_app_mark_correct_shortcut_edit = self._create_shortcut_editor()
+        self.in_app_mark_wrong_shortcut_edit = self._create_shortcut_editor()
+        self.in_app_toggle_fullscreen_shortcut_edit = self._create_shortcut_editor()
+        self.in_app_exit_fullscreen_shortcut_edit = self._create_shortcut_editor()
+        in_app_form.addRow(
+            "Pause / Resume:",
+            self.in_app_pause_resume_shortcut_edit,
+        )
+        in_app_form.addRow(
+            "Start / Stop:",
+            self.in_app_start_stop_shortcut_edit,
+        )
+        in_app_form.addRow(
+            "Mark correct:",
+            self.in_app_mark_correct_shortcut_edit,
+        )
+        in_app_form.addRow(
+            "Mark wrong:",
+            self.in_app_mark_wrong_shortcut_edit,
+        )
+        in_app_form.addRow(
+            "Toggle fullscreen:",
+            self.in_app_toggle_fullscreen_shortcut_edit,
+        )
+        in_app_form.addRow(
+            "Exit fullscreen:",
+            self.in_app_exit_fullscreen_shortcut_edit,
+        )
+        self.in_app_shortcut_help_label = QLabel(
+            "These only work while the app is focused. Start / Stop keeps "
+            "Enter and Return synchronized."
+        )
+        self.in_app_shortcut_help_label.setWordWrap(True)
+        set_muted_label_color(self.in_app_shortcut_help_label)
+        in_app_form.addRow("", self.in_app_shortcut_help_label)
+        content_layout.addWidget(in_app_group)
 
         hotkey_group = QGroupBox("Global Hotkeys")
         hotkey_form = QFormLayout(hotkey_group)
-        self.pause_resume_hotkey_edit = QKeySequenceEdit()
-        self.pause_resume_hotkey_edit.setClearButtonEnabled(True)
-        self.start_stop_hotkey_edit = QKeySequenceEdit()
-        self.start_stop_hotkey_edit.setClearButtonEnabled(True)
-        self.mark_correct_hotkey_edit = QKeySequenceEdit()
-        self.mark_correct_hotkey_edit.setClearButtonEnabled(True)
-        self.mark_wrong_hotkey_edit = QKeySequenceEdit()
-        self.mark_wrong_hotkey_edit.setClearButtonEnabled(True)
-        for editor in (
-            self.pause_resume_hotkey_edit,
-            self.start_stop_hotkey_edit,
-            self.mark_correct_hotkey_edit,
-            self.mark_wrong_hotkey_edit,
-        ):
-            maximum_sequence_length = getattr(editor, "setMaximumSequenceLength", None)
-            if callable(maximum_sequence_length):
-                maximum_sequence_length(1)
+        self._configure_form_layout(hotkey_form)
+        self.pause_resume_hotkey_edit = self._create_shortcut_editor()
+        self.start_stop_hotkey_edit = self._create_shortcut_editor()
+        self.mark_correct_hotkey_edit = self._create_shortcut_editor()
+        self.mark_wrong_hotkey_edit = self._create_shortcut_editor()
         hotkey_form.addRow("Pause / Resume:", self.pause_resume_hotkey_edit)
         hotkey_form.addRow("Start / Stop:", self.start_stop_hotkey_edit)
         hotkey_form.addRow("Mark correct:", self.mark_correct_hotkey_edit)
         hotkey_form.addRow("Mark wrong:", self.mark_wrong_hotkey_edit)
         self.hotkey_help_label = QLabel(
-            "Bindings are system-wide. " "Choose single key combinations only."
+            "Bindings are system-wide. Choose single key combinations only."
         )
         self.hotkey_help_label.setWordWrap(True)
         set_muted_label_color(self.hotkey_help_label)
         hotkey_form.addRow("", self.hotkey_help_label)
-        layout.addWidget(hotkey_group)
+        content_layout.addWidget(hotkey_group)
+        content_layout.addStretch()
+        return content
 
-        footer_layout = QHBoxLayout()
-        footer_layout.addStretch()
-        self.cancel_button = QPushButton("Cancel")
-        self.save_button = QPushButton("Save")
-        footer_layout.addWidget(self.cancel_button)
-        footer_layout.addWidget(self.save_button)
-        layout.addLayout(footer_layout)
-        layout.addStretch()
+    def _create_tab_content_widget(self) -> QWidget:
+        """Create the inner widget hosted inside one scrollable settings tab."""
+        content = QWidget()
+        content.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Minimum,
+        )
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(4, 4, 4, 4)
+        content_layout.setSpacing(12)
+        return content
+
+    def _build_scroll_tab(self, content: QWidget) -> QScrollArea:
+        """Wrap one tab content widget in an inner scroll area."""
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_area.setWidget(content)
+        scroll_area.setMinimumSize(0, 0)
+        scroll_area.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+        return scroll_area
+
+    def _configure_form_layout(self, form_layout: QFormLayout) -> None:
+        """Apply a responsive configuration shared by form-based groups."""
+        form_layout.setFieldGrowthPolicy(
+            QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
+        )
+        form_layout.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        form_layout.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
+
+    def _create_shortcut_editor(self) -> QKeySequenceEdit:
+        """Create a one-combination shortcut editor with a clear button."""
+        editor = QKeySequenceEdit()
+        editor.setClearButtonEnabled(True)
+        maximum_sequence_length = getattr(editor, "setMaximumSequenceLength", None)
+        if callable(maximum_sequence_length):
+            maximum_sequence_length(1)
+        return editor
 
     def changeEvent(self, event: QEvent) -> None:  # noqa: N802
         """Refresh palette-driven colors when theme/palette changes."""
         if event.type() in (QEvent.PaletteChange, QEvent.ApplicationPaletteChange):
-            set_muted_label_color(self.description_label)
-            set_muted_label_color(self.notification_sound_label)
-            set_muted_label_color(self.hotkey_help_label)
+            for label in self._muted_labels:
+                set_muted_label_color(label)
         super().changeEvent(event)
 
     def _connect_signals(self) -> None:
@@ -279,6 +426,24 @@ class SettingsPage(QWidget):
         self.mark_wrong_hotkey_edit.setKeySequence(
             QKeySequence(settings.mark_wrong_hotkey)
         )
+        self.in_app_pause_resume_shortcut_edit.setKeySequence(
+            QKeySequence(settings.in_app_pause_resume_shortcut)
+        )
+        self.in_app_start_stop_shortcut_edit.setKeySequence(
+            QKeySequence(settings.in_app_start_stop_shortcut)
+        )
+        self.in_app_mark_correct_shortcut_edit.setKeySequence(
+            QKeySequence(settings.in_app_mark_correct_shortcut)
+        )
+        self.in_app_mark_wrong_shortcut_edit.setKeySequence(
+            QKeySequence(settings.in_app_mark_wrong_shortcut)
+        )
+        self.in_app_toggle_fullscreen_shortcut_edit.setKeySequence(
+            QKeySequence(settings.in_app_toggle_fullscreen_shortcut)
+        )
+        self.in_app_exit_fullscreen_shortcut_edit.setKeySequence(
+            QKeySequence(settings.in_app_exit_fullscreen_shortcut)
+        )
         self._update_wrong_answer_reinsert_after_enabled_state()
         self._update_sound_summary()
 
@@ -297,7 +462,9 @@ class SettingsPage(QWidget):
         return AppSettings(
             timer_duration_seconds=self.timer_duration_spinbox.value(),
             flashcard_probability_percent=self.flashcard_probability_spinbox.value(),
-            flashcard_random_order_enabled=self.flashcard_random_order_checkbox.isChecked(),
+            flashcard_random_order_enabled=(
+                self.flashcard_random_order_checkbox.isChecked()
+            ),
             question_display_duration_seconds=self.question_duration_spinbox.value(),
             answer_display_duration_seconds=self.answer_duration_spinbox.value(),
             notification_sound_path=self._notification_sound_path,
@@ -307,11 +474,31 @@ class SettingsPage(QWidget):
             wrong_answer_reinsertion_mode=WrongAnswerReinsertionMode(
                 self.wrong_answer_reinsertion_mode_combo.currentData()
             ),
-            wrong_answer_reinsert_after_count=self.wrong_answer_reinsert_after_spinbox.value(),
+            wrong_answer_reinsert_after_count=(
+                self.wrong_answer_reinsert_after_spinbox.value()
+            ),
             pause_resume_hotkey=self.pause_resume_hotkey_edit.keySequence().toString(),
             start_stop_hotkey=self.start_stop_hotkey_edit.keySequence().toString(),
             mark_correct_hotkey=self.mark_correct_hotkey_edit.keySequence().toString(),
             mark_wrong_hotkey=self.mark_wrong_hotkey_edit.keySequence().toString(),
+            in_app_pause_resume_shortcut=(
+                self.in_app_pause_resume_shortcut_edit.keySequence().toString()
+            ),
+            in_app_start_stop_shortcut=(
+                self.in_app_start_stop_shortcut_edit.keySequence().toString()
+            ),
+            in_app_mark_correct_shortcut=(
+                self.in_app_mark_correct_shortcut_edit.keySequence().toString()
+            ),
+            in_app_mark_wrong_shortcut=(
+                self.in_app_mark_wrong_shortcut_edit.keySequence().toString()
+            ),
+            in_app_toggle_fullscreen_shortcut=(
+                self.in_app_toggle_fullscreen_shortcut_edit.keySequence().toString()
+            ),
+            in_app_exit_fullscreen_shortcut=(
+                self.in_app_exit_fullscreen_shortcut_edit.keySequence().toString()
+            ),
         )
 
     def _persist_settings(self) -> None:
@@ -412,6 +599,7 @@ class SettingsPage(QWidget):
 
     def _validate_settings_form(self) -> str | None:
         """Return a validation message when the form contains invalid raw input."""
+        settings = self._collect_settings()
         spinboxes = [
             (
                 self.timer_duration_spinbox,
@@ -451,13 +639,49 @@ class SettingsPage(QWidget):
                 return f"{label} must be between {expected_range}."
 
         try:
-            normalize_hotkey_bindings(
-                hotkey_bindings_from_settings(self._collect_settings())
+            self._normalize_unique_shortcut_bindings(
+                in_app_shortcut_bindings_from_settings(settings),
+                group_label="In-app shortcuts",
             )
+            normalize_hotkey_bindings(hotkey_bindings_from_settings(settings))
         except ValueError as error:
             return str(error)
 
         return None
+
+    def _normalize_unique_shortcut_bindings(
+        self,
+        bindings: dict[InAppShortcutAction, str],
+        *,
+        group_label: str,
+    ) -> dict[InAppShortcutAction, str]:
+        """Normalize one shortcut group and reject duplicate assignments."""
+        normalized_bindings: dict[InAppShortcutAction, str] = {}
+        owners_by_binding: dict[str, InAppShortcutAction] = {}
+        singular_group_label = (
+            group_label[:-1] if group_label.endswith("s") else group_label
+        )
+        for action, binding in bindings.items():
+            try:
+                normalized_binding = normalize_hotkey_binding(binding)
+            except ValueError as error:
+                message = str(error)
+                if message.startswith("Hotkeys"):
+                    message = message.replace("Hotkeys", group_label, 1)
+                elif message.startswith("Hotkey"):
+                    message = message.replace("Hotkey", singular_group_label, 1)
+                raise ValueError(message) from error
+            owner = owners_by_binding.get(normalized_binding)
+            if owner is not None:
+                msg = (
+                    f"{group_label} must be unique. "
+                    f"'{binding}' is assigned to both '{owner.value}' and "
+                    f"'{action.value}'."
+                )
+                raise ValueError(msg)
+            normalized_bindings[action] = normalized_binding
+            owners_by_binding[normalized_binding] = action
+        return normalized_bindings
 
     def _save_settings_directly(self, settings: AppSettings) -> None:
         """Persist settings when no external save orchestrator is provided."""

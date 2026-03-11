@@ -66,11 +66,14 @@ from estudai.services.hotkeys import (
     GlobalHotkeyService,
     HotkeyAction,
     HotkeyRegistrationError,
+    normalize_hotkey_binding,
 )
 from estudai.services.settings import (
     AppSettings,
+    InAppShortcutAction,
     get_default_notification_sound_path,
     hotkey_bindings_from_settings,
+    in_app_shortcut_bindings_from_settings,
     load_app_settings,
     save_app_settings,
 )
@@ -162,6 +165,7 @@ class MainWindow(QMainWindow):
             self._flashcard_sound_player.setAudioOutput(self._flashcard_sound_output)
         self.setWindowTitle("Estudai!")
         self.setGeometry(100, 100, 900, 650)
+        app_settings = load_app_settings()
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -172,8 +176,7 @@ class MainWindow(QMainWindow):
         self._build_sidebar(root_layout)
         self._build_content_area(root_layout)
         self._configure_window_shortcuts()
-
-        app_settings = load_app_settings()
+        self._apply_in_app_shortcut_bindings(app_settings)
         self.timer_page = TimerPage(
             default_duration_seconds=app_settings.timer_duration_seconds
         )
@@ -340,39 +343,71 @@ class MainWindow(QMainWindow):
 
     def _configure_window_shortcuts(self) -> None:
         """Register app-scoped shortcuts that should work regardless of focus."""
-        self._timer_page_pause_resume_shortcut = QShortcut(QKeySequence("Space"), self)
-        self._timer_page_pause_resume_shortcut.setContext(Qt.ApplicationShortcut)
-        self._timer_page_pause_resume_shortcut.activated.connect(
+        self._timer_page_pause_resume_shortcut = self._create_application_shortcut(
             self._trigger_timer_page_pause_resume
         )
-
-        self._timer_page_start_stop_shortcuts = [
-            QShortcut(QKeySequence("Return"), self),
-            QShortcut(QKeySequence("Enter"), self),
-        ]
-        for shortcut in self._timer_page_start_stop_shortcuts:
-            shortcut.setContext(Qt.ApplicationShortcut)
-            shortcut.activated.connect(self._trigger_timer_page_start_stop)
-
-        self._timer_page_mark_correct_shortcut = QShortcut(QKeySequence("Up"), self)
-        self._timer_page_mark_correct_shortcut.setContext(Qt.ApplicationShortcut)
-        self._timer_page_mark_correct_shortcut.activated.connect(
+        self._timer_page_start_stop_shortcut = self._create_application_shortcut(
+            self._trigger_timer_page_start_stop
+        )
+        self._timer_page_mark_correct_shortcut = self._create_application_shortcut(
             self._trigger_timer_page_mark_correct
         )
-
-        self._timer_page_mark_wrong_shortcut = QShortcut(QKeySequence("Down"), self)
-        self._timer_page_mark_wrong_shortcut.setContext(Qt.ApplicationShortcut)
-        self._timer_page_mark_wrong_shortcut.activated.connect(
+        self._timer_page_mark_wrong_shortcut = self._create_application_shortcut(
             self._trigger_timer_page_mark_wrong
         )
+        self._toggle_fullscreen_shortcut = self._create_application_shortcut(
+            self.toggle_fullscreen
+        )
+        self._exit_fullscreen_shortcut = self._create_application_shortcut(
+            self.exit_fullscreen
+        )
 
-        self._toggle_fullscreen_shortcut = QShortcut(QKeySequence("F11"), self)
-        self._toggle_fullscreen_shortcut.setContext(Qt.ApplicationShortcut)
-        self._toggle_fullscreen_shortcut.activated.connect(self.toggle_fullscreen)
+    def _create_application_shortcut(self, callback: object) -> QShortcut:
+        """Create one app-scoped shortcut with no binding assigned yet."""
+        shortcut = QShortcut(QKeySequence(), self)
+        shortcut.setContext(Qt.ApplicationShortcut)
+        shortcut.activated.connect(callback)
+        return shortcut
 
-        self._exit_fullscreen_shortcut = QShortcut(QKeySequence("Escape"), self)
-        self._exit_fullscreen_shortcut.setContext(Qt.ApplicationShortcut)
-        self._exit_fullscreen_shortcut.activated.connect(self.exit_fullscreen)
+    def _apply_in_app_shortcut_bindings(self, settings: AppSettings) -> None:
+        """Apply persisted in-app shortcut bindings to the active window."""
+        bindings = in_app_shortcut_bindings_from_settings(settings)
+        self._timer_page_pause_resume_shortcut.setKey(
+            QKeySequence(bindings[InAppShortcutAction.PAUSE_RESUME])
+        )
+        self._timer_page_start_stop_shortcut.setKeys(
+            self._start_stop_shortcut_sequences(
+                bindings[InAppShortcutAction.START_STOP]
+            )
+        )
+        self._timer_page_mark_correct_shortcut.setKey(
+            QKeySequence(bindings[InAppShortcutAction.MARK_CORRECT])
+        )
+        self._timer_page_mark_wrong_shortcut.setKey(
+            QKeySequence(bindings[InAppShortcutAction.MARK_WRONG])
+        )
+        self._toggle_fullscreen_shortcut.setKey(
+            QKeySequence(bindings[InAppShortcutAction.TOGGLE_FULLSCREEN])
+        )
+        self._exit_fullscreen_shortcut.setKey(
+            QKeySequence(bindings[InAppShortcutAction.EXIT_FULLSCREEN])
+        )
+
+    def _start_stop_shortcut_sequences(self, binding: str) -> list[QKeySequence]:
+        """Return the start/stop shortcut list, keeping Enter and Return aligned."""
+        normalized_binding = normalize_hotkey_binding(binding)
+        primary_sequence = QKeySequence(binding)
+        primary_binding = primary_sequence.toString()
+        sequences = [primary_sequence]
+        if normalized_binding.endswith("enter"):
+            if "+" in primary_binding:
+                prefix, _separator, key_name = primary_binding.rpartition("+")
+                alias_key_name = "Return" if key_name == "Enter" else "Enter"
+                alias_binding = f"{prefix}+{alias_key_name}"
+            else:
+                alias_binding = "Return" if primary_binding == "Enter" else "Enter"
+            sequences.append(QKeySequence(alias_binding))
+        return sequences
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         """Resize sidebar width proportionally with window size."""
@@ -566,6 +601,7 @@ class MainWindow(QMainWindow):
                 hotkey_bindings_from_settings(settings),
                 self._hotkey_action_callbacks(),
             )
+        self._apply_in_app_shortcut_bindings(settings)
         save_app_settings(settings)
 
     def _handle_global_hotkey_action_requested(self, action_value: str) -> None:
