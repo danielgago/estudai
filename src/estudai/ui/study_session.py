@@ -67,6 +67,7 @@ class StudySessionController:
         self,
         flashcards: list[Flashcard],
         *,
+        initial_counters: list[SessionCardCounters] | None = None,
         study_order_mode: StudyOrderMode,
         queue_start_shuffled: bool,
         wrong_answer_completion_mode: WrongAnswerCompletionMode,
@@ -76,25 +77,59 @@ class StudySessionController:
     ) -> bool:
         """Start a new session for the provided flashcard snapshot."""
         self.flashcards = list(flashcards)
-        self.card_states = [StudyCardState.PENDING for _ in self.flashcards]
-        self.card_counters = [SessionCardCounters() for _ in self.flashcards]
-        self._choice_func = choice_func
-        self.current_flashcard_index = None
-        self.study_order_mode = study_order_mode
         self.wrong_answer_completion_mode = wrong_answer_completion_mode
         self.wrong_answer_reinsertion_mode = wrong_answer_reinsertion_mode
         self.wrong_answer_reinsert_after_count = max(
             0, int(wrong_answer_reinsert_after_count)
         )
+        self.card_counters = self._build_initial_counters(
+            len(self.flashcards),
+            initial_counters=initial_counters,
+        )
+        self.card_states = [
+            self._initial_state_for(index) for index in range(len(self.flashcards))
+        ]
+        self._choice_func = choice_func
+        self.current_flashcard_index = None
+        self.study_order_mode = study_order_mode
         self._upcoming_indexes = (
-            list(range(len(self.flashcards)))
+            [
+                index
+                for index, state in enumerate(self.card_states)
+                if state is not StudyCardState.COMPLETED
+            ]
             if self.study_order_mode is StudyOrderMode.QUEUE
             else []
         )
         if queue_start_shuffled and self.study_order_mode is StudyOrderMode.QUEUE:
             self._upcoming_indexes = self._shuffled_indexes(self._upcoming_indexes)
-        self.active = bool(self.flashcards)
+        self.active = any(
+            state is not StudyCardState.COMPLETED for state in self.card_states
+        )
         return self.active
+
+    def _build_initial_counters(
+        self,
+        flashcard_count: int,
+        *,
+        initial_counters: list[SessionCardCounters] | None,
+    ) -> list[SessionCardCounters]:
+        """Return normalized counters for the starting flashcard snapshot."""
+        if initial_counters is None:
+            return [SessionCardCounters() for _ in range(flashcard_count)]
+        normalized_counters = [
+            SessionCardCounters(
+                wrong_count=max(0, counter.wrong_count),
+                correct_count=max(0, counter.correct_count),
+            )
+            for counter in initial_counters[:flashcard_count]
+        ]
+        if len(normalized_counters) < flashcard_count:
+            normalized_counters.extend(
+                SessionCardCounters()
+                for _ in range(flashcard_count - len(normalized_counters))
+            )
+        return normalized_counters
 
     def reset(self) -> None:
         """Abort the current session and clear runtime-only state."""
@@ -298,12 +333,23 @@ class StudySessionController:
     def _is_completed(self, flashcard_index: int) -> bool:
         """Return whether the card satisfies the configured completion rule."""
         counters = self.card_counters[flashcard_index]
+        return self._is_completed_from_counters(counters)
+
+    def _is_completed_from_counters(self, counters: SessionCardCounters) -> bool:
+        """Return whether counters satisfy the configured completion rule."""
         if (
             self.wrong_answer_completion_mode
             is WrongAnswerCompletionMode.UNTIL_CORRECT_MORE_THAN_WRONG
         ):
             return counters.correct_count > counters.wrong_count
         return counters.correct_count >= 1
+
+    def _initial_state_for(self, flashcard_index: int) -> StudyCardState:
+        """Return the correct opening state for one flashcard."""
+        counters = self.card_counters[flashcard_index]
+        if self._is_completed_from_counters(counters):
+            return StudyCardState.COMPLETED
+        return self._pending_state_for(flashcard_index)
 
     def _pending_state_for(self, flashcard_index: int) -> StudyCardState:
         """Return the pending state for an incomplete card."""

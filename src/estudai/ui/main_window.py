@@ -78,6 +78,13 @@ from estudai.services.settings import (
     load_app_settings,
     save_app_settings,
 )
+from estudai.services.study_progress import (
+    FlashcardProgressEntry,
+    load_folder_progress,
+    prune_folder_progress,
+    reviewed_progress,
+    save_progress_entries,
+)
 from estudai.ui.utils import (
     NativeCheckboxDelegate,
     blend_colors,
@@ -100,7 +107,7 @@ from .navigation_icons import (
 )
 from .pages import ManagementPage, SettingsPage, TimerPage
 from .sidebar_folders import SidebarFolderController
-from .study_session import StudySessionController
+from .study_session import SessionCardCounters, StudySessionController
 
 
 class SidebarCheckboxDelegate(NativeCheckboxDelegate):
@@ -151,6 +158,7 @@ class MainWindow(QMainWindow):
         self.current_folder_id: str | None = None
         self.current_folder_name = "No folders selected"
         self._editing_folder_id: str | None = None
+        self._active_study_session_keys: list[tuple[str, str]] = []
         self._study_session = StudySessionController()
         self._pending_flashcard_score: str | None = None
         self._visible_flashcard: Flashcard | None = None
@@ -842,9 +850,11 @@ class MainWindow(QMainWindow):
         self._flashcard_sequence.sequence_paused = False
         self._reset_flashcard_sequence_order()
         self._pending_flashcard_score = None
+        session_keys = self._selected_study_session_keys()
         app_settings = load_app_settings()
         if not self._study_session.start(
             self.loaded_flashcards,
+            initial_counters=self._initial_study_session_counters(session_keys),
             study_order_mode=app_settings.flashcard_study_order_mode,
             queue_start_shuffled=app_settings.flashcard_queue_start_shuffled,
             wrong_answer_completion_mode=app_settings.wrong_answer_completion_mode,
@@ -852,9 +862,90 @@ class MainWindow(QMainWindow):
             wrong_answer_reinsert_after_count=app_settings.wrong_answer_reinsert_after_count,
             choice_func=random.choice,
         ):
+            QMessageBox.information(
+                self,
+                "Timer",
+                "All selected flashcards are already completed.",
+            )
             return False
+        self._active_study_session_keys = session_keys
         self._update_study_session_progress()
         return True
+
+    def _selected_study_session_keys(self) -> list[tuple[str, str]]:
+        """Return folder/card keys for the currently selected study scope."""
+        session_keys: list[tuple[str, str]] = []
+        for item in self._iter_sidebar_folder_items():
+            folder_id = item.data(Qt.UserRole)
+            if folder_id is None or item.checkState() != Qt.Checked:
+                continue
+            folder_flashcards = self.flashcards_by_folder.get(folder_id, [])
+            selected_indexes = self.selected_flashcard_indexes_by_folder.get(
+                folder_id,
+                set(range(len(folder_flashcards))),
+            )
+            for flashcard_index, flashcard in enumerate(folder_flashcards):
+                if flashcard_index not in selected_indexes or not flashcard.stable_id:
+                    continue
+                session_keys.append((folder_id, flashcard.stable_id))
+        return session_keys
+
+    def _initial_study_session_counters(
+        self,
+        session_keys: list[tuple[str, str]],
+    ) -> list[SessionCardCounters]:
+        """Return persisted counters aligned with the selected session order."""
+        progress_by_folder = {
+            folder_id: load_folder_progress(folder_id)
+            for folder_id in self.selected_folder_ids
+        }
+        counters: list[SessionCardCounters] = []
+        for folder_id, flashcard_id in session_keys:
+            flashcard_progress = progress_by_folder.get(folder_id, {}).get(flashcard_id)
+            counters.append(
+                SessionCardCounters(
+                    wrong_count=(
+                        flashcard_progress.wrong_count
+                        if flashcard_progress is not None
+                        else 0
+                    ),
+                    correct_count=(
+                        flashcard_progress.correct_count
+                        if flashcard_progress is not None
+                        else 0
+                    ),
+                )
+            )
+        return counters
+
+    def _persist_active_study_session_progress(
+        self,
+        session_indexes: list[int],
+    ) -> None:
+        """Persist counters for specific flashcards tracked in the session."""
+        if not session_indexes or not self._active_study_session_keys:
+            return
+        if len(self._active_study_session_keys) != len(
+            self._study_session.card_counters
+        ):
+            return
+        progress_entries: list[FlashcardProgressEntry] = []
+        for session_index in session_indexes:
+            if not (0 <= session_index < len(self._active_study_session_keys)):
+                continue
+            folder_id, flashcard_id = self._active_study_session_keys[session_index]
+            counters = self._study_session.card_counters[session_index]
+            progress_entries.append(
+                FlashcardProgressEntry(
+                    folder_id=folder_id,
+                    flashcard_id=flashcard_id,
+                    progress=reviewed_progress(
+                        counters.correct_count,
+                        counters.wrong_count,
+                    ),
+                )
+            )
+        save_progress_entries(progress_entries)
 
     def _update_study_session_progress(self) -> None:
         """Refresh visible study progress for the timer page."""
@@ -873,6 +964,7 @@ class MainWindow(QMainWindow):
         self._flashcard_sequence.sequence_paused = False
         self._reset_flashcard_sequence_order()
         self._study_session.reset()
+        self._active_study_session_keys = []
         self._pending_flashcard_score = None
         self._visible_flashcard = None
         self.timer_page.clear_session_progress()
@@ -1050,7 +1142,14 @@ class MainWindow(QMainWindow):
             )
         ):
             return
+        selected_score = self._pending_flashcard_score
+        session_flashcard_index = self._study_session.current_flashcard_index
         self._study_session.apply_current_score(self._pending_flashcard_score)
+        if (
+            selected_score in {"correct", "wrong"}
+            and session_flashcard_index is not None
+        ):
+            self._persist_active_study_session_progress([session_flashcard_index])
         self._advance_after_flashcard_score()
 
     def show_flashcard_popup(self, flashcard: object) -> None:
@@ -1232,6 +1331,8 @@ class MainWindow(QMainWindow):
                 selected_indexes=selected_indexes,
             )
             return
+        if 0 <= location.session_flashcard_index < len(self._active_study_session_keys):
+            self._active_study_session_keys.pop(location.session_flashcard_index)
         self._sync_session_flashcards_for_folder(
             previous_folder_flashcards,
             updated_flashcards,
@@ -1878,6 +1979,15 @@ class MainWindow(QMainWindow):
             )
             if load_error is not None:
                 folder_load_errors.append(load_error)
+            else:
+                prune_folder_progress(
+                    persisted_folder.id,
+                    {
+                        flashcard.stable_id
+                        for flashcard in folder_flashcards
+                        if flashcard.stable_id
+                    },
+                )
             self.flashcards_by_folder[persisted_folder.id] = folder_flashcards
             folder_flashcards = self.flashcards_by_folder[persisted_folder.id]
             self.selected_flashcard_indexes_by_folder[persisted_folder.id] = (

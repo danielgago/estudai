@@ -18,9 +18,11 @@ from PySide6.QtWidgets import (
 )
 
 from estudai.services.csv_flashcards import Flashcard
+from estudai.services.csv_flashcards import get_managed_csv_path
 from estudai.services.folder_storage import (
     create_managed_folder,
     list_persisted_folders,
+    rename_persisted_folder,
 )
 from estudai.services.hotkeys import GlobalHotkeyService, HotkeyRegistrationError
 from estudai.services.settings import (
@@ -1050,6 +1052,200 @@ def test_stop_button_resets_runtime_study_session_state(
     assert window._next_flashcard_index == 0
     assert "completed" not in window.timer_page.folder_context_label.text()
     assert window.timer_page.start_button.isEnabled()
+
+
+def test_study_progress_persists_between_windows_and_skips_completed_cards(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify wrong/correct counts persist and completed cards stay skipped later."""
+    monkeypatch.setattr(
+        "estudai.ui.main_window.load_app_settings",
+        lambda: AppSettings(
+            timer_duration_seconds=1500,
+            flashcard_probability_percent=100,
+            flashcard_study_order_mode=StudyOrderMode.QUEUE,
+            question_display_duration_seconds=2,
+            answer_display_duration_seconds=3,
+        ),
+    )
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\nQ2?,A2.\n", encoding="utf-8")
+
+    callbacks: list[object] = []
+    first_window = MainWindow()
+    assert first_window.add_folder(biology_folder) is True
+    monkeypatch.setattr(
+        first_window,
+        "_start_flashcard_phase_timer",
+        lambda _delay, callback: callbacks.append(callback),
+    )
+    first_window.timer_page.start_timer()
+    first_window.timer_page.is_running = False
+    first_window.handle_timer_cycle_completed()
+    callbacks.pop(0)()
+    first_window.timer_page.wrong_button.click()
+    callbacks.pop(0)()
+    first_window.timer_page.stop_button.click()
+
+    callbacks = []
+    second_window = MainWindow()
+    monkeypatch.setattr(
+        second_window,
+        "_start_flashcard_phase_timer",
+        lambda _delay, callback: callbacks.append(callback),
+    )
+    second_window.timer_page.start_timer()
+
+    assert second_window._study_session.card_counters[0].wrong_count == 1
+    assert second_window._study_session.card_counters[0].correct_count == 0
+    assert second_window._study_session.card_states[0].value == "wrong_pending"
+
+    second_window.timer_page.is_running = False
+    second_window.handle_timer_cycle_completed()
+    assert second_window.timer_page.flashcard_question_label.text() == "Q1?"
+    callbacks.pop(0)()
+    second_window.timer_page.correct_button.click()
+    callbacks.pop(0)()
+    second_window.timer_page.stop_button.click()
+
+    callbacks = []
+    third_window = MainWindow()
+    monkeypatch.setattr(
+        third_window,
+        "_start_flashcard_phase_timer",
+        lambda _delay, callback: callbacks.append(callback),
+    )
+    third_window.timer_page.start_timer()
+
+    assert third_window._study_session.card_counters[0].wrong_count == 1
+    assert third_window._study_session.card_counters[0].correct_count == 1
+    assert third_window._study_session.card_states[0].value == "completed"
+    assert third_window._study_session.progress().completed_count == 1
+    assert third_window._study_session.progress().remaining_count == 1
+
+    third_window.timer_page.is_running = False
+    third_window.handle_timer_cycle_completed()
+
+    assert third_window.timer_page.flashcard_question_label.text() == "Q2?"
+
+
+def test_study_progress_isolated_by_folder_and_survives_folder_rename(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify folder IDs isolate progress even when names change or text matches."""
+    monkeypatch.setattr(
+        "estudai.ui.main_window.load_app_settings",
+        lambda: AppSettings(
+            timer_duration_seconds=1500,
+            flashcard_probability_percent=100,
+            flashcard_study_order_mode=StudyOrderMode.QUEUE,
+            question_display_duration_seconds=2,
+            answer_display_duration_seconds=3,
+        ),
+    )
+    biology_folder = tmp_path / "biology"
+    chemistry_folder = tmp_path / "chemistry"
+    biology_folder.mkdir()
+    chemistry_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
+    (chemistry_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
+
+    callbacks: list[object] = []
+    first_window = MainWindow()
+    assert first_window.add_folder(biology_folder) is True
+    assert first_window.add_folder(chemistry_folder) is True
+    monkeypatch.setattr(
+        first_window,
+        "_start_flashcard_phase_timer",
+        lambda _delay, callback: callbacks.append(callback),
+    )
+    first_window.timer_page.start_timer()
+    first_window.timer_page.is_running = False
+    first_window.handle_timer_cycle_completed()
+    callbacks.pop(0)()
+    first_window.timer_page.correct_button.click()
+    callbacks.pop(0)()
+    first_window.timer_page.stop_button.click()
+
+    biology_persisted_folder = next(
+        folder for folder in list_persisted_folders() if folder.name == "biology"
+    )
+    rename_persisted_folder(biology_persisted_folder.id, "Biology Renamed")
+
+    callbacks = []
+    second_window = MainWindow()
+    monkeypatch.setattr(
+        second_window,
+        "_start_flashcard_phase_timer",
+        lambda _delay, callback: callbacks.append(callback),
+    )
+    second_window.timer_page.start_timer()
+
+    assert second_window._study_session.card_counters[0].correct_count == 1
+    assert second_window._study_session.card_counters[1].correct_count == 0
+    assert second_window._study_session.progress().completed_count == 1
+    assert second_window._study_session.progress().remaining_count == 1
+
+    second_window.timer_page.is_running = False
+    second_window.handle_timer_cycle_completed()
+
+    assert second_window.timer_page.flashcard_question_label.text() == "Q1?"
+    assert second_window.current_folder_name == "2 folders selected"
+
+
+def test_legacy_managed_folder_migrates_and_persists_progress(
+    app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify legacy managed CSV folders are upgraded before saving progress."""
+    monkeypatch.setattr(
+        "estudai.ui.main_window.load_app_settings",
+        lambda: AppSettings(
+            timer_duration_seconds=1500,
+            flashcard_probability_percent=100,
+            flashcard_study_order_mode=StudyOrderMode.QUEUE,
+            question_display_duration_seconds=2,
+            answer_display_duration_seconds=3,
+        ),
+    )
+    persisted_folder = create_managed_folder("Biology")
+    managed_csv = get_managed_csv_path(Path(persisted_folder.stored_path))
+    managed_csv.write_text("Q1?,A1.\nQ2?,A2.\n", encoding="utf-8")
+
+    callbacks: list[object] = []
+    first_window = MainWindow()
+    monkeypatch.setattr(
+        first_window,
+        "_start_flashcard_phase_timer",
+        lambda _delay, callback: callbacks.append(callback),
+    )
+    first_window.timer_page.start_timer()
+    first_window.timer_page.is_running = False
+    first_window.handle_timer_cycle_completed()
+    callbacks.pop(0)()
+    first_window.timer_page.wrong_button.click()
+    callbacks.pop(0)()
+    first_window.timer_page.stop_button.click()
+
+    migrated_rows = [
+        line.split(",")
+        for line in managed_csv.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(migrated_rows[0]) >= 3
+    assert migrated_rows[0][2]
+
+    callbacks = []
+    second_window = MainWindow()
+    monkeypatch.setattr(
+        second_window,
+        "_start_flashcard_phase_timer",
+        lambda _delay, callback: callbacks.append(callback),
+    )
+    second_window.timer_page.start_timer()
+
+    assert second_window._study_session.card_counters[0].wrong_count == 1
+    assert second_window._study_session.card_states[0].value == "wrong_pending"
 
 
 def test_timer_completion_uses_queue_shuffle_when_setting_enabled(

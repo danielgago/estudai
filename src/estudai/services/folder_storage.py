@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import os
 import shutil
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from uuid import uuid4
+
+from .csv_flashcards import (
+    Flashcard,
+    ensure_managed_flashcards,
+    load_flashcards_from_folder,
+)
+from .study_progress import delete_folder_progress
 
 APP_NAME = "estudai"
 ENV_DATA_DIR = "ESTUDAI_DATA_DIR"
@@ -258,6 +266,7 @@ def delete_persisted_folder(folder_id: str) -> bool:
     stored_path = Path(removed_folder.stored_path)
     if stored_path.exists():
         shutil.rmtree(stored_path)
+    delete_folder_progress(folder_id)
     save_persisted_folders(remaining_folders)
     return True
 
@@ -285,12 +294,24 @@ def import_folder(source_folder: Path) -> PersistedFolder:
         (folder for folder in persisted_folders if folder.source_path == source_key),
         None,
     )
+    previous_flashcards: list[Flashcard] = []
+    if existing_folder is not None:
+        previous_stored_path = Path(existing_folder.stored_path)
+        if previous_stored_path.exists():
+            try:
+                previous_flashcards = load_flashcards_from_folder(previous_stored_path)
+            except csv.Error, OSError, UnicodeDecodeError, ValueError:
+                previous_flashcards = []
     folder_id = existing_folder.id if existing_folder is not None else uuid4().hex
     stored_folder_path = get_library_dir() / folder_id
 
     if stored_folder_path.exists():
         shutil.rmtree(stored_folder_path)
     shutil.copytree(resolved_source, stored_folder_path)
+    ensure_managed_flashcards(
+        stored_folder_path,
+        previous_flashcards=previous_flashcards,
+    )
 
     persisted_folder = PersistedFolder(
         id=folder_id,
