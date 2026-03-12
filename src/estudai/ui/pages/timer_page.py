@@ -701,8 +701,7 @@ class TimerPage(QWidget):
         ]
         available_width = self._flashcard_content_available_width()
         visible_image_count = sum(
-            not label.isHidden()
-            and path is not None
+            not label.isHidden() and path is not None
             for label, path in (
                 (
                     self.flashcard_question_image_label,
@@ -758,8 +757,7 @@ class TimerPage(QWidget):
         """Scale visible flashcard images to fit the current content bounds."""
         available_width = self._flashcard_content_available_width()
         visible_image_count = sum(
-            not label.isHidden()
-            and path is not None
+            not label.isHidden() and path is not None
             for label, path in (
                 (
                     self.flashcard_question_image_label,
@@ -835,9 +833,7 @@ class TimerPage(QWidget):
         label.setText("")
         label.setPixmap(scaled_pixmap)
 
-    def _set_flashcard_label_point_size(
-        self, label: QLabel, point_size: int
-    ) -> None:
+    def _set_flashcard_label_point_size(self, label: QLabel, point_size: int) -> None:
         """Apply one point size to a flashcard label."""
         font = QFont(label.font())
         if font.pointSize() == point_size:
@@ -873,8 +869,7 @@ class TimerPage(QWidget):
     ) -> dict[QLabel, int]:
         """Shrink visible labels until their combined height fits the content area."""
         point_sizes = {
-            label: base_point_size
-            for label, base_point_size in visible_label_specs
+            label: base_point_size for label, base_point_size in visible_label_specs
         }
         if not point_sizes:
             return point_sizes
@@ -893,7 +888,8 @@ class TimerPage(QWidget):
                 return point_sizes
 
             shrinkable_labels = [
-                label for label, _base_point_size in visible_label_specs
+                label
+                for label, _base_point_size in visible_label_specs
                 if point_sizes[label] > 1
             ]
             if not shrinkable_labels:

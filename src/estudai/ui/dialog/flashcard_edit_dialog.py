@@ -169,7 +169,9 @@ class FlashcardEditDialog(QDialog):
         resolved_path = self._resolved_image_path(image_path)
         if resolved_path is not None and self._base_folder_path is not None:
             try:
-                display_path = resolved_path.relative_to(self._base_folder_path).as_posix()
+                display_path = resolved_path.relative_to(
+                    self._base_folder_path
+                ).as_posix()
             except ValueError:
                 display_path = str(resolved_path)
         status_suffix = ""

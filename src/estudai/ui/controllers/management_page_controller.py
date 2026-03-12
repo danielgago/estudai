@@ -242,7 +242,9 @@ class ManagementPageController:
                 "No folder selected for editing.",
             )
             return None
-        folder_path = self._app_state.persisted_folder_paths.get(self._editing_folder_id)
+        folder_path = self._app_state.persisted_folder_paths.get(
+            self._editing_folder_id
+        )
         if folder_path is None:
             QMessageBox.warning(
                 self._parent,

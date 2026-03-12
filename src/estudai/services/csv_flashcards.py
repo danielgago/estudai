@@ -1066,9 +1066,7 @@ def replace_flashcards_in_folder(
     Returns:
         list[Flashcard]: Updated flashcards from managed CSV.
     """
-    normalized_rows = [
-        _normalize_flashcard_row_input(row) for row in flashcard_rows
-    ]
+    normalized_rows = [_normalize_flashcard_row_input(row) for row in flashcard_rows]
     existing_flashcards = _load_or_bootstrap_managed_flashcards(folder_path)
     managed_rows = _reconcile_managed_rows(
         [

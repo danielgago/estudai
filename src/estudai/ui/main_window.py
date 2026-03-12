@@ -25,8 +25,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
     QLabel,
-    QListWidget,
-    QListWidgetItem,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -48,6 +46,7 @@ from estudai.services.csv_flashcards import (
 )
 from estudai.services.folder_catalog import PersistedFolderCatalogService
 from estudai.services.folder_storage import (
+    move_persisted_folder,
     rename_persisted_folder,
 )
 from estudai.services.hotkeys import (
@@ -84,7 +83,11 @@ from .navigation_icons import (
     load_navigation_icon,
 )
 from .pages import ManagementPage, SettingsPage, TimerPage
-from .sidebar_folders import SidebarFolderController
+from .sidebar_folders import (
+    SidebarFolderController,
+    SidebarFolderItem,
+    SidebarFolderTreeWidget,
+)
 
 
 class SidebarCheckboxDelegate(NativeCheckboxDelegate):
@@ -433,18 +436,30 @@ class MainWindow(QMainWindow):
         sidebar_title.setStyleSheet("border: none;")
         sidebar_layout.addWidget(sidebar_title)
 
-        self.sidebar_folder_list = QListWidget()
+        self.sidebar_folder_list = SidebarFolderTreeWidget()
         self.sidebar_folder_list.setSpacing(0)
-        self.sidebar_folder_list.setUniformItemSizes(True)
-        self.sidebar_folder_list.setSelectionMode(QListWidget.ExtendedSelection)
-        self.sidebar_folder_list.setEditTriggers(QListWidget.NoEditTriggers)
+        self.sidebar_folder_list.setUniformRowHeights(True)
+        self.sidebar_folder_list.setIndentation(18)
+        self.sidebar_folder_list.setSelectionMode(
+            SidebarFolderTreeWidget.ExtendedSelection
+        )
+        self.sidebar_folder_list.setEditTriggers(SidebarFolderTreeWidget.NoEditTriggers)
+        self.sidebar_folder_list.setDragEnabled(True)
+        self.sidebar_folder_list.viewport().setAcceptDrops(True)
+        self.sidebar_folder_list.setDropIndicatorShown(True)
+        self.sidebar_folder_list.setDefaultDropAction(Qt.MoveAction)
+        self.sidebar_folder_list.setDragDropMode(SidebarFolderTreeWidget.InternalMove)
         self.sidebar_folder_list.setItemDelegate(
             SidebarCheckboxDelegate(self.sidebar_folder_list)
         )
-        self.sidebar_folder_list.itemChanged.connect(self.handle_sidebar_item_changed)
-        self.sidebar_folder_list.itemClicked.connect(self.handle_sidebar_folder_click)
+        self.sidebar_folder_list.itemChanged.connect(
+            lambda item, column: self.handle_sidebar_item_changed(item, column)
+        )
+        self.sidebar_folder_list.itemClicked.connect(
+            lambda item, column: self.handle_sidebar_folder_click(item, column)
+        )
         self.sidebar_folder_list.itemDoubleClicked.connect(
-            self.handle_sidebar_folder_double_click
+            lambda item, column: self.handle_sidebar_folder_double_click(item, column)
         )
         self.sidebar_folder_list.itemSelectionChanged.connect(
             self._update_sidebar_reorder_buttons
@@ -455,6 +470,9 @@ class MainWindow(QMainWindow):
         self.sidebar_folder_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.sidebar_folder_list.customContextMenuRequested.connect(
             self.open_sidebar_folder_menu
+        )
+        self.sidebar_folder_list.folder_drop_completed.connect(
+            self.handle_sidebar_folder_drop
         )
         self._sidebar_folders = SidebarFolderController(
             self.sidebar_folder_list,
@@ -601,7 +619,7 @@ class MainWindow(QMainWindow):
             "}"
         )
         self.sidebar_folder_list.setStyleSheet(
-            "QListWidget {" " show-decoration-selected: 0;" "}"
+            "QTreeWidget {" " show-decoration-selected: 0;" "}"
         )
 
     def _update_sidebar_width(self) -> None:
@@ -822,7 +840,7 @@ class MainWindow(QMainWindow):
             app.removeEventFilter(self)
         super().closeEvent(event)
 
-    def _is_folder_item(self, item: QListWidgetItem | None) -> bool:
+    def _is_folder_item(self, item: SidebarFolderItem | None) -> bool:
         """Return whether a sidebar item maps to a persisted folder.
 
         Args:
@@ -833,11 +851,11 @@ class MainWindow(QMainWindow):
         """
         return self._sidebar_folders.is_folder_item(item)
 
-    def _selected_folder_items(self) -> list[QListWidgetItem]:
+    def _selected_folder_items(self) -> list[SidebarFolderItem]:
         """Return selected list items that map to persisted folders.
 
         Returns:
-            list[QListWidgetItem]: Selected folder items.
+            list[SidebarFolderItem]: Selected folder items.
         """
         return self._sidebar_folders.selected_folder_items()
 
@@ -909,15 +927,25 @@ class MainWindow(QMainWindow):
         if not self._timer_controller.study_session.active:
             self.timer_page.clear_session_progress()
 
-    def handle_sidebar_item_changed(self, item: QListWidgetItem) -> None:
+    def handle_sidebar_item_changed(
+        self,
+        item: SidebarFolderItem,
+        column: int = 0,
+    ) -> None:
         """Handle sidebar item updates (checkbox and inline rename).
 
         Args:
             item: Updated sidebar item.
+            column: Updated tree column.
         """
-        if not self._is_folder_item(item):
+        if column != 0 or not self._is_folder_item(item):
             return
-        self._apply_sidebar_item_visual_state(item)
+        were_signals_blocked = self.sidebar_folder_list.blockSignals(True)
+        try:
+            self._apply_sidebar_item_visual_state(item)
+            self._sidebar_folders.cascade_check_state(item)
+        finally:
+            self.sidebar_folder_list.blockSignals(were_signals_blocked)
         self._handle_inline_rename(item)
         folder_id = item.data(Qt.UserRole)
         if folder_id is not None:
@@ -933,7 +961,7 @@ class MainWindow(QMainWindow):
                 self._app_state.update_selected_indexes(folder_id, set())
         self._refresh_loaded_flashcards()
 
-    def _handle_inline_rename(self, item: QListWidgetItem) -> None:
+    def _handle_inline_rename(self, item: SidebarFolderItem) -> None:
         """Persist folder rename when inline editing changes item text.
 
         Args:
@@ -954,7 +982,11 @@ class MainWindow(QMainWindow):
             refresh_data=self._refresh_sidebar_data,
         )
 
-    def handle_sidebar_folder_click(self, clicked_item: QListWidgetItem) -> None:
+    def handle_sidebar_folder_click(
+        self,
+        clicked_item: SidebarFolderItem,
+        _column: int = 0,
+    ) -> None:
         """Handle folder clicks without forcing page navigation.
 
         Args:
@@ -963,7 +995,11 @@ class MainWindow(QMainWindow):
         if not self._is_folder_item(clicked_item):
             return
 
-    def handle_sidebar_folder_double_click(self, clicked_item: QListWidgetItem) -> None:
+    def handle_sidebar_folder_double_click(
+        self,
+        clicked_item: SidebarFolderItem,
+        _column: int = 0,
+    ) -> None:
         """Open folder management when a folder is double-clicked.
 
         Args:
@@ -992,22 +1028,27 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         rename_action = menu.addAction("Rename")
         rename_action.setToolTip("Rename")
+        create_subfolder_action = menu.addAction("Create Subfolder")
+        create_subfolder_action.setToolTip("Create a child folder")
         forget_progress_action = menu.addAction("Forget progress")
         forget_progress_action.setToolTip("Reset folder progress")
         delete_action = menu.addAction("Delete")
         delete_action.setToolTip("Delete")
         rename_action.setEnabled(len(selected_folder_items) == 1)
+        create_subfolder_action.setEnabled(len(selected_folder_items) == 1)
         chosen_action = menu.exec(
             self.sidebar_folder_list.viewport().mapToGlobal(position)
         )
         if chosen_action is rename_action and len(selected_folder_items) == 1:
             self.rename_sidebar_folder(selected_folder_items[0])
+        if chosen_action is create_subfolder_action and len(selected_folder_items) == 1:
+            self.prompt_and_create_subfolder(selected_folder_items[0])
         if chosen_action is forget_progress_action:
             self.forget_sidebar_folder_progress(selected_folder_items)
         if chosen_action is delete_action:
             self.delete_sidebar_folders(selected_folder_items)
 
-    def rename_sidebar_folder(self, folder_item: QListWidgetItem) -> None:
+    def rename_sidebar_folder(self, folder_item: SidebarFolderItem) -> None:
         """Start inline rename for one folder from sidebar action.
 
         Args:
@@ -1015,7 +1056,7 @@ class MainWindow(QMainWindow):
         """
         self._sidebar_folders.begin_rename(folder_item)
 
-    def delete_sidebar_folders(self, folder_items: list[QListWidgetItem]) -> None:
+    def delete_sidebar_folders(self, folder_items: list[SidebarFolderItem]) -> None:
         """Delete one or many folders from sidebar action.
 
         Args:
@@ -1025,7 +1066,7 @@ class MainWindow(QMainWindow):
 
     def forget_sidebar_folder_progress(
         self,
-        folder_items: list[QListWidgetItem],
+        folder_items: list[SidebarFolderItem],
     ) -> None:
         """Reset persisted study progress for one or many folders.
 
@@ -1068,6 +1109,49 @@ class MainWindow(QMainWindow):
         """Move the selected sidebar folder one position downward."""
         self._sidebar_folder_operations_controller.move_selected_folder(1)
 
+    def move_selected_sidebar_folder_in(self) -> None:
+        """Nest the selected sidebar folder under its previous sibling."""
+        self._sidebar_folder_operations_controller.move_selected_folder_in()
+
+    def move_selected_sidebar_folder_out(self) -> None:
+        """Promote the selected sidebar folder to the parent level."""
+        self._sidebar_folder_operations_controller.move_selected_folder_out()
+
+    def handle_sidebar_folder_drop(
+        self,
+        folder_id: str,
+        parent_id: object,
+        new_index: int,
+    ) -> None:
+        """Persist one sidebar drag-and-drop move.
+
+        Args:
+            folder_id: Moved folder identifier.
+            parent_id: New parent folder identifier, or None at the root.
+            new_index: Zero-based sibling index after the drop.
+        """
+        target_parent_id = parent_id if isinstance(parent_id, str) else None
+        if new_index < 0:
+            self.handle_management_data_changed(
+                preferred_checked_ids=self._get_checked_folder_ids(),
+                preferred_current_folder_id=folder_id,
+            )
+            return
+        checked_ids = self._get_checked_folder_ids()
+        try:
+            move_persisted_folder(folder_id, new_index, parent_id=target_parent_id)
+        except (KeyError, IndexError, ValueError) as error:
+            self._show_warning_message("Move folder", str(error))
+            self.handle_management_data_changed(
+                preferred_checked_ids=checked_ids,
+                preferred_current_folder_id=folder_id,
+            )
+            return
+        self.handle_management_data_changed(
+            preferred_checked_ids=checked_ids,
+            preferred_current_folder_id=folder_id,
+        )
+
     def prompt_and_add_folder(self) -> None:
         """Prompt the user for a folder and load CSV flashcards from it."""
         selected_path = QFileDialog.getExistingDirectory(
@@ -1083,14 +1167,36 @@ class MainWindow(QMainWindow):
 
     def prompt_and_create_folder(self) -> None:
         """Prompt for a folder name and create a managed empty folder."""
+        self._prompt_and_create_folder()
+
+    def prompt_and_create_subfolder(self, folder_item: SidebarFolderItem) -> None:
+        """Prompt for a subfolder name and create it under the selected folder.
+
+        Args:
+            folder_item: Parent folder item.
+        """
+        parent_folder_id = folder_item.data(Qt.UserRole)
+        if not isinstance(parent_folder_id, str):
+            return
+        self._prompt_and_create_folder(parent_id=parent_folder_id)
+
+    def _prompt_and_create_folder(self, parent_id: str | None = None) -> None:
+        """Prompt for a folder name and create it at the requested level.
+
+        Args:
+            parent_id: Optional parent folder id.
+        """
         folder_name, accepted = QInputDialog.getText(
             self,
-            "Create folder",
-            "Folder name:",
+            "Create subfolder" if parent_id is not None else "Create folder",
+            "Subfolder name:" if parent_id is not None else "Folder name:",
         )
         if not accepted:
             return
-        self._sidebar_folder_operations_controller.create_folder(folder_name)
+        self._sidebar_folder_operations_controller.create_folder(
+            folder_name,
+            parent_id=parent_id,
+        )
 
     def prompt_and_import_notebooklm_csv(self) -> None:
         """Open NotebookLM CSV import dialog and import valid rows."""
@@ -1148,7 +1254,7 @@ class MainWindow(QMainWindow):
         flashcard_count: int,
         progress_percent: int,
         checked: bool,
-    ) -> QListWidgetItem:
+    ) -> SidebarFolderItem:
         """Create one folder item for the sidebar list.
 
         Args:
@@ -1159,7 +1265,7 @@ class MainWindow(QMainWindow):
             checked: Whether the item starts checked.
 
         Returns:
-            QListWidgetItem: Configured list item.
+            SidebarFolderItem: Configured tree item.
         """
         return self._sidebar_folders.create_folder_item(
             folder_id,
@@ -1169,7 +1275,7 @@ class MainWindow(QMainWindow):
             checked,
         )
 
-    def _apply_sidebar_item_visual_state(self, item: QListWidgetItem) -> None:
+    def _apply_sidebar_item_visual_state(self, item: SidebarFolderItem) -> None:
         """Apply visual cues that keep checked folders easy to identify."""
         self._sidebar_folders.apply_item_visual_state(item)
 
@@ -1177,7 +1283,7 @@ class MainWindow(QMainWindow):
         """Recompute item visuals for current palette/theme values."""
         self._sidebar_folders.refresh_item_visual_states()
 
-    def _folder_item_name(self, item: QListWidgetItem) -> str:
+    def _folder_item_name(self, item: SidebarFolderItem) -> str:
         """Return folder name without flashcard count suffix."""
         return self._sidebar_folders.folder_item_name(item)
 
@@ -1228,7 +1334,8 @@ class MainWindow(QMainWindow):
             preferred_checked_ids: Folder ids that should remain checked.
             preferred_current_folder_id: Folder id that should remain selected.
         """
-        preferred_current_row: int | None = None
+        preferred_current_item: SidebarFolderItem | None = None
+        expanded_folder_ids = self._sidebar_folders.expanded_folder_ids()
         completion_mode = load_app_settings().wrong_answer_completion_mode
         catalog_result = self._folder_catalog_service.load_catalog(completion_mode)
         self._app_state.replace_folders(
@@ -1248,13 +1355,16 @@ class MainWindow(QMainWindow):
         )
         self.sidebar_folder_list.blockSignals(True)
         self.sidebar_folder_list.clear()
+        folder_items_by_id: dict[str, SidebarFolderItem] = {}
 
         for loaded_folder in catalog_result.folders:
             persisted_folder = loaded_folder.persisted_folder
+            parent_item = folder_items_by_id.get(persisted_folder.parent_id)
             is_checked = (
                 True
                 if preferred_checked_ids is None
                 else persisted_folder.id in preferred_checked_ids
+                or (parent_item is not None and parent_item.checkState() == Qt.Checked)
             )
             folder_item = self._create_sidebar_folder_item(
                 persisted_folder.id,
@@ -1263,18 +1373,33 @@ class MainWindow(QMainWindow):
                 progress_percent=loaded_folder.progress_percent,
                 checked=is_checked,
             )
-            self.sidebar_folder_list.addItem(folder_item)
+            if parent_item is None:
+                self.sidebar_folder_list.addItem(folder_item)
+            else:
+                parent_item.addChild(folder_item)
+                parent_item.setExpanded(
+                    parent_item.data(Qt.UserRole) in expanded_folder_ids
+                    or preferred_checked_ids is None
+                )
+            folder_items_by_id[persisted_folder.id] = folder_item
+            if persisted_folder.id in expanded_folder_ids or (
+                preferred_checked_ids is None
+                and folder_item.childCount() > 0
+                and persisted_folder.parent_id is None
+            ):
+                folder_item.setExpanded(True)
             if persisted_folder.id == preferred_current_folder_id:
-                preferred_current_row = self.sidebar_folder_list.count() - 1
+                preferred_current_item = folder_item
 
         if self.sidebar_folder_list.count() == 0:
-            empty_item = QListWidgetItem("No saved folders yet.")
-            empty_item.setFlags(Qt.NoItemFlags)
-            self.sidebar_folder_list.addItem(empty_item)
-        else:
-            self.sidebar_folder_list.setCurrentRow(
-                0 if preferred_current_row is None else preferred_current_row
+            self.sidebar_folder_list.addItem(
+                self._sidebar_folders.create_placeholder_item("No saved folders yet.")
             )
+        else:
+            if preferred_current_item is None:
+                self.sidebar_folder_list.setCurrentRow(0)
+            else:
+                self.sidebar_folder_list.setCurrentItem(preferred_current_item)
         self.sidebar_folder_list.blockSignals(False)
         self._refresh_loaded_flashcards()
         if self.stacked_widget.currentWidget() is self.management_page:
@@ -1299,8 +1424,18 @@ class MainWindow(QMainWindow):
             self.move_folder_up_button.setEnabled(False)
             self.move_folder_down_button.setEnabled(False)
             return
-        current_row = self.sidebar_folder_list.row(selected_items[0])
-        last_row = self.sidebar_folder_list.count() - 1
+        selected_item = selected_items[0]
+        parent_item = selected_item.parent()
+        current_row = (
+            parent_item.indexOfChild(selected_item)
+            if isinstance(parent_item, SidebarFolderItem)
+            else self.sidebar_folder_list.indexOfTopLevelItem(selected_item)
+        )
+        last_row = (
+            parent_item.childCount() - 1
+            if isinstance(parent_item, SidebarFolderItem)
+            else self.sidebar_folder_list.topLevelItemCount() - 1
+        )
         self.move_folder_up_button.setEnabled(current_row > 0)
         self.move_folder_down_button.setEnabled(current_row < last_row)
 

@@ -26,6 +26,8 @@ def _write_test_image(path: Path, *, width: int = 320, height: int = 180) -> str
     image.fill(0xFF3366CC)
     assert image.save(str(path))
     return str(path)
+
+
 def test_timer_start_stop_reset_and_context() -> None:
     """Verify timer controls and context label updates."""
     _get_app()
@@ -288,9 +290,14 @@ def test_paused_flashcard_actions_are_positioned_above_question() -> None:
     assert flashcard_layout.itemAt(1).widget() is page.flashcard_content_widget
     assert flashcard_layout.itemAt(0).alignment() == (Qt.AlignTop | Qt.AlignRight)
     assert flashcard_content_layout.itemAt(1).widget() is page.flashcard_question_label
-    assert flashcard_content_layout.itemAt(2).widget() is page.flashcard_question_image_label
+    assert (
+        flashcard_content_layout.itemAt(2).widget()
+        is page.flashcard_question_image_label
+    )
     assert flashcard_content_layout.itemAt(3).widget() is page.flashcard_answer_label
-    assert flashcard_content_layout.itemAt(4).widget() is page.flashcard_answer_image_label
+    assert (
+        flashcard_content_layout.itemAt(4).widget() is page.flashcard_answer_image_label
+    )
 
 
 def test_flashcard_content_uses_centered_container_without_scroll_area() -> None:
@@ -299,7 +306,10 @@ def test_flashcard_content_uses_centered_container_without_scroll_area() -> None
     page = TimerPage()
 
     assert hasattr(page, "flashcard_content_scroll_area") is False
-    assert page.content_stack.widget(1).layout().itemAt(1).widget() is page.flashcard_content_widget
+    assert (
+        page.content_stack.widget(1).layout().itemAt(1).widget()
+        is page.flashcard_content_widget
+    )
     assert page.flashcard_content_layout.itemAt(0).spacerItem() is not None
     assert page.flashcard_content_layout.itemAt(5).spacerItem() is not None
 
@@ -436,7 +446,9 @@ def test_long_flashcard_text_shrinks_to_fit_without_scrollbars() -> None:
     _get_app()
     page = TimerPage()
     page.flashcard_content_widget.setFixedSize(320, 180)
-    long_question = " ".join(["Long question text with enough detail to wrap heavily."] * 50)
+    long_question = " ".join(
+        ["Long question text with enough detail to wrap heavily."] * 50
+    )
     long_answer = " ".join(["Long answer text with additional explanation."] * 45)
 
     page.show_flashcard_question(long_question)
@@ -445,19 +457,16 @@ def test_long_flashcard_text_shrinks_to_fit_without_scrollbars() -> None:
     question_point_size = page.flashcard_question_label.font().pointSize()
     answer_point_size = page.flashcard_answer_label.font().pointSize()
     available_width = page._flashcard_content_available_width()
-    combined_height = (
-        page._measure_flashcard_text_height(
-            page.flashcard_question_label,
-            rendered_text=page.flashcard_question_label.text(),
-            point_size=question_point_size,
-            available_width=available_width,
-        )
-        + page._measure_flashcard_text_height(
-            page.flashcard_answer_label,
-            rendered_text=page.flashcard_answer_label.text(),
-            point_size=answer_point_size,
-            available_width=available_width,
-        )
+    combined_height = page._measure_flashcard_text_height(
+        page.flashcard_question_label,
+        rendered_text=page.flashcard_question_label.text(),
+        point_size=question_point_size,
+        available_width=available_width,
+    ) + page._measure_flashcard_text_height(
+        page.flashcard_answer_label,
+        rendered_text=page.flashcard_answer_label.text(),
+        point_size=answer_point_size,
+        available_width=available_width,
     )
 
     assert 1 <= question_point_size < 22

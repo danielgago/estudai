@@ -7,8 +7,6 @@ import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
-    QListWidget,
-    QListWidgetItem,
     QMessageBox,
     QWidget,
 )
@@ -29,6 +27,7 @@ from estudai.ui.application_state import FolderLibraryState, StudyApplicationSta
 from estudai.ui.controllers.sidebar_folder_operations_controller import (
     SidebarFolderOperationsController,
 )
+from estudai.ui.sidebar_folders import SidebarFolderItem, SidebarFolderTreeWidget
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -51,7 +50,7 @@ def isolated_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 def _build_controller(
     *,
     app_state: StudyApplicationState,
-    sidebar_folder_list: QListWidget | None = None,
+    sidebar_folder_list: SidebarFolderTreeWidget | None = None,
     selected_folder_items_getter=None,
     checked_folder_ids_getter=None,
     handle_folder_data_changed=None,
@@ -61,7 +60,7 @@ def _build_controller(
     show_warning_message=None,
 ) -> SidebarFolderOperationsController:
     """Create a sidebar operations controller with injectable test callbacks."""
-    folder_list = sidebar_folder_list or QListWidget()
+    folder_list = sidebar_folder_list or SidebarFolderTreeWidget()
     return SidebarFolderOperationsController(
         parent=QWidget(),
         app_state=app_state,
@@ -96,9 +95,9 @@ def _create_source_folder(tmp_path: Path, name: str, csv_text: str) -> Path:
     return folder
 
 
-def _create_sidebar_item(folder_id: str, label: str) -> QListWidgetItem:
+def _create_sidebar_item(folder_id: str, label: str) -> SidebarFolderItem:
     """Create one sidebar list item for controller tests."""
-    item = QListWidgetItem(label)
+    item = SidebarFolderItem([label])
     item.setData(Qt.UserRole, folder_id)
     return item
 
@@ -157,7 +156,7 @@ def test_move_selected_folder_preserves_current_folder(app: QApplication) -> Non
     """Verify reordering keeps the moved folder selected after refresh."""
     first_folder = create_managed_folder("Biology")
     second_folder = create_managed_folder("Chemistry")
-    folder_list = QListWidget()
+    folder_list = SidebarFolderTreeWidget()
     first_item = _create_sidebar_item(first_folder.id, first_folder.name)
     second_item = _create_sidebar_item(second_folder.id, second_folder.name)
     folder_list.addItem(first_item)
@@ -187,6 +186,45 @@ def test_move_selected_folder_preserves_current_folder(app: QApplication) -> Non
         first_folder.id,
     ]
     assert refresh_calls == [({first_folder.id, second_folder.id}, first_folder.id)]
+
+
+def test_move_selected_folder_in_nests_under_previous_sibling(
+    app: QApplication,
+) -> None:
+    """Verify moving right reparents the folder under its previous sibling."""
+    first_folder = create_managed_folder("Biology")
+    second_folder = create_managed_folder("Chemistry")
+    folder_list = SidebarFolderTreeWidget()
+    first_item = _create_sidebar_item(first_folder.id, first_folder.name)
+    second_item = _create_sidebar_item(second_folder.id, second_folder.name)
+    folder_list.addItem(first_item)
+    folder_list.addItem(second_item)
+    checked_ids = {first_folder.id, second_folder.id}
+    refresh_calls: list[tuple[set[str] | None, str | None]] = []
+    controller = _build_controller(
+        app_state=StudyApplicationState(),
+        sidebar_folder_list=folder_list,
+        selected_folder_items_getter=lambda: [second_item],
+        checked_folder_ids_getter=lambda: checked_ids,
+        handle_folder_data_changed=lambda selected_ids, current_folder_id: (
+            refresh_calls.append(
+                (
+                    None if selected_ids is None else set(selected_ids),
+                    current_folder_id,
+                )
+            )
+        ),
+    )
+
+    controller.move_selected_folder_in()
+
+    persisted_folders = list_persisted_folders()
+    assert [folder.id for folder in persisted_folders] == [
+        first_folder.id,
+        second_folder.id,
+    ]
+    assert persisted_folders[1].parent_id == first_folder.id
+    assert refresh_calls == [({first_folder.id, second_folder.id}, second_folder.id)]
 
 
 def test_forget_progress_refreshes_labels_and_session(

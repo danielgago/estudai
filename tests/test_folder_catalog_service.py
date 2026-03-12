@@ -89,3 +89,21 @@ def test_load_catalog_prunes_progress_for_removed_flashcards() -> None:
     assert result.load_errors == []
     assert [flashcard.question for flashcard in result.folders[0].flashcards] == ["Q2?"]
     assert set(remaining_progress) == {updated_flashcards[0].stable_id}
+
+
+def test_load_catalog_preserves_nested_folder_metadata() -> None:
+    """Verify catalog loading keeps nested folder parent relationships intact."""
+    root_folder = create_managed_folder("Biology")
+    child_folder = create_managed_folder("Genetics", parent_id=root_folder.id)
+    replace_flashcards_in_folder(Path(root_folder.stored_path), [("Root?", "A.")])
+    replace_flashcards_in_folder(Path(child_folder.stored_path), [("Child?", "B.")])
+
+    service = PersistedFolderCatalogService()
+    result = service.load_catalog(WrongAnswerCompletionMode.UNTIL_CORRECT_ONCE)
+
+    assert [loaded.persisted_folder.name for loaded in result.folders] == [
+        "Biology",
+        "Genetics",
+    ]
+    assert result.folders[0].persisted_folder.parent_id is None
+    assert result.folders[1].persisted_folder.parent_id == root_folder.id

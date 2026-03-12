@@ -5,9 +5,13 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QAbstractItemView, QApplication, QMessageBox
 
-from estudai.services.folder_storage import PersistedFolder, list_persisted_folders
+from estudai.services.folder_storage import (
+    PersistedFolder,
+    create_managed_folder,
+    list_persisted_folders,
+)
 from estudai.services.study_progress import (
     FlashcardProgress,
     FlashcardProgressEntry,
@@ -58,7 +62,9 @@ def test_inline_rename_triggers_editor(
         lambda _delay, callback: callback(),
     )
     monkeypatch.setattr(
-        window.sidebar_folder_list, "editItem", lambda item: edited_items.append(item)
+        window.sidebar_folder_list,
+        "editItem",
+        lambda item, _column=0: edited_items.append(item),
     )
 
     window.rename_sidebar_folder(folder_item)
@@ -165,11 +171,13 @@ def test_open_sidebar_menu_rename_action_uses_expected_labels(
     assert called == ["rename"]
     assert [action.text for action in _FakeMenu.last_instance.actions] == [
         "Rename",
+        "Create Subfolder",
         "Forget progress",
         "Delete",
     ]
     assert [action.tooltip for action in _FakeMenu.last_instance.actions] == [
         "Rename",
+        "Create a child folder",
         "Reset folder progress",
         "Delete",
     ]
@@ -219,7 +227,9 @@ def test_open_sidebar_menu_forget_progress_dispatch_and_cancel_reset(
             return action
 
         def exec(self, *_args, **_kwargs):  # noqa: A003
-            return self.actions[1]
+            return next(
+                action for action in self.actions if action.text == "Forget progress"
+            )
 
     monkeypatch.setattr("estudai.ui.main_window.QMenu", _FakeMenu)
     monkeypatch.setattr(window.sidebar_folder_list, "itemAt", lambda _pos: first_item)
@@ -284,7 +294,7 @@ def test_open_sidebar_menu_delete_dispatch_and_cancel_delete(
             return action
 
         def exec(self, *_args, **_kwargs):  # noqa: A003
-            return self.actions[2]
+            return next(action for action in self.actions if action.text == "Delete")
 
     monkeypatch.setattr("estudai.ui.main_window.QMenu", _FakeMenu)
     monkeypatch.setattr(window.sidebar_folder_list, "itemAt", lambda _pos: first_item)
@@ -362,3 +372,55 @@ def test_set_navigation_visible_hides_sidebar_and_buttons(app: QApplication) -> 
     assert not window.sidebar_toggle_button.isVisible()
     assert not window.settings_button.isVisible()
     assert not window.sidebar.isVisible()
+
+
+def test_handle_management_data_changed_builds_nested_sidebar_tree(
+    app: QApplication,
+) -> None:
+    """Verify nested persisted folders render as a parent/child sidebar tree."""
+    root_folder = create_managed_folder("Biology")
+    child_folder = create_managed_folder("Genetics", parent_id=root_folder.id)
+    window = MainWindow()
+
+    root_item = window.sidebar_folder_list.item(0)
+    child_item = window.sidebar_folder_list.item(1)
+
+    assert root_item.data(Qt.UserRole) == root_folder.id
+    assert child_item.data(Qt.UserRole) == child_folder.id
+    assert root_item.childCount() == 1
+    assert root_item.child(0) is child_item
+
+    root_item.setCheckState(Qt.Unchecked)
+    window.handle_sidebar_item_changed(root_item)
+
+    assert child_item.checkState() == Qt.Unchecked
+
+
+def test_sidebar_enables_internal_drag_drop(app: QApplication) -> None:
+    """Verify the sidebar tree uses internal drag-and-drop reordering."""
+    window = MainWindow()
+
+    assert window.sidebar_folder_list.dragDropMode() == QAbstractItemView.InternalMove
+    assert window.sidebar_folder_list.dragEnabled() is True
+    assert window.sidebar_folder_list.acceptDrops() is True
+
+
+def test_handle_sidebar_folder_drop_persists_reparenting(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify a completed drop persists the folder under its new parent."""
+    window = MainWindow()
+    _add_sample_folder(window, tmp_path, "biology")
+    _add_sample_folder(window, tmp_path, "chemistry")
+    biology_item = window.sidebar_folder_list.item(0)
+    chemistry_item = window.sidebar_folder_list.item(1)
+    biology_folder_id = biology_item.data(Qt.UserRole)
+    chemistry_folder_id = chemistry_item.data(Qt.UserRole)
+    assert isinstance(biology_folder_id, str)
+    assert isinstance(chemistry_folder_id, str)
+
+    window.handle_sidebar_folder_drop(chemistry_folder_id, biology_folder_id, 0)
+
+    persisted_folders = list_persisted_folders()
+    assert [folder.name for folder in persisted_folders] == ["biology", "chemistry"]
+    assert persisted_folders[1].parent_id == biology_folder_id

@@ -17,11 +17,14 @@ from estudai.services.csv_flashcards import (
     update_flashcard_in_folder,
 )
 from estudai.services.folder_storage import (
+    child_folder_ids,
     create_managed_folder,
     delete_persisted_folder,
     get_registry_path,
+    import_folder,
     list_persisted_folders,
     move_persisted_folder,
+    reparent_persisted_folder,
     rename_persisted_folder,
 )
 
@@ -296,6 +299,45 @@ def test_move_persisted_folder_reorders_registry_entries() -> None:
         "Biology",
         "Chemistry",
     ]
+
+
+def test_create_nested_folder_and_promote_back_to_root() -> None:
+    """Verify nested folders persist parent ids and can be promoted cleanly."""
+    root_folder = create_managed_folder("Biology")
+    child_folder = create_managed_folder("Genetics", parent_id=root_folder.id)
+    create_managed_folder("Chemistry")
+
+    reparented = reparent_persisted_folder(child_folder.id, None, new_index=1)
+
+    assert [folder.name for folder in reparented] == [
+        "Biology",
+        "Genetics",
+        "Chemistry",
+    ]
+    persisted_folders = list_persisted_folders()
+    assert persisted_folders[0].parent_id is None
+    assert persisted_folders[1].parent_id is None
+    assert persisted_folders[2].parent_id is None
+    assert persisted_folders[1].id == child_folder.id
+    assert child_folder_ids(root_folder.id) == set()
+
+
+def test_import_folder_preserves_nested_structure() -> None:
+    """Verify importing a directory tree creates nested persisted folders."""
+    source_root = Path(os.environ["ESTUDAI_DATA_DIR"]) / "source"
+    child_source = source_root / "subfolder"
+    child_source.mkdir(parents=True)
+    (source_root / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
+    (child_source / "cards.csv").write_text("Q2?,A2.\n", encoding="utf-8")
+
+    imported_root = import_folder(source_root)
+
+    persisted_folders = list_persisted_folders()
+    assert [folder.name for folder in persisted_folders] == ["source", "subfolder"]
+    assert persisted_folders[0].id == imported_root.id
+    assert persisted_folders[0].parent_id is None
+    assert persisted_folders[1].parent_id == imported_root.id
+    assert child_folder_ids(imported_root.id) == {persisted_folders[1].id}
 
 
 def test_list_persisted_folders_handles_corrupt_registry_json() -> None:

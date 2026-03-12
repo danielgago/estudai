@@ -6,7 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QListWidget, QListWidgetItem, QMessageBox, QWidget
+from PySide6.QtWidgets import QMessageBox, QWidget
 
 from estudai.services.csv_flashcards import (
     Flashcard,
@@ -14,17 +14,20 @@ from estudai.services.csv_flashcards import (
     replace_flashcards_in_folder,
 )
 from estudai.services.folder_storage import (
+    child_folder_ids,
     create_managed_folder,
     delete_persisted_folder,
     import_folder,
     list_persisted_folders,
     move_persisted_folder,
+    reparent_persisted_folder,
 )
 from estudai.services.study_progress import delete_folder_progress
 from estudai.ui.application_state import StudyApplicationState
 from estudai.ui.folder_context import merge_imported_flashcard_indexes
+from estudai.ui.sidebar_folders import SidebarFolderItem, SidebarFolderTreeWidget
 
-SelectedFolderItemsGetter = Callable[[], list[QListWidgetItem]]
+SelectedFolderItemsGetter = Callable[[], list[SidebarFolderItem]]
 CheckedFolderIdsGetter = Callable[[], set[str]]
 HandleFolderDataChanged = Callable[[set[str] | None, str | None], None]
 RefreshSidebarFolderProgressLabels = Callable[[set[str] | None], None]
@@ -41,7 +44,7 @@ class SidebarFolderOperationsController:
         *,
         parent: QWidget,
         app_state: StudyApplicationState,
-        sidebar_folder_list: QListWidget,
+        sidebar_folder_list: SidebarFolderTreeWidget,
         selected_folder_items_getter: SelectedFolderItemsGetter,
         checked_folder_ids_getter: CheckedFolderIdsGetter,
         handle_folder_data_changed: HandleFolderDataChanged,
@@ -84,11 +87,18 @@ class SidebarFolderOperationsController:
         self._load_folder_flashcards = load_folder_flashcards
         self._show_warning_message = show_warning_message
 
-    def add_folder(self, folder_path: Path, *, show_errors: bool = False) -> bool:
+    def add_folder(
+        self,
+        folder_path: Path,
+        *,
+        parent_id: str | None = None,
+        show_errors: bool = False,
+    ) -> bool:
         """Import one existing flashcard folder into managed storage.
 
         Args:
             folder_path: Selected source folder path.
+            parent_id: Optional parent folder id for nested imports.
             show_errors: Whether import failures should show a warning dialog.
 
         Returns:
@@ -96,28 +106,35 @@ class SidebarFolderOperationsController:
         """
         checked_ids = self._checked_folder_ids_getter()
         try:
-            persisted_folder = import_folder(folder_path)
-        except (FileNotFoundError, NotADirectoryError, OSError) as error:
+            persisted_folder = import_folder(folder_path, parent_id=parent_id)
+        except (FileNotFoundError, NotADirectoryError, OSError, KeyError) as error:
             if show_errors:
                 self._show_warning_message("Import folder", str(error))
             return False
         checked_ids.add(persisted_folder.id)
+        checked_ids.update(child_folder_ids(persisted_folder.id))
         self._handle_folder_data_changed(checked_ids, None)
         return True
 
-    def create_folder(self, folder_name: str) -> bool:
+    def create_folder(
+        self,
+        folder_name: str,
+        *,
+        parent_id: str | None = None,
+    ) -> bool:
         """Create one managed empty folder and refresh sidebar state.
 
         Args:
             folder_name: User-provided folder name.
+            parent_id: Optional parent folder id for nested creation.
 
         Returns:
             bool: True when the folder was created successfully.
         """
         checked_ids = self._checked_folder_ids_getter()
         try:
-            persisted_folder = create_managed_folder(folder_name)
-        except ValueError as error:
+            persisted_folder = create_managed_folder(folder_name, parent_id=parent_id)
+        except (KeyError, ValueError) as error:
             self._show_warning_message("Create folder", str(error))
             return False
         checked_ids.add(persisted_folder.id)
@@ -189,7 +206,7 @@ class SidebarFolderOperationsController:
         self._handle_folder_data_changed(checked_ids, None)
         return True
 
-    def delete_folders(self, folder_items: list[QListWidgetItem]) -> None:
+    def delete_folders(self, folder_items: list[SidebarFolderItem]) -> None:
         """Delete one or more persisted folders after confirmation.
 
         Args:
@@ -198,10 +215,15 @@ class SidebarFolderOperationsController:
         folder_ids = self._folder_ids_from_items(folder_items)
         if not folder_ids:
             return
+        deleting_nested = any(child_folder_ids(folder_id) for folder_id in folder_ids)
         confirmation = QMessageBox.question(
             self._parent,
             "Delete folder",
-            f"Delete {len(folder_ids)} selected folder(s)?",
+            (
+                f"Delete {len(folder_ids)} selected folder(s) and any nested subfolders?"
+                if deleting_nested
+                else f"Delete {len(folder_ids)} selected folder(s)?"
+            ),
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
@@ -215,7 +237,7 @@ class SidebarFolderOperationsController:
 
     def forget_progress_for_folders(
         self,
-        folder_items: list[QListWidgetItem],
+        folder_items: list[SidebarFolderItem],
     ) -> None:
         """Reset persisted study progress for one or many folders.
 
@@ -287,14 +309,100 @@ class SidebarFolderOperationsController:
         folder_id = folder_item.data(Qt.UserRole)
         if folder_id is None:
             return
-        current_row = self._sidebar_folder_list.row(folder_item)
+        parent_item = folder_item.parent()
+        parent_folder_id = (
+            parent_item.data(Qt.UserRole)
+            if isinstance(parent_item, SidebarFolderItem)
+            else None
+        )
+        current_row = (
+            parent_item.indexOfChild(folder_item)
+            if isinstance(parent_item, SidebarFolderItem)
+            else self._sidebar_folder_list.indexOfTopLevelItem(folder_item)
+        )
+        sibling_count = (
+            parent_item.childCount()
+            if isinstance(parent_item, SidebarFolderItem)
+            else self._sidebar_folder_list.topLevelItemCount()
+        )
         target_row = current_row + offset
-        if not (0 <= target_row < self._sidebar_folder_list.count()):
+        if not (0 <= target_row < sibling_count):
             return
         checked_ids = self._checked_folder_ids_getter()
         try:
-            move_persisted_folder(folder_id, target_row)
-        except (KeyError, IndexError) as error:
+            move_persisted_folder(folder_id, target_row, parent_id=parent_folder_id)
+        except (KeyError, IndexError, ValueError) as error:
+            self._show_warning_message("Move folder", str(error))
+            self._handle_folder_data_changed(checked_ids, None)
+            return
+        self._handle_folder_data_changed(checked_ids, folder_id)
+
+    def move_selected_folder_in(self) -> None:
+        """Nest the selected folder under its previous sibling."""
+        selected_items = self._selected_folder_items_getter()
+        if len(selected_items) != 1:
+            return
+        folder_item = selected_items[0]
+        parent_item = folder_item.parent()
+        current_row = (
+            parent_item.indexOfChild(folder_item)
+            if isinstance(parent_item, SidebarFolderItem)
+            else self._sidebar_folder_list.indexOfTopLevelItem(folder_item)
+        )
+        if current_row <= 0:
+            return
+        previous_sibling = (
+            parent_item.child(current_row - 1)
+            if isinstance(parent_item, SidebarFolderItem)
+            else self._sidebar_folder_list.topLevelItem(current_row - 1)
+        )
+        if not isinstance(previous_sibling, SidebarFolderItem):
+            return
+        folder_id = folder_item.data(Qt.UserRole)
+        previous_sibling_id = previous_sibling.data(Qt.UserRole)
+        if folder_id is None or previous_sibling_id is None:
+            return
+        checked_ids = self._checked_folder_ids_getter()
+        try:
+            reparent_persisted_folder(folder_id, previous_sibling_id)
+        except (KeyError, IndexError, ValueError) as error:
+            self._show_warning_message("Move folder", str(error))
+            self._handle_folder_data_changed(checked_ids, None)
+            return
+        self._handle_folder_data_changed(checked_ids, folder_id)
+
+    def move_selected_folder_out(self) -> None:
+        """Promote the selected folder to its parent's level."""
+        selected_items = self._selected_folder_items_getter()
+        if len(selected_items) != 1:
+            return
+        folder_item = selected_items[0]
+        parent_item = folder_item.parent()
+        if not isinstance(parent_item, SidebarFolderItem):
+            return
+        folder_id = folder_item.data(Qt.UserRole)
+        parent_folder_id = parent_item.data(Qt.UserRole)
+        if folder_id is None or parent_folder_id is None:
+            return
+        grandparent_item = parent_item.parent()
+        grandparent_folder_id = (
+            grandparent_item.data(Qt.UserRole)
+            if isinstance(grandparent_item, SidebarFolderItem)
+            else None
+        )
+        parent_row = (
+            grandparent_item.indexOfChild(parent_item)
+            if isinstance(grandparent_item, SidebarFolderItem)
+            else self._sidebar_folder_list.indexOfTopLevelItem(parent_item)
+        )
+        checked_ids = self._checked_folder_ids_getter()
+        try:
+            reparent_persisted_folder(
+                folder_id,
+                grandparent_folder_id,
+                new_index=parent_row + 1,
+            )
+        except (KeyError, IndexError, ValueError) as error:
             self._show_warning_message("Move folder", str(error))
             self._handle_folder_data_changed(checked_ids, None)
             return
@@ -332,7 +440,7 @@ class SidebarFolderOperationsController:
         self._refresh_active_study_session_after_progress_reset(folder_ids)
 
     @staticmethod
-    def _folder_ids_from_items(folder_items: list[QListWidgetItem]) -> set[str]:
+    def _folder_ids_from_items(folder_items: list[SidebarFolderItem]) -> set[str]:
         """Return managed folder ids represented by sidebar items.
 
         Args:
