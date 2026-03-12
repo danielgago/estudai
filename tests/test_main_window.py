@@ -2052,6 +2052,31 @@ def test_double_click_folder_opens_management_and_save_updates_selection(
     assert window.loaded_flashcards[0].answer == "Updated messenger molecule."
 
 
+def test_management_row_selection_does_not_mark_page_dirty(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify transient table selection does not count as unsaved data changes."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+    folder_item = window.sidebar_folder_list.item(0)
+
+    window.handle_sidebar_folder_double_click(folder_item)
+
+    table = window.management_page.flashcards_table
+    assert window.management_page.is_dirty() is False
+
+    table.selectRow(0)
+
+    assert window.management_page.is_dirty() is False
+
+    table.item(0, 2).setText("Updated A1.")
+
+    assert window.management_page.is_dirty() is True
+
+
 def test_management_select_and_unselect_all_controls(
     app: QApplication, tmp_path: Path
 ) -> None:
@@ -2486,6 +2511,59 @@ def test_sidebar_click_does_not_leave_management_page(
     window.handle_sidebar_folder_click(folder_item)
 
     assert window.stacked_widget.currentWidget() is window.management_page
+
+
+def test_management_cancel_warns_before_discarding_unsaved_changes(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify Cancel keeps management open when the user rejects discarding edits."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+    folder_item = window.sidebar_folder_list.item(0)
+    window.handle_sidebar_folder_double_click(folder_item)
+    window.management_page.flashcards_table.item(0, 2).setText("Updated A1.")
+    warning_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def _warning(*args, **kwargs) -> QMessageBox.StandardButton:
+        warning_calls.append((args, kwargs))
+        return QMessageBox.Cancel
+
+    monkeypatch.setattr("estudai.ui.main_window.QMessageBox.warning", _warning)
+
+    window.management_page.cancel_button.click()
+
+    assert len(warning_calls) == 1
+    assert window.stacked_widget.currentWidget() is window.management_page
+    assert window.management_page.is_dirty() is True
+
+
+def test_management_settings_button_discards_unsaved_changes_after_confirmation(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify other exit paths from management share the unsaved-changes warning."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+    folder_item = window.sidebar_folder_list.item(0)
+    window.handle_sidebar_folder_double_click(folder_item)
+    window.management_page.flashcards_table.item(0, 2).setText("Updated A1.")
+    warning_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def _warning(*args, **kwargs) -> QMessageBox.StandardButton:
+        warning_calls.append((args, kwargs))
+        return QMessageBox.Discard
+
+    monkeypatch.setattr("estudai.ui.main_window.QMessageBox.warning", _warning)
+
+    window.settings_button.click()
+
+    assert len(warning_calls) == 1
+    assert window.stacked_widget.currentWidget() is window.settings_page
 
 
 def test_in_app_timer_shortcuts_control_timer(
@@ -3134,3 +3212,54 @@ def test_import_notebooklm_csv_appends_rows_to_selected_folder(
     assert len(window.flashcards_by_folder[folder_id]) == 2
     assert window.flashcards_by_folder[folder_id][1].question == "Imported question?"
     assert window.loaded_flashcards[-1].answer == "Imported answer."
+
+
+def test_import_notebooklm_csv_refreshes_open_management_page(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify importing rows refreshes an already-open management page."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text(
+        "What is DNA?,Genetic material.\n",
+        encoding="utf-8",
+    )
+    assert window.add_folder(biology_folder) is True
+    folder_item = window.sidebar_folder_list.item(0)
+    folder_id = folder_item.data(Qt.UserRole)
+    window.handle_sidebar_folder_double_click(folder_item)
+
+    class _FakeImportDialog:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def exec(self) -> int:
+            return QDialog.Accepted
+
+        def selected_folder_id(self) -> str | None:
+            return folder_id
+
+        def import_rows(self) -> list[tuple[str, str]]:
+            return [("Imported question?", "Imported answer.")]
+
+    monkeypatch.setattr(
+        "estudai.ui.main_window.NotebookLMCsvImportDialog",
+        _FakeImportDialog,
+    )
+
+    assert window.management_page.flashcards_table.rowCount() == 1
+
+    window.prompt_and_import_notebooklm_csv()
+
+    table = window.management_page.flashcards_table
+
+    assert window.stacked_widget.currentWidget() is window.management_page
+    assert table.rowCount() == 2
+    assert table.item(1, 1).text() == "Imported question?"
+    assert window.management_page.is_dirty() is False
+
+    window.save_management_changes()
+
+    assert len(window.flashcards_by_folder[folder_id]) == 2
+    assert window.flashcards_by_folder[folder_id][1].answer == "Imported answer."

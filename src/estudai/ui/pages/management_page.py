@@ -62,6 +62,7 @@ class ManagementPage(QWidget):
         """Initialize the management page."""
         super().__init__()
         self.folder_id: str | None = None
+        self._loaded_table_row_states: list[FlashcardTableRowState] = []
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -198,6 +199,9 @@ class ManagementPage(QWidget):
         self.flashcards_table.blockSignals(False)
         self._sync_select_all_header()
         self._update_row_action_buttons()
+        self._loaded_table_row_states = self._collect_table_row_states(
+            include_selection=False
+        )
 
     def _insert_row(
         self,
@@ -484,9 +488,18 @@ class ManagementPage(QWidget):
         if sorted_rows != rows:
             self._set_table_row_states(sorted_rows)
 
-    def _collect_table_row_states(self) -> list[FlashcardTableRowState]:
-        """Return current table rows including checked and selected state."""
-        selected_rows = set(self.selected_table_rows())
+    def _collect_table_row_states(
+        self,
+        *,
+        include_selection: bool = True,
+    ) -> list[FlashcardTableRowState]:
+        """Return current table rows including persisted and optional UI state.
+
+        Args:
+            include_selection: Whether transient table-row selection should be
+                included in the collected state.
+        """
+        selected_rows = set(self.selected_table_rows()) if include_selection else set()
         rows: list[FlashcardTableRowState] = []
         for row_index in range(self.flashcards_table.rowCount()):
             question_item = self.flashcards_table.item(row_index, 1)
@@ -542,6 +555,12 @@ class ManagementPage(QWidget):
         self.flashcards_table.blockSignals(False)
         self._sync_select_all_header()
         self._update_row_action_buttons()
+
+    def is_dirty(self) -> bool:
+        """Return whether persisted flashcard data differs from the loaded state."""
+        return self._loaded_table_row_states != self._collect_table_row_states(
+            include_selection=False
+        )
 
     def _update_row_action_buttons(self) -> None:
         """Enable reorder actions only when the current selection can move."""

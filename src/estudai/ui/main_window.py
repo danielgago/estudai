@@ -620,6 +620,8 @@ class MainWindow(QMainWindow):
 
     def switch_to_timer(self) -> None:
         """Switch to timer page."""
+        if not self._confirm_discard_management_changes():
+            return
         self._app_shell_controller.switch_to_timer()
 
     def switch_to_management(self) -> None:
@@ -628,7 +630,24 @@ class MainWindow(QMainWindow):
 
     def switch_to_settings(self) -> None:
         """Switch to settings page or back to timer when already there."""
+        if not self._confirm_discard_management_changes():
+            return
         self._app_shell_controller.switch_to_settings()
+
+    def _confirm_discard_management_changes(self) -> bool:
+        """Confirm leaving management when there are unsaved flashcard edits."""
+        if self.stacked_widget.currentWidget() is not self.management_page:
+            return True
+        if not self.management_page.is_dirty():
+            return True
+        confirmation = QMessageBox.warning(
+            self,
+            "Unsaved changes",
+            "You have unsaved flashcard changes. Discard them and leave this page?",
+            QMessageBox.Discard | QMessageBox.Cancel,
+            QMessageBox.Cancel,
+        )
+        return confirmation == QMessageBox.Discard
 
     def _refresh_sidebar_data(self, checked_ids: set[str]) -> None:
         """Refresh sidebar items while preserving the provided checked ids."""
@@ -1258,6 +1277,17 @@ class MainWindow(QMainWindow):
             )
         self.sidebar_folder_list.blockSignals(False)
         self._refresh_loaded_flashcards()
+        if self.stacked_widget.currentWidget() is self.management_page:
+            editing_folder_id = self._management_controller.editing_folder_id
+            if editing_folder_id is not None and self._app_state.has_folder(
+                editing_folder_id
+            ):
+                self.management_page.set_folder_flashcards(
+                    editing_folder_id,
+                    self._app_state.folder_names_by_id[editing_folder_id],
+                    self._app_state.flashcards_by_folder[editing_folder_id],
+                    self._app_state.selected_indexes_for_folder(editing_folder_id),
+                )
         self.reset_all_progress_button.setEnabled(bool(self.flashcards_by_folder))
         self._update_sidebar_reorder_buttons()
         self._show_folder_load_warning(catalog_result.load_errors)
