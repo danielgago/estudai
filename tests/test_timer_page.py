@@ -16,8 +16,6 @@ def _get_app() -> QApplication:
     if existing_app is not None:
         return existing_app
     return QApplication([])
-
-
 def test_timer_start_stop_reset_and_context() -> None:
     """Verify timer controls and context label updates."""
     _get_app()
@@ -274,10 +272,37 @@ def test_paused_flashcard_actions_are_positioned_above_question() -> None:
     _get_app()
     page = TimerPage()
     flashcard_layout = page.content_stack.widget(1).layout()
+    flashcard_content_layout = page.flashcard_content_layout
 
     assert flashcard_layout.itemAt(0).widget() is page.flashcard_pause_actions_container
-    assert flashcard_layout.itemAt(2).widget() is page.flashcard_question_label
+    assert flashcard_layout.itemAt(1).widget() is page.flashcard_content_widget
     assert flashcard_layout.itemAt(0).alignment() == (Qt.AlignTop | Qt.AlignRight)
+    assert flashcard_content_layout.itemAt(1).widget() is page.flashcard_question_label
+    assert flashcard_content_layout.itemAt(2).widget() is page.flashcard_answer_label
+
+
+def test_flashcard_content_uses_centered_container_without_scroll_area() -> None:
+    """Verify flashcard text uses the available area directly without scrolling."""
+    _get_app()
+    page = TimerPage()
+
+    assert hasattr(page, "flashcard_content_scroll_area") is False
+    assert page.content_stack.widget(1).layout().itemAt(1).widget() is page.flashcard_content_widget
+    assert page.flashcard_content_layout.itemAt(0).spacerItem() is not None
+    assert page.flashcard_content_layout.itemAt(3).spacerItem() is not None
+
+
+def test_small_flashcard_question_stays_near_vertical_center() -> None:
+    """Verify smaller flashcards stay visually centered in the content area."""
+    _get_app()
+    page = TimerPage()
+    page.flashcard_content_widget.setFixedSize(464, 248)
+    page.show_flashcard_question("What is DNA?")
+
+    question_center_y = page.flashcard_question_label.geometry().center().y()
+    content_center_y = page.flashcard_content_widget.rect().center().y()
+
+    assert abs(question_center_y - content_center_y) <= 30
 
 
 def test_queue_shuffle_action_only_shows_when_available_and_paused() -> None:
@@ -380,3 +405,51 @@ def test_flashcard_text_decodes_html_entities_as_plain_text() -> None:
 
     assert page.flashcard_question_label.text() == "A > B and it's fine."
     assert page.flashcard_question_label.textFormat() == Qt.PlainText
+
+
+def test_short_flashcard_text_keeps_prominent_font_sizes() -> None:
+    """Verify short flashcards keep the default large typography."""
+    _get_app()
+    page = TimerPage()
+    page.flashcard_content_widget.setFixedSize(464, 248)
+    page.show_flashcard_question("What is DNA?")
+    page.show_flashcard_answer("Genetic material.")
+
+    assert page.flashcard_question_label.font().pointSize() == 40
+    assert page.flashcard_answer_label.font().pointSize() == 34
+
+
+def test_long_flashcard_text_shrinks_to_fit_without_scrollbars() -> None:
+    """Verify very long flashcards keep shrinking until they fit the content area."""
+    _get_app()
+    page = TimerPage()
+    page.flashcard_content_widget.setFixedSize(320, 180)
+    long_question = " ".join(["Long question text with enough detail to wrap heavily."] * 50)
+    long_answer = " ".join(["Long answer text with additional explanation."] * 45)
+
+    page.show_flashcard_question(long_question)
+    page.show_flashcard_answer(long_answer)
+
+    question_point_size = page.flashcard_question_label.font().pointSize()
+    answer_point_size = page.flashcard_answer_label.font().pointSize()
+    available_width = page._flashcard_content_available_width()
+    combined_height = (
+        page._measure_flashcard_text_height(
+            page.flashcard_question_label,
+            rendered_text=page.flashcard_question_label.text(),
+            point_size=question_point_size,
+            available_width=available_width,
+        )
+        + page._measure_flashcard_text_height(
+            page.flashcard_answer_label,
+            rendered_text=page.flashcard_answer_label.text(),
+            point_size=answer_point_size,
+            available_width=available_width,
+        )
+    )
+
+    assert 1 <= question_point_size < 22
+    assert 1 <= answer_point_size < 20
+    assert combined_height <= page._flashcard_content_available_height(
+        visible_label_count=2
+    )
