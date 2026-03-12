@@ -2107,7 +2107,9 @@ def test_reset_all_progress_button_clears_all_sidebar_progress(
     assert biology_folder_id is not None
     assert chemistry_folder_id is not None
     biology_flashcard_id = window.flashcards_by_folder[biology_folder_id][0].stable_id
-    chemistry_flashcard_id = window.flashcards_by_folder[chemistry_folder_id][0].stable_id
+    chemistry_flashcard_id = window.flashcards_by_folder[chemistry_folder_id][
+        0
+    ].stable_id
     assert biology_flashcard_id is not None
     assert chemistry_flashcard_id is not None
     save_progress_entries(

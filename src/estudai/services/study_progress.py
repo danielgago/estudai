@@ -7,6 +7,10 @@ import json
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .settings import WrongAnswerCompletionMode
 
 STUDY_PROGRESS_FILENAME = "study-progress.json"
 STUDY_PROGRESS_VERSION = 1
@@ -59,9 +63,7 @@ class FolderProgressSummary:
         """Return the rounded completion percentage for display."""
         if self.total_flashcards <= 0:
             return 0
-        return int(
-            round((self.completed_flashcards / self.total_flashcards) * 100)
-        )
+        return int(round((self.completed_flashcards / self.total_flashcards) * 100))
 
 
 def get_study_progress_path() -> Path:
