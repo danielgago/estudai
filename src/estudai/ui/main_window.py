@@ -230,6 +230,14 @@ class MainWindow(QMainWindow):
             refresh_management_data=self._refresh_sidebar_data,
             switch_to_management=self.switch_to_management,
             switch_to_timer=self.switch_to_timer,
+            edit_dialog_factory=lambda question, answer, question_image_path, answer_image_path, folder_path: FlashcardEditDialog(
+                question,
+                answer,
+                question_image_path=question_image_path,
+                answer_image_path=answer_image_path,
+                base_folder_path=folder_path,
+                parent=self,
+            ),
         )
         self._timer_controller = TimerPageController(
             parent=self,
@@ -275,10 +283,13 @@ class MainWindow(QMainWindow):
                     )
                 )
             ),
-            edit_dialog_factory=lambda question, answer: FlashcardEditDialog(
+            edit_dialog_factory=lambda question, answer, question_image_path, answer_image_path, folder_path: FlashcardEditDialog(
                 question,
                 answer,
-                self,
+                question_image_path=question_image_path,
+                answer_image_path=answer_image_path,
+                base_folder_path=folder_path,
+                parent=self,
             ),
             show_warning_message=self._show_warning_message,
             confirm_action=lambda title, message: (
@@ -377,7 +388,10 @@ class MainWindow(QMainWindow):
             self._handle_global_hotkey_action_requested
         )
         self.management_page.add_flashcard_button.clicked.connect(
-            self.management_page.add_empty_flashcard_row
+            self._management_controller.add_flashcard
+        )
+        self.management_page.edit_requested.connect(
+            self._management_controller.edit_selected_flashcard
         )
         self.management_page.delete_requested.connect(
             self.delete_selected_flashcards_from_management

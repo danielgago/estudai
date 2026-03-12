@@ -10,6 +10,7 @@ import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, Qt
 from PySide6.QtGui import QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QDialog,
     QMessageBox,
@@ -1714,6 +1715,12 @@ def test_paused_flashcard_edit_updates_current_display_and_future_retry(
         def answer_text(self) -> str:
             return "Edited A1."
 
+        def question_image_path(self) -> str | None:
+            return None
+
+        def answer_image_path(self) -> str | None:
+            return None
+
     monkeypatch.setattr(
         "estudai.ui.main_window.FlashcardEditDialog",
         _FakeEditDialog,
@@ -1886,6 +1893,12 @@ def test_paused_flashcard_delete_keeps_next_card_editable(
 
         def answer_text(self) -> str:
             return "Edited A2."
+
+        def question_image_path(self) -> str | None:
+            return None
+
+        def answer_image_path(self) -> str | None:
+            return None
 
     monkeypatch.setattr(
         "estudai.ui.main_window.FlashcardEditDialog",
@@ -2060,7 +2073,7 @@ def test_management_select_and_unselect_all_controls(
 
 
 def test_management_add_button_is_plus_at_top(
-    app: QApplication, tmp_path: Path
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify the management action bar exposes reorder, sort, and add controls."""
     window = MainWindow()
@@ -2084,12 +2097,54 @@ def test_management_add_button_is_plus_at_top(
         "Move Up",
         "Move Down",
         "Sort by Question A-Z",
+        "Edit",
         "Reset Progress",
         "+",
     ]
     assert management_layout.itemAt(3).widget() is table
+
+    class _FakeAddDialog:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def exec(self) -> int:
+            return QDialog.Accepted
+
+        def question_text(self) -> str:
+            return "Q2?"
+
+        def answer_text(self) -> str:
+            return "A2."
+
+        def question_image_path(self) -> str | None:
+            return None
+
+        def answer_image_path(self) -> str | None:
+            return None
+
+    monkeypatch.setattr(
+        "estudai.ui.main_window.FlashcardEditDialog",
+        _FakeAddDialog,
+    )
     window.management_page.add_flashcard_button.click()
     assert table.rowCount() == 2
+
+
+def test_management_table_is_dialog_only_for_question_and_answer_editing(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify flashcard text editing is disabled directly in the management table."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+    window.handle_sidebar_folder_double_click(window.sidebar_folder_list.item(0))
+    table = window.management_page.flashcards_table
+
+    assert table.editTriggers() == QAbstractItemView.NoEditTriggers
+    assert not (table.item(0, 1).flags() & Qt.ItemIsEditable)
+    assert not (table.item(0, 2).flags() & Qt.ItemIsEditable)
 
 
 def test_sidebar_progress_percentage_updates_after_scoring(
@@ -2330,12 +2385,16 @@ def test_management_right_click_delete_selected_rows(
             self.actions = []
 
         def addAction(self, text: str):  # noqa: N802
-            action = object()
+            class _FakeAction:
+                def setEnabled(self, _enabled: bool) -> None:  # noqa: N802
+                    return None
+
+            action = _FakeAction()
             self.actions.append(action)
             return action
 
         def exec(self, *_args, **_kwargs):  # noqa: A003
-            return self.actions[0]
+            return self.actions[-1]
 
     monkeypatch.setattr("estudai.ui.pages.management_page.QMenu", _FakeMenu)
     monkeypatch.setattr(

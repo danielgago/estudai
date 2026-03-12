@@ -30,10 +30,19 @@ def app() -> QApplication:
 class _FakeDialog:
     """Minimal accepted edit dialog used by mutation-controller tests."""
 
-    def __init__(self, question: str, answer: str) -> None:
+    def __init__(
+        self,
+        question: str,
+        answer: str,
+        question_image_path: str | None = None,
+        answer_image_path: str | None = None,
+        folder_path: Path | None = None,
+    ) -> None:
         """Initialize the dialog with replacement values."""
         self._question = question
         self._answer = answer
+        self._question_image_path = question_image_path
+        self._answer_image_path = answer_image_path
 
     def exec(self) -> int:
         """Return an accepted dialog result."""
@@ -47,18 +56,37 @@ class _FakeDialog:
         """Return the edited answer text."""
         return self._answer
 
+    def question_image_path(self) -> str | None:
+        """Return the edited question image path."""
+        return self._question_image_path
+
+    def answer_image_path(self) -> str | None:
+        """Return the edited answer image path."""
+        return self._answer_image_path
+
 
 class _FakeTimerPage:
     """Minimal timer page spy used by mutation-controller tests."""
 
     def __init__(self) -> None:
         """Initialize the fake timer page."""
-        self.updated_display: tuple[str, str] | None = None
+        self.updated_display: tuple[str, str, str | None, str | None] | None = None
         self.prepared_next_cycle = False
 
-    def update_displayed_flashcard(self, question: str, answer: str) -> None:
+    def update_displayed_flashcard(
+        self,
+        question: str,
+        answer: str,
+        question_image_path: str | None = None,
+        answer_image_path: str | None = None,
+    ) -> None:
         """Record the flashcard text updated in place."""
-        self.updated_display = (question, answer)
+        self.updated_display = (
+            question,
+            answer,
+            question_image_path,
+            answer_image_path,
+        )
 
     def prepare_next_timer_cycle_paused(self) -> None:
         """Record preparing the next timer cycle in paused mode."""
@@ -178,7 +206,12 @@ def _build_controller(
         handle_folder_data_changed=handle_folder_data_changed
         or (lambda _checked_ids, _current_folder_id: None),
         edit_dialog_factory=edit_dialog_factory
-        or (lambda _question, _answer: _FakeDialog("Edited Q?", "Edited A.")),
+        or (
+            lambda _question, _answer, _question_image_path, _answer_image_path, _folder_path: _FakeDialog(
+                "Edited Q?",
+                "Edited A.",
+            )
+        ),
         show_warning_message=show_warning_message or (lambda _title, _message: None),
         confirm_action=confirm_action or (lambda _title, _message: True),
     )
@@ -190,7 +223,15 @@ def test_edit_requested_updates_session_flashcard_and_timer_display(
 ) -> None:
     """Verify editing the paused flashcard updates runtime and display state."""
     flashcard = _flashcard("Q1?", "A1.", "bio-1")
-    updated_flashcard = _flashcard("Edited Q1?", "Edited A1.", "bio-1")
+    updated_flashcard = Flashcard(
+        question="Edited Q1?",
+        answer="Edited A1.",
+        source_file=Path("/tmp/bio/_estudai_flashcards.csv"),
+        source_line=1,
+        stable_id="bio-1",
+        question_image_path="_estudai_flashcard_media/question.png",
+        answer_image_path="_estudai_flashcard_media/answer.png",
+    )
     app_state = StudyApplicationState()
     app_state.replace_folders(
         [
@@ -218,9 +259,11 @@ def test_edit_requested_updates_session_flashcard_and_timer_display(
                 )
             )
         ),
-        edit_dialog_factory=lambda _question, _answer: _FakeDialog(
+        edit_dialog_factory=lambda _question, _answer, _question_image_path, _answer_image_path, _folder_path: _FakeDialog(
             "Edited Q1?",
             "Edited A1.",
+            "_estudai_flashcard_media/question.png",
+            "_estudai_flashcard_media/answer.png",
         ),
     )
     monkeypatch.setattr(
@@ -232,7 +275,12 @@ def test_edit_requested_updates_session_flashcard_and_timer_display(
 
     assert runtime.study_session.flashcards == [updated_flashcard]
     assert runtime.visible_flashcard == updated_flashcard
-    assert timer_page.updated_display == ("Edited Q1?", "Edited A1.")
+    assert timer_page.updated_display == (
+        "Edited Q1?",
+        "Edited A1.",
+        "/tmp/bio/_estudai_flashcard_media/question.png",
+        "/tmp/bio/_estudai_flashcard_media/answer.png",
+    )
     assert refresh_calls == [({"bio"}, None)]
 
 

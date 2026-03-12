@@ -8,7 +8,11 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QListWidget, QListWidgetItem, QMessageBox, QWidget
 
-from estudai.services.csv_flashcards import Flashcard, replace_flashcards_in_folder
+from estudai.services.csv_flashcards import (
+    Flashcard,
+    FlashcardRowData,
+    replace_flashcards_in_folder,
+)
 from estudai.services.folder_storage import (
     create_managed_folder,
     delete_persisted_folder,
@@ -162,7 +166,13 @@ class SidebarFolderOperationsController:
                 f"{load_error}",
             )
         existing_rows = [
-            (flashcard.question, flashcard.answer) for flashcard in existing_flashcards
+            FlashcardRowData(
+                question=flashcard.question,
+                answer=flashcard.answer,
+                question_image_path=flashcard.question_image_path,
+                answer_image_path=flashcard.answer_image_path,
+            )
+            for flashcard in existing_flashcards
         ]
         replace_flashcards_in_folder(target_folder_path, [*existing_rows, *valid_rows])
 

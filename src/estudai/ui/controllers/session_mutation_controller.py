@@ -20,7 +20,7 @@ from estudai.ui.study_session import StudySessionController
 
 CheckedFolderIdsGetter = Callable[[], set[str]]
 HandleFolderDataChanged = Callable[[set[str] | None, str | None], None]
-EditDialogFactory = Callable[[str, str], object]
+EditDialogFactory = Callable[[str, str, str | None, str | None, Path], object]
 ShowWarningMessage = Callable[[str, str], None]
 ConfirmAction = Callable[[str, str], bool]
 
@@ -140,6 +140,9 @@ class SessionMutationController:
         dialog = self._edit_dialog_factory(
             location.flashcard.question,
             location.flashcard.answer,
+            location.flashcard.question_image_path,
+            location.flashcard.answer_image_path,
+            location.folder_path,
         )
         if dialog.exec() != QDialog.Accepted:
             return
@@ -153,6 +156,8 @@ class SessionMutationController:
                 location.folder_flashcard_index,
                 dialog.question_text(),
                 dialog.answer_text(),
+                question_image_path=dialog.question_image_path(),
+                answer_image_path=dialog.answer_image_path(),
             )
         except (IndexError, ValueError) as error:
             self._show_warning_message("Edit flashcard", str(error))
@@ -175,6 +180,14 @@ class SessionMutationController:
         self._timer_page.update_displayed_flashcard(
             updated_flashcard.question,
             updated_flashcard.answer,
+            self._resolved_image_path(
+                location.folder_path,
+                updated_flashcard.question_image_path,
+            ),
+            self._resolved_image_path(
+                location.folder_path,
+                updated_flashcard.answer_image_path,
+            ),
         )
 
     def handle_flashcard_delete_requested(self) -> None:
@@ -317,3 +330,16 @@ class SessionMutationController:
                 continue
             replacements[previous_flashcard] = updated_folder_flashcards[updated_index]
         self._runtime.study_session.replace_flashcards(replacements)
+
+    def _resolved_image_path(
+        self,
+        folder_path: Path,
+        image_path: str | None,
+    ) -> str | None:
+        """Return one absolute image path for timer-page rendering."""
+        if image_path is None:
+            return None
+        candidate_path = Path(image_path)
+        if candidate_path.is_absolute():
+            return str(candidate_path)
+        return str(folder_path / candidate_path)

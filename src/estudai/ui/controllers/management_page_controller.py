@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
+from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QListWidgetItem, QMessageBox, QWidget
+from PySide6.QtWidgets import QDialog, QListWidgetItem, QMessageBox, QWidget
 
 from estudai.services.csv_flashcards import replace_flashcards_in_folder
 from estudai.ui.application_state import StudyApplicationState
@@ -17,6 +18,7 @@ FolderNameResolver = Callable[[QListWidgetItem], str]
 CheckedFolderIdsGetter = Callable[[], set[str]]
 RefreshManagementData = Callable[[set[str]], None]
 PageSwitchCallback = Callable[[], None]
+EditDialogFactory = Callable[[str, str, str | None, str | None, Path], object]
 
 
 class ManagementPageController:
@@ -35,6 +37,7 @@ class ManagementPageController:
         refresh_management_data: RefreshManagementData,
         switch_to_management: PageSwitchCallback,
         switch_to_timer: PageSwitchCallback,
+        edit_dialog_factory: EditDialogFactory,
     ) -> None:
         """Initialize the controller.
 
@@ -52,6 +55,8 @@ class ManagementPageController:
                 the provided checked ids.
             switch_to_management: Navigates to the management page.
             switch_to_timer: Navigates back to the timer page.
+            edit_dialog_factory: Creates the flashcard edit dialog used for
+                management add/edit workflows.
         """
         self._parent = parent
         self._management_page = management_page
@@ -63,6 +68,7 @@ class ManagementPageController:
         self._refresh_management_data = refresh_management_data
         self._switch_to_management = switch_to_management
         self._switch_to_timer = switch_to_timer
+        self._edit_dialog_factory = edit_dialog_factory
         self._editing_folder_id: str | None = None
 
     @property
@@ -140,6 +146,52 @@ class ManagementPageController:
             return
         self._management_page.remove_rows(selected_rows)
 
+    def add_flashcard(self) -> None:
+        """Open the flashcard editor and append a new management row."""
+        folder_path = self._editing_folder_path()
+        if folder_path is None:
+            return
+        dialog = self._edit_dialog_factory("", "", None, None, folder_path)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        self._management_page.add_flashcard_row(
+            dialog.question_text(),
+            dialog.answer_text(),
+            question_image_path=dialog.question_image_path(),
+            answer_image_path=dialog.answer_image_path(),
+        )
+
+    def edit_selected_flashcard(self) -> None:
+        """Edit the currently selected management row through the dialog."""
+        selected_row = self._management_page.selected_flashcard_row()
+        if selected_row is None:
+            QMessageBox.information(
+                self._parent,
+                "Edit flashcard",
+                "Select exactly one flashcard first.",
+            )
+            return
+        folder_path = self._editing_folder_path()
+        if folder_path is None:
+            return
+        row_index, row_data = selected_row
+        dialog = self._edit_dialog_factory(
+            row_data.question,
+            row_data.answer,
+            row_data.question_image_path,
+            row_data.answer_image_path,
+            folder_path,
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return
+        self._management_page.update_flashcard_row(
+            row_index,
+            dialog.question_text(),
+            dialog.answer_text(),
+            question_image_path=dialog.question_image_path(),
+            answer_image_path=dialog.answer_image_path(),
+        )
+
     def save_changes(self) -> None:
         """Persist management-page edits and return to the timer page."""
         if self._editing_folder_id is None:
@@ -180,6 +232,25 @@ class ManagementPageController:
         )
         self._refresh_management_data(checked_ids)
         self._switch_to_timer()
+
+    def _editing_folder_path(self) -> Path | None:
+        """Return the managed folder path for the open management session."""
+        if self._editing_folder_id is None:
+            QMessageBox.warning(
+                self._parent,
+                "Edit flashcard",
+                "No folder selected for editing.",
+            )
+            return None
+        folder_path = self._app_state.persisted_folder_paths.get(self._editing_folder_id)
+        if folder_path is None:
+            QMessageBox.warning(
+                self._parent,
+                "Edit flashcard",
+                "Folder storage is unavailable. Please refresh and try again.",
+            )
+            return None
+        return folder_path
 
     def _open_for_sidebar_item(self, folder_item: QListWidgetItem) -> None:
         """Open management using one sidebar item.

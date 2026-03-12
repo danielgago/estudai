@@ -6,6 +6,7 @@ import csv
 import json
 import os
 import shutil
+from tempfile import TemporaryDirectory
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from uuid import uuid4
@@ -13,6 +14,7 @@ from uuid import uuid4
 from .csv_flashcards import (
     Flashcard,
     ensure_managed_flashcards,
+    get_managed_flashcard_media_dir,
     load_flashcards_from_folder,
 )
 from .study_progress import delete_folder_progress
@@ -295,6 +297,8 @@ def import_folder(source_folder: Path) -> PersistedFolder:
         None,
     )
     previous_flashcards: list[Flashcard] = []
+    managed_media_backup_dir: TemporaryDirectory[str] | None = None
+    preserved_media_dir: Path | None = None
     if existing_folder is not None:
         previous_stored_path = Path(existing_folder.stored_path)
         if previous_stored_path.exists():
@@ -302,16 +306,35 @@ def import_folder(source_folder: Path) -> PersistedFolder:
                 previous_flashcards = load_flashcards_from_folder(previous_stored_path)
             except csv.Error, OSError, UnicodeDecodeError, ValueError:
                 previous_flashcards = []
+            previous_media_dir = get_managed_flashcard_media_dir(previous_stored_path)
+            if previous_media_dir.exists():
+                managed_media_backup_dir = TemporaryDirectory(
+                    dir=get_app_data_dir(),
+                )
+                preserved_media_dir = (
+                    Path(managed_media_backup_dir.name) / previous_media_dir.name
+                )
+                shutil.copytree(previous_media_dir, preserved_media_dir)
     folder_id = existing_folder.id if existing_folder is not None else uuid4().hex
     stored_folder_path = get_library_dir() / folder_id
 
-    if stored_folder_path.exists():
-        shutil.rmtree(stored_folder_path)
-    shutil.copytree(resolved_source, stored_folder_path)
-    ensure_managed_flashcards(
-        stored_folder_path,
-        previous_flashcards=previous_flashcards,
-    )
+    try:
+        if stored_folder_path.exists():
+            shutil.rmtree(stored_folder_path)
+        shutil.copytree(resolved_source, stored_folder_path)
+        if preserved_media_dir is not None and preserved_media_dir.exists():
+            shutil.copytree(
+                preserved_media_dir,
+                get_managed_flashcard_media_dir(stored_folder_path),
+                dirs_exist_ok=True,
+            )
+        ensure_managed_flashcards(
+            stored_folder_path,
+            previous_flashcards=previous_flashcards,
+        )
+    finally:
+        if managed_media_backup_dir is not None:
+            managed_media_backup_dir.cleanup()
 
     persisted_folder = PersistedFolder(
         id=folder_id,

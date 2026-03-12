@@ -465,6 +465,7 @@ class TimerPageController:
         self.show_flashcard_answer(
             sequence_id,
             current_flashcard.answer,
+            current_flashcard.answer_image_path,
             answer_display_duration_seconds,
         )
 
@@ -472,6 +473,7 @@ class TimerPageController:
         self,
         sequence_id: int,
         answer: str,
+        answer_image_path: str | None,
         answer_display_duration_seconds: int,
     ) -> None:
         """Show the answer phase for the active flashcard sequence."""
@@ -481,7 +483,11 @@ class TimerPageController:
             or self._timer_page.flashcard_question_label.isHidden()
         ):
             return
-        self._timer_page.show_flashcard_answer(answer, answer_display_duration_seconds)
+        self._timer_page.show_flashcard_answer(
+            answer,
+            self._resolved_flashcard_image_path(answer_image_path),
+            answer_display_duration_seconds,
+        )
         self.play_flashcard_notification_sound(
             question_phase=False,
             phase_duration_ms=answer_display_duration_seconds * 1000,
@@ -526,6 +532,7 @@ class TimerPageController:
         self._set_navigation_visible(False)
         self._timer_page.show_flashcard_question(
             flashcard.question,
+            self._resolved_flashcard_image_path(flashcard.question_image_path),
             app_settings.question_display_duration_seconds,
         )
         self.refresh_queue_shuffle_action()
@@ -540,6 +547,15 @@ class TimerPageController:
                 app_settings.answer_display_duration_seconds,
             ),
         )
+
+    def _resolved_flashcard_image_path(self, image_path: str | None) -> str | None:
+        """Return one absolute image path for timer-page rendering."""
+        if image_path is None or self._visible_flashcard is None:
+            return None
+        candidate_path = Path(image_path)
+        if candidate_path.is_absolute():
+            return str(candidate_path)
+        return str(self._visible_flashcard.source_file.parent / candidate_path)
 
     def advance_after_flashcard_score(self) -> None:
         """Continue or finish the session after scoring the current flashcard."""

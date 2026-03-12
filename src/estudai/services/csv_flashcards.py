@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import csv
+import shutil
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
 MANAGED_FLASHCARDS_FILENAME = "_estudai_flashcards.csv"
+MANAGED_FLASHCARD_MEDIA_DIRNAME = "_estudai_flashcard_media"
+SUPPORTED_FLASHCARD_IMAGE_EXTENSIONS = frozenset(
+    {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}
+)
+FLASHCARD_IMAGE_FILE_DIALOG_FILTER = (
+    "Image files (*.png *.jpg *.jpeg *.bmp *.gif *.webp)"
+)
 
 
 @dataclass(frozen=True)
@@ -23,6 +31,8 @@ class Flashcard:
         stable_id: Persistent identifier used to track study progress.
         origin_relative_path: Original CSV path within the managed folder, when known.
         origin_line: Original one-based source CSV row index, when known.
+        question_image_path: Optional managed relative path for the question image.
+        answer_image_path: Optional managed relative path for the answer image.
     """
 
     question: str
@@ -32,6 +42,27 @@ class Flashcard:
     stable_id: str = ""
     origin_relative_path: str | None = None
     origin_line: int | None = None
+    question_image_path: str | None = None
+    answer_image_path: str | None = None
+
+
+@dataclass(frozen=True)
+class FlashcardRowData:
+    """Editable flashcard payload used by management and persistence flows.
+
+    Args:
+        question: Flashcard prompt text.
+        answer: Flashcard answer text.
+        question_image_path: Optional image path or managed relative image path
+            for the question side.
+        answer_image_path: Optional image path or managed relative image path
+            for the answer side.
+    """
+
+    question: str
+    answer: str
+    question_image_path: str | None = None
+    answer_image_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -43,6 +74,8 @@ class _ManagedFlashcardRow:
     stable_id: str
     origin_relative_path: str | None
     origin_line: int | None
+    question_image_path: str | None
+    answer_image_path: str | None
 
 
 @dataclass(frozen=True)
@@ -53,6 +86,8 @@ class _FlashcardRecord:
     answer: str
     origin_relative_path: str | None
     origin_line: int | None
+    question_image_path: str | None
+    answer_image_path: str | None
 
 
 def get_managed_csv_path(folder_path: Path) -> Path:
@@ -65,6 +100,18 @@ def get_managed_csv_path(folder_path: Path) -> Path:
         Path: Internal managed CSV path.
     """
     return folder_path / MANAGED_FLASHCARDS_FILENAME
+
+
+def get_managed_flashcard_media_dir(folder_path: Path) -> Path:
+    """Return the folder-owned storage directory for managed flashcard images.
+
+    Args:
+        folder_path: Folder containing managed flashcards.
+
+    Returns:
+        Path: Directory where copied image attachments live.
+    """
+    return folder_path / MANAGED_FLASHCARD_MEDIA_DIRNAME
 
 
 def list_csv_files(folder_path: Path) -> list[Path]:
@@ -190,8 +237,7 @@ def ensure_managed_flashcards(
         source_flashcards,
         previous_flashcards=previous_flashcards or [],
     )
-    _write_managed_flashcards(managed_csv, managed_rows)
-    return load_flashcards_from_csv(managed_csv)
+    return _persist_managed_rows(folder_path, managed_rows)
 
 
 def _load_flashcards_from_source_csv(
@@ -223,6 +269,8 @@ def _load_flashcards_from_source_csv(
                     source_line=line_number,
                     origin_relative_path=origin_relative_path,
                     origin_line=line_number,
+                    question_image_path=None,
+                    answer_image_path=None,
                 )
             )
     return flashcards
@@ -254,6 +302,12 @@ def _load_flashcards_from_managed_csv(csv_path: Path) -> list[Flashcard]:
                         row[3] if len(row) >= 4 else ""
                     ),
                     origin_line=_parse_optional_int(row[4] if len(row) >= 5 else ""),
+                    question_image_path=_parse_optional_text(
+                        row[5] if len(row) >= 6 else ""
+                    ),
+                    answer_image_path=_parse_optional_text(
+                        row[6] if len(row) >= 7 else ""
+                    ),
                 )
             )
     return flashcards
@@ -291,16 +345,26 @@ def _record_from_flashcard(flashcard: Flashcard) -> _FlashcardRecord:
         answer=flashcard.answer,
         origin_relative_path=flashcard.origin_relative_path,
         origin_line=flashcard.origin_line,
+        question_image_path=flashcard.question_image_path,
+        answer_image_path=flashcard.answer_image_path,
     )
 
 
-def _record_from_row(question: str, answer: str) -> _FlashcardRecord:
+def _record_from_row(
+    question: str,
+    answer: str,
+    *,
+    question_image_path: str | None = None,
+    answer_image_path: str | None = None,
+) -> _FlashcardRecord:
     """Build a reconciliation record from one editable row."""
     return _FlashcardRecord(
         question=question,
         answer=answer,
         origin_relative_path=None,
         origin_line=None,
+        question_image_path=question_image_path,
+        answer_image_path=answer_image_path,
     )
 
 
@@ -369,6 +433,12 @@ def _reconcile_managed_rows(
         origin_line = record.origin_line
         if origin_line is None and previous_flashcard is not None:
             origin_line = previous_flashcard.origin_line
+        question_image_path = record.question_image_path
+        if question_image_path is None and previous_flashcard is not None:
+            question_image_path = previous_flashcard.question_image_path
+        answer_image_path = record.answer_image_path
+        if answer_image_path is None and previous_flashcard is not None:
+            answer_image_path = previous_flashcard.answer_image_path
         managed_rows.append(
             _ManagedFlashcardRow(
                 question=record.question,
@@ -376,6 +446,8 @@ def _reconcile_managed_rows(
                 stable_id=stable_id,
                 origin_relative_path=origin_relative_path,
                 origin_line=origin_line,
+                question_image_path=question_image_path,
+                answer_image_path=answer_image_path,
             )
         )
 
@@ -478,39 +550,64 @@ def _origin_line_key(record: _FlashcardRecord) -> tuple[str, int] | None:
     return (record.origin_relative_path, record.origin_line)
 
 
-def _validate_flashcard_field(value: str, field_name: str) -> str:
-    """Validate and normalize one flashcard text field.
+def _validate_flashcard_side(
+    value: str,
+    field_name: str,
+    *,
+    image_path: str | None = None,
+) -> str:
+    """Validate and normalize one flashcard side's text content.
 
     Args:
         value: Field text from user input.
         field_name: Field label used in error messages.
+        image_path: Optional image path attached to the same flashcard side.
 
     Returns:
-        str: Normalized field value.
+        str: Normalized field value, which may be empty when the side has an
+        image attachment.
 
     Raises:
-        ValueError: If the normalized field is empty.
+        ValueError: If the side has neither text nor an image.
     """
     normalized_value = value.strip()
-    if not normalized_value:
-        msg = f"{field_name} cannot be empty."
-        raise ValueError(msg)
-    return normalized_value
+    if normalized_value:
+        return normalized_value
+    if image_path is not None and image_path.strip():
+        return ""
+    msg = f"{field_name} cannot be empty."
+    raise ValueError(msg)
 
 
-def normalize_flashcard_fields(question: str, answer: str) -> tuple[str, str]:
+def normalize_flashcard_fields(
+    question: str,
+    answer: str,
+    *,
+    question_image_path: str | None = None,
+    answer_image_path: str | None = None,
+) -> tuple[str, str]:
     """Validate and normalize one flashcard question/answer pair.
 
     Args:
         question: Raw question text.
         answer: Raw answer text.
+        question_image_path: Optional question-side image path.
+        answer_image_path: Optional answer-side image path.
 
     Returns:
         tuple[str, str]: Normalized question and answer text.
     """
     return (
-        _validate_flashcard_field(question, "Question"),
-        _validate_flashcard_field(answer, "Answer"),
+        _validate_flashcard_side(
+            question,
+            "Question",
+            image_path=question_image_path,
+        ),
+        _validate_flashcard_side(
+            answer,
+            "Answer",
+            image_path=answer_image_path,
+        ),
     )
 
 
@@ -595,22 +692,192 @@ def _write_managed_flashcards(
                 row.stable_id,
                 row.origin_relative_path or "",
                 str(row.origin_line or ""),
+                row.question_image_path or "",
+                row.answer_image_path or "",
             )
             for row in flashcard_rows
         ],
     )
 
 
-def _flashcards_to_rows(flashcards: list[Flashcard]) -> list[tuple[str, str]]:
-    """Convert flashcards into editable question/answer rows.
+def _flashcards_to_rows(flashcards: list[Flashcard]) -> list[FlashcardRowData]:
+    """Convert flashcards into editable question/answer/image rows.
 
     Args:
         flashcards: Flashcards to serialize.
 
     Returns:
-        list[tuple[str, str]]: CSV-compatible question/answer rows.
+        list[FlashcardRowData]: Editable flashcard rows.
     """
-    return [(flashcard.question, flashcard.answer) for flashcard in flashcards]
+    return [
+        FlashcardRowData(
+            question=flashcard.question,
+            answer=flashcard.answer,
+            question_image_path=flashcard.question_image_path,
+            answer_image_path=flashcard.answer_image_path,
+        )
+        for flashcard in flashcards
+    ]
+
+
+def _normalize_flashcard_row_input(
+    row: FlashcardRowData | tuple[str, str],
+) -> FlashcardRowData:
+    """Return one editable flashcard row with a uniform dataclass shape."""
+    if isinstance(row, FlashcardRowData):
+        normalized_question, normalized_answer = normalize_flashcard_fields(
+            row.question,
+            row.answer,
+            question_image_path=row.question_image_path,
+            answer_image_path=row.answer_image_path,
+        )
+        return FlashcardRowData(
+            question=normalized_question,
+            answer=normalized_answer,
+            question_image_path=_normalize_optional_image_path(row.question_image_path),
+            answer_image_path=_normalize_optional_image_path(row.answer_image_path),
+        )
+    normalized_question, normalized_answer = normalize_flashcard_fields(*row)
+    return FlashcardRowData(
+        question=normalized_question,
+        answer=normalized_answer,
+        question_image_path=None,
+        answer_image_path=None,
+    )
+
+
+def _normalize_optional_image_path(image_path: str | None) -> str | None:
+    """Return one optional image path as normalized text."""
+    if image_path is None:
+        return None
+    normalized_path = image_path.strip()
+    return normalized_path or None
+
+
+def _managed_row_from_flashcard(flashcard: Flashcard) -> _ManagedFlashcardRow:
+    """Return one managed CSV row built from an in-memory flashcard."""
+    return _ManagedFlashcardRow(
+        question=flashcard.question,
+        answer=flashcard.answer,
+        stable_id=flashcard.stable_id or uuid4().hex,
+        origin_relative_path=flashcard.origin_relative_path,
+        origin_line=flashcard.origin_line,
+        question_image_path=flashcard.question_image_path,
+        answer_image_path=flashcard.answer_image_path,
+    )
+
+
+def _normalize_managed_image_path(
+    folder_path: Path,
+    image_path: str | None,
+) -> str | None:
+    """Return a managed relative image path for persisted flashcard metadata.
+
+    Relative paths are treated as already-managed references and preserved even
+    when the underlying file is currently unavailable. Absolute paths are
+    validated and copied into folder-owned managed media storage.
+    """
+    normalized_path = _normalize_optional_image_path(image_path)
+    if normalized_path is None:
+        return None
+    candidate_path = Path(normalized_path).expanduser()
+    if not candidate_path.is_absolute():
+        return Path(normalized_path).as_posix()
+    return _copy_flashcard_image_to_managed_storage(folder_path, candidate_path)
+
+
+def _copy_flashcard_image_to_managed_storage(
+    folder_path: Path,
+    source_path: Path,
+) -> str:
+    """Copy one selected image into managed folder storage and return its path.
+
+    Args:
+        folder_path: Managed folder that owns the flashcard.
+        source_path: Absolute source image path chosen by the user.
+
+    Returns:
+        str: Folder-relative managed image path.
+
+    Raises:
+        ValueError: If the image path is invalid or unsupported.
+    """
+    resolved_source_path = source_path.expanduser()
+    if not resolved_source_path.exists():
+        msg = f"Image file not found: {resolved_source_path}"
+        raise ValueError(msg)
+    if not resolved_source_path.is_file():
+        msg = f"Image path is not a file: {resolved_source_path}"
+        raise ValueError(msg)
+    source_suffix = resolved_source_path.suffix.lower()
+    if source_suffix not in SUPPORTED_FLASHCARD_IMAGE_EXTENSIONS:
+        supported_formats = ", ".join(
+            suffix.removeprefix(".").upper()
+            for suffix in sorted(SUPPORTED_FLASHCARD_IMAGE_EXTENSIONS)
+        )
+        msg = f"Unsupported image format. Supported formats: {supported_formats}."
+        raise ValueError(msg)
+    if resolved_source_path.is_relative_to(folder_path):
+        relative_path = resolved_source_path.relative_to(folder_path).as_posix()
+        if _is_managed_flashcard_image_path(relative_path):
+            return relative_path
+    managed_media_dir = get_managed_flashcard_media_dir(folder_path)
+    managed_media_dir.mkdir(parents=True, exist_ok=True)
+    managed_image_path = managed_media_dir / f"{uuid4().hex}{source_suffix}"
+    shutil.copy2(resolved_source_path, managed_image_path)
+    return managed_image_path.relative_to(folder_path).as_posix()
+
+
+def _is_managed_flashcard_image_path(image_path: str) -> bool:
+    """Return whether the path points into the managed flashcard media folder."""
+    path_parts = Path(image_path).parts
+    return bool(path_parts) and path_parts[0] == MANAGED_FLASHCARD_MEDIA_DIRNAME
+
+
+def _referenced_managed_image_paths(
+    flashcard_rows: list[_ManagedFlashcardRow],
+) -> set[str]:
+    """Return the managed image paths currently referenced by persisted rows."""
+    referenced_paths: set[str] = set()
+    for row in flashcard_rows:
+        for image_path in (row.question_image_path, row.answer_image_path):
+            if image_path is None or not _is_managed_flashcard_image_path(image_path):
+                continue
+            referenced_paths.add(image_path)
+    return referenced_paths
+
+
+def _cleanup_unused_managed_images(
+    folder_path: Path,
+    referenced_paths: set[str],
+) -> None:
+    """Delete orphaned managed flashcard images left behind by mutations."""
+    managed_media_dir = get_managed_flashcard_media_dir(folder_path)
+    if not managed_media_dir.exists():
+        return
+    for managed_file in managed_media_dir.iterdir():
+        if not managed_file.is_file():
+            continue
+        relative_path = managed_file.relative_to(folder_path).as_posix()
+        if relative_path in referenced_paths:
+            continue
+        managed_file.unlink()
+    if not any(managed_media_dir.iterdir()):
+        managed_media_dir.rmdir()
+
+
+def _persist_managed_rows(
+    folder_path: Path,
+    managed_rows: list[_ManagedFlashcardRow],
+) -> list[Flashcard]:
+    """Write managed rows, clean orphaned media, and reload flashcards."""
+    managed_csv = get_managed_csv_path(folder_path)
+    _write_managed_flashcards(managed_csv, managed_rows)
+    _cleanup_unused_managed_images(
+        folder_path,
+        _referenced_managed_image_paths(managed_rows),
+    )
+    return load_flashcards_from_csv(managed_csv)
 
 
 def _load_or_bootstrap_managed_flashcards(folder_path: Path) -> list[Flashcard]:
@@ -626,7 +893,12 @@ def _load_or_bootstrap_managed_flashcards(folder_path: Path) -> list[Flashcard]:
 
 
 def add_flashcard_to_folder(
-    folder_path: Path, question: str, answer: str
+    folder_path: Path,
+    question: str,
+    answer: str,
+    *,
+    question_image_path: str | None = None,
+    answer_image_path: str | None = None,
 ) -> list[Flashcard]:
     """Add one flashcard to a folder.
 
@@ -641,18 +913,11 @@ def add_flashcard_to_folder(
     normalized_question, normalized_answer = normalize_flashcard_fields(
         question,
         answer,
+        question_image_path=question_image_path,
+        answer_image_path=answer_image_path,
     )
     flashcards = _load_or_bootstrap_managed_flashcards(folder_path)
-    managed_rows = [
-        _ManagedFlashcardRow(
-            question=flashcard.question,
-            answer=flashcard.answer,
-            stable_id=flashcard.stable_id or uuid4().hex,
-            origin_relative_path=flashcard.origin_relative_path,
-            origin_line=flashcard.origin_line,
-        )
-        for flashcard in flashcards
-    ]
+    managed_rows = [_managed_row_from_flashcard(flashcard) for flashcard in flashcards]
     managed_rows.append(
         _ManagedFlashcardRow(
             question=normalized_question,
@@ -660,11 +925,17 @@ def add_flashcard_to_folder(
             stable_id=uuid4().hex,
             origin_relative_path=None,
             origin_line=None,
+            question_image_path=_normalize_managed_image_path(
+                folder_path,
+                question_image_path,
+            ),
+            answer_image_path=_normalize_managed_image_path(
+                folder_path,
+                answer_image_path,
+            ),
         )
     )
-    managed_csv = get_managed_csv_path(folder_path)
-    _write_managed_flashcards(managed_csv, managed_rows)
-    return load_flashcards_from_csv(managed_csv)
+    return _persist_managed_rows(folder_path, managed_rows)
 
 
 def update_flashcard_in_folder(
@@ -672,6 +943,9 @@ def update_flashcard_in_folder(
     flashcard_index: int,
     question: str,
     answer: str,
+    *,
+    question_image_path: str | None = None,
+    answer_image_path: str | None = None,
 ) -> list[Flashcard]:
     """Update one flashcard by index inside a folder.
 
@@ -690,31 +964,30 @@ def update_flashcard_in_folder(
     normalized_question, normalized_answer = normalize_flashcard_fields(
         question,
         answer,
+        question_image_path=question_image_path,
+        answer_image_path=answer_image_path,
     )
     flashcards = _load_or_bootstrap_managed_flashcards(folder_path)
     if flashcard_index < 0 or flashcard_index >= len(flashcards):
         msg = f"Flashcard index out of range: {flashcard_index}"
         raise IndexError(msg)
-    managed_rows = [
-        _ManagedFlashcardRow(
-            question=flashcard.question,
-            answer=flashcard.answer,
-            stable_id=flashcard.stable_id or uuid4().hex,
-            origin_relative_path=flashcard.origin_relative_path,
-            origin_line=flashcard.origin_line,
-        )
-        for flashcard in flashcards
-    ]
+    managed_rows = [_managed_row_from_flashcard(flashcard) for flashcard in flashcards]
     managed_rows[flashcard_index] = _ManagedFlashcardRow(
         question=normalized_question,
         answer=normalized_answer,
         stable_id=managed_rows[flashcard_index].stable_id,
         origin_relative_path=managed_rows[flashcard_index].origin_relative_path,
         origin_line=managed_rows[flashcard_index].origin_line,
+        question_image_path=_normalize_managed_image_path(
+            folder_path,
+            question_image_path,
+        ),
+        answer_image_path=_normalize_managed_image_path(
+            folder_path,
+            answer_image_path,
+        ),
     )
-    managed_csv = get_managed_csv_path(folder_path)
-    _write_managed_flashcards(managed_csv, managed_rows)
-    return load_flashcards_from_csv(managed_csv)
+    return _persist_managed_rows(folder_path, managed_rows)
 
 
 def delete_flashcards_from_folder(
@@ -744,24 +1017,16 @@ def delete_flashcards_from_folder(
 
     index_set = set(unique_indexes)
     managed_rows = [
-        _ManagedFlashcardRow(
-            question=card.question,
-            answer=card.answer,
-            stable_id=card.stable_id or uuid4().hex,
-            origin_relative_path=card.origin_relative_path,
-            origin_line=card.origin_line,
-        )
+        _managed_row_from_flashcard(card)
         for index, card in enumerate(flashcards)
         if index not in index_set
     ]
-    managed_csv = get_managed_csv_path(folder_path)
-    _write_managed_flashcards(managed_csv, managed_rows)
-    return load_flashcards_from_csv(managed_csv)
+    return _persist_managed_rows(folder_path, managed_rows)
 
 
 def replace_flashcards_in_folder(
     folder_path: Path,
-    flashcard_rows: list[tuple[str, str]],
+    flashcard_rows: list[FlashcardRowData | tuple[str, str]],
 ) -> list[Flashcard]:
     """Replace all flashcards inside one folder.
 
@@ -773,14 +1038,25 @@ def replace_flashcards_in_folder(
         list[Flashcard]: Updated flashcards from managed CSV.
     """
     normalized_rows = [
-        normalize_flashcard_fields(question, answer)
-        for question, answer in flashcard_rows
+        _normalize_flashcard_row_input(row) for row in flashcard_rows
     ]
     existing_flashcards = _load_or_bootstrap_managed_flashcards(folder_path)
     managed_rows = _reconcile_managed_rows(
-        [_record_from_row(question, answer) for question, answer in normalized_rows],
+        [
+            _record_from_row(
+                row.question,
+                row.answer,
+                question_image_path=_normalize_managed_image_path(
+                    folder_path,
+                    row.question_image_path,
+                ),
+                answer_image_path=_normalize_managed_image_path(
+                    folder_path,
+                    row.answer_image_path,
+                ),
+            )
+            for row in normalized_rows
+        ],
         previous_flashcards=existing_flashcards,
     )
-    managed_csv = get_managed_csv_path(folder_path)
-    _write_managed_flashcards(managed_csv, managed_rows)
-    return load_flashcards_from_csv(managed_csv)
+    return _persist_managed_rows(folder_path, managed_rows)
