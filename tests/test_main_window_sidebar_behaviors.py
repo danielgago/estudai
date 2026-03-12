@@ -341,7 +341,8 @@ def test_handle_management_data_changed_skips_missing_stored_folder(
         stored_path=str(tmp_path / "not-there"),
     )
     monkeypatch.setattr(
-        "estudai.ui.main_window.list_persisted_folders", lambda: [fake_folder]
+        "estudai.services.folder_catalog.list_persisted_folders",
+        lambda: [fake_folder],
     )
 
     window.handle_management_data_changed()
