@@ -64,7 +64,7 @@ def test_inline_rename_triggers_editor(
     window.rename_sidebar_folder(folder_item)
 
     assert edited_items == [folder_item]
-    assert window._renaming_folder_id == folder_item.data(Qt.UserRole)
+    assert window._sidebar_folders.renaming_folder_id == folder_item.data(Qt.UserRole)
 
 
 def test_inline_rename_invalid_name_shows_warning(
@@ -90,13 +90,13 @@ def test_inline_rename_invalid_name_shows_warning(
 def test_sidebar_editor_closed_clears_tracking(app: QApplication) -> None:
     """Verify editor close handler clears rename tracking state."""
     window = MainWindow()
-    window._renaming_folder_id = "x"
-    window._renaming_original_name = "y"
+    window._sidebar_folders.renaming_folder_id = "x"
+    window._sidebar_folders.renaming_original_name = "y"
 
     window.handle_sidebar_editor_closed(None)
 
-    assert window._renaming_folder_id is None
-    assert window._renaming_original_name is None
+    assert window._sidebar_folders.renaming_folder_id is None
+    assert window._sidebar_folders.renaming_original_name is None
 
 
 def test_sidebar_click_ignores_non_folder_item(app: QApplication) -> None:

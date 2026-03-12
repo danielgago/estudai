@@ -1,6 +1,5 @@
 """Main application window."""
 
-import random
 from pathlib import Path
 
 from PySide6.QtCore import (
@@ -86,45 +85,6 @@ from .navigation_icons import (
 )
 from .pages import ManagementPage, SettingsPage, TimerPage
 from .sidebar_folders import SidebarFolderController
-
-
-def _attribute_proxy(
-    getter_path: tuple[str, ...],
-    setter_path: tuple[str, ...] | None = None,
-    *,
-    doc: str,
-) -> property:
-    """Build a compatibility property that forwards through nested attributes.
-
-    Args:
-        getter_path: Attribute chain used to read the proxied value.
-        setter_path: Attribute chain used to write the proxied value. When
-            omitted, the resulting property is read-only.
-        doc: Docstring attached to the generated property.
-
-    Returns:
-        property: Descriptor that forwards access through the configured path.
-    """
-
-    def _resolve_path(instance: object, path: tuple[str, ...]) -> object:
-        target = instance
-        for attribute_name in path:
-            target = getattr(target, attribute_name)
-        return target
-
-    def _getter(instance: object) -> object:
-        return _resolve_path(instance, getter_path)
-
-    if setter_path is None:
-        return property(_getter, doc=doc)
-
-    def _setter(instance: object, value: object) -> None:
-        parent = instance
-        for attribute_name in setter_path[:-1]:
-            parent = getattr(parent, attribute_name)
-        setattr(parent, setter_path[-1], value)
-
-    return property(_getter, _setter, doc=doc)
 
 
 class SidebarCheckboxDelegate(NativeCheckboxDelegate):
@@ -286,15 +246,20 @@ class MainWindow(QMainWindow):
                 self._refresh_sidebar_folder_progress_labels
             ),
             start_flashcard_phase_timer=lambda duration_ms, callback: (
-                self._start_flashcard_phase_timer(duration_ms, callback)
+                self._timer_controller.start_flashcard_phase_timer(
+                    duration_ms, callback
+                )
             ),
-            handle_flashcard_phase_timeout=lambda: self._handle_flashcard_phase_timeout(),
+            handle_flashcard_phase_timeout=(
+                lambda: self._timer_controller.handle_flashcard_phase_timeout()
+            ),
             handle_timer_cycle_completed=lambda: self.handle_timer_cycle_completed(),
             load_settings=lambda: load_app_settings(),
             default_sound_path_getter=lambda: get_default_notification_sound_path(),
         )
-        self._bind_timer_compatibility_aliases()
-        flashcard_phase_timer.timeout.connect(self._handle_flashcard_phase_timeout)
+        flashcard_phase_timer.timeout.connect(
+            self._timer_controller.handle_flashcard_phase_timeout
+        )
         self._session_mutation_controller = SessionMutationController(
             parent=self,
             timer_page=self.timer_page,
@@ -378,28 +343,6 @@ class MainWindow(QMainWindow):
             exit_fullscreen=self.exit_fullscreen,
         )
         self._configure_window_shortcuts()
-        self._timer_page_pause_resume_shortcut = (
-            self._hotkey_controller.timer_page_pause_resume_shortcut
-        )
-        self._timer_page_start_stop_shortcut = (
-            self._hotkey_controller.timer_page_start_stop_shortcut
-        )
-        self._timer_page_skip_phase_shortcut = (
-            self._hotkey_controller.timer_page_skip_phase_shortcut
-        )
-        self._timer_page_mark_correct_shortcut = (
-            self._hotkey_controller.timer_page_mark_correct_shortcut
-        )
-        self._timer_page_mark_wrong_shortcut = (
-            self._hotkey_controller.timer_page_mark_wrong_shortcut
-        )
-        self._timer_page_copy_question_shortcut = (
-            self._hotkey_controller.timer_page_copy_question_shortcut
-        )
-        self._toggle_fullscreen_shortcut = (
-            self._hotkey_controller.toggle_fullscreen_shortcut
-        )
-        self._exit_fullscreen_shortcut = self._hotkey_controller.exit_fullscreen_shortcut
         self._apply_in_app_shortcut_bindings(app_settings)
         self.stacked_widget.addWidget(self.timer_page)
         self.stacked_widget.addWidget(self.management_page)
@@ -457,68 +400,6 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             app.installEventFilter(self)
-
-    def _bind_timer_compatibility_aliases(self) -> None:
-        """Expose timer-controller methods through the legacy MainWindow seam."""
-
-        method_aliases = {
-            "_start_flashcard_phase_timer": (
-                self._timer_controller.start_flashcard_phase_timer
-            ),
-            "_handle_flashcard_phase_timeout": (
-                self._timer_controller.handle_flashcard_phase_timeout
-            ),
-            "_cancel_flashcard_phase_timer": (
-                self._timer_controller.cancel_flashcard_phase_timer
-            ),
-            "_reapply_paused_state_after_phase_skip": (
-                self._timer_controller.reapply_paused_state_after_phase_skip
-            ),
-            "_reset_flashcard_sequence_order": (
-                self._timer_controller.reset_flashcard_sequence_order
-            ),
-            "_next_flashcard_for_display": (
-                self._timer_controller.next_flashcard_for_display
-            ),
-            "_start_study_session": self._timer_controller.start_study_session,
-            "_selected_study_session_keys": (
-                self._timer_controller.selected_study_session_keys
-            ),
-            "_initial_study_session_counters": (
-                self._timer_controller.initial_study_session_counters
-            ),
-            "_persist_active_study_session_progress": (
-                self._timer_controller.persist_active_study_session_progress
-            ),
-            "_update_study_session_progress": (
-                self._timer_controller.update_study_session_progress
-            ),
-            "_reset_study_session_state": (
-                self._timer_controller.reset_study_session_state
-            ),
-            "_complete_study_session": self._timer_controller.complete_study_session,
-            "_play_flashcard_notification_sound": (
-                self._timer_controller.play_flashcard_notification_sound
-            ),
-            "_show_current_flashcard_answer": (
-                self._timer_controller.show_current_flashcard_answer
-            ),
-            "_show_flashcard_answer": self._timer_controller.show_flashcard_answer,
-            "_finish_flashcard_answer_phase": (
-                self._timer_controller.finish_flashcard_answer_phase
-            ),
-            "_advance_after_flashcard_score": (
-                self._timer_controller.advance_after_flashcard_score
-            ),
-            "_refresh_queue_shuffle_action": (
-                self._timer_controller.refresh_queue_shuffle_action
-            ),
-            "_can_shuffle_remaining_queue": (
-                self._timer_controller.can_shuffle_remaining_queue
-            ),
-        }
-        for alias_name, method in method_aliases.items():
-            setattr(self, alias_name, method)
 
     def _build_sidebar(self, root_layout: QHBoxLayout) -> None:
         """Build the sidebar area."""
@@ -745,7 +626,7 @@ class MainWindow(QMainWindow):
     def _handle_settings_saved(self, _settings: AppSettings) -> None:
         """Return to the timer page after a successful settings save."""
         self._refresh_sidebar_folder_progress_labels()
-        self._refresh_queue_shuffle_action()
+        self._timer_controller.refresh_queue_shuffle_action()
         self.switch_to_timer()
 
     def handle_timer_running_changed(self, is_running: bool) -> None:
@@ -811,15 +692,6 @@ class MainWindow(QMainWindow):
     def handle_flashcard_phase_skip_requested(self) -> None:
         """Advance the current flashcard phase immediately when one is pending."""
         self._timer_controller.handle_flashcard_phase_skip_requested()
-
-    def _should_show_flashcard_this_cycle(self, probability_percent: int) -> bool:
-        """Return whether the current timer cycle should show a flashcard."""
-        normalized_probability = max(0, min(100, int(probability_percent)))
-        if normalized_probability <= 0:
-            return False
-        if normalized_probability >= 100:
-            return True
-        return random.randint(1, 100) <= normalized_probability
 
     def handle_timer_cycle_completed(self) -> None:
         """Advance the current study session when a timer cycle finishes."""
@@ -909,7 +781,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:  # noqa: N802
         """Release global hotkeys and app-wide filters when closing the window."""
         self.settings_page.stop_active_preview()
-        self._flashcard_sound_controller.stop()
+        self._timer_controller.flashcard_sound_controller.stop()
         self._hotkey_service.clear()
         app = QApplication.instance()
         if app is not None:
@@ -979,7 +851,7 @@ class MainWindow(QMainWindow):
                     continue
                 if folder_ids is not None and folder_id not in folder_ids:
                     continue
-                if folder_id == self._renaming_folder_id:
+                if folder_id == self._sidebar_folders.renaming_folder_id:
                     continue
                 folder_flashcards = self.flashcards_by_folder.get(folder_id, [])
                 item.setText(
@@ -995,12 +867,12 @@ class MainWindow(QMainWindow):
     def _refresh_loaded_flashcards(self) -> None:
         """Refresh selected flashcards from checked folders."""
         self._app_state.refresh_selection(self._get_checked_folder_ids())
-        self._reset_flashcard_sequence_order()
+        self._timer_controller.reset_flashcard_sequence_order()
         self.timer_page.set_flashcard_context(
             self.current_folder_name,
             len(self.loaded_flashcards),
         )
-        if not self._study_session.active:
+        if not self._timer_controller.study_session.active:
             self.timer_page.clear_session_progress()
 
     def handle_sidebar_item_changed(self, item: QListWidgetItem) -> None:
@@ -1394,68 +1266,3 @@ class MainWindow(QMainWindow):
             visible: Whether navigation controls should be visible.
         """
         self._app_shell_controller.set_navigation_visible(visible)
-
-    _study_session = _attribute_proxy(
-        ("_timer_controller", "study_session"),
-        ("_timer_controller", "_study_session"),
-        doc="Compatibility proxy for the runtime study-session controller.",
-    )
-    _active_study_session_keys = _attribute_proxy(
-        ("_timer_controller", "active_study_session_keys"),
-        ("_timer_controller", "active_study_session_keys"),
-        doc="Compatibility proxy for active session keys.",
-    )
-    _pending_flashcard_score = _attribute_proxy(
-        ("_timer_controller", "pending_flashcard_score"),
-        ("_timer_controller", "pending_flashcard_score"),
-        doc="Compatibility proxy for queued flashcard score.",
-    )
-    _visible_flashcard = _attribute_proxy(
-        ("_timer_controller", "visible_flashcard"),
-        ("_timer_controller", "visible_flashcard"),
-        doc="Compatibility proxy for the visible flashcard.",
-    )
-    _flashcard_sound_controller = _attribute_proxy(
-        ("_timer_controller", "flashcard_sound_controller"),
-        doc="Compatibility proxy for flashcard sound playback.",
-    )
-    _renaming_folder_id = _attribute_proxy(
-        ("_sidebar_folders", "renaming_folder_id"),
-        ("_sidebar_folders", "renaming_folder_id"),
-        doc="Compatibility proxy for sidebar inline rename id.",
-    )
-    _renaming_original_name = _attribute_proxy(
-        ("_sidebar_folders", "renaming_original_name"),
-        ("_sidebar_folders", "renaming_original_name"),
-        doc="Compatibility proxy for sidebar inline rename original name.",
-    )
-    _active_flashcard_sequence_id = _attribute_proxy(
-        ("_timer_controller", "flashcard_sequence", "active_sequence_id"),
-        ("_timer_controller", "flashcard_sequence", "active_sequence_id"),
-        doc="Compatibility proxy for flashcard sequence id.",
-    )
-    _next_flashcard_index = _attribute_proxy(
-        ("_timer_controller", "flashcard_sequence", "next_flashcard_index"),
-        ("_timer_controller", "flashcard_sequence", "next_flashcard_index"),
-        doc="Compatibility proxy for sequential flashcard index.",
-    )
-    _pending_flashcard_phase_callback = _attribute_proxy(
-        ("_timer_controller", "flashcard_sequence", "pending_phase_callback"),
-        ("_timer_controller", "flashcard_sequence", "pending_phase_callback"),
-        doc="Compatibility proxy for pending flashcard callback.",
-    )
-    _flashcard_phase_remaining_ms = _attribute_proxy(
-        ("_timer_controller", "flashcard_sequence", "phase_remaining_ms"),
-        ("_timer_controller", "flashcard_sequence", "phase_remaining_ms"),
-        doc="Compatibility proxy for remaining flashcard phase time.",
-    )
-    _flashcard_sequence_paused = _attribute_proxy(
-        ("_timer_controller", "flashcard_sequence", "sequence_paused"),
-        ("_timer_controller", "flashcard_sequence", "sequence_paused"),
-        doc="Compatibility proxy for paused flashcard state.",
-    )
-    _flashcard_phase_timer = _attribute_proxy(
-        ("_timer_controller", "flashcard_sequence", "phase_timer"),
-        ("_timer_controller", "flashcard_sequence", "phase_timer"),
-        doc="Compatibility proxy for the underlying phase timer.",
-    )

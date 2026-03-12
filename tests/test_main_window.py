@@ -656,7 +656,7 @@ def test_start_timer_without_selected_folders_warns_and_stops(
 
     assert warnings == ["warning"]
     assert window.timer_page.is_running is False
-    assert window._study_session.active is False
+    assert window._timer_controller.study_session.active is False
     assert "completed" not in window.timer_page.folder_context_label.text()
 
 
@@ -672,7 +672,7 @@ def test_start_timer_with_selected_flashcards_starts_study_session(
 
     window.timer_page.start_timer()
 
-    assert window._study_session.active is True
+    assert window._timer_controller.study_session.active is True
     assert "0/2 completed | 2 remaining | 0 pending review" in (
         window.timer_page.folder_context_label.text()
     )
@@ -700,8 +700,8 @@ def test_zero_second_timer_starts_flashcards_immediately_and_resets_to_ready(
     (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
     assert window.add_folder(biology_folder) is True
     monkeypatch.setattr(
-        window,
-        "_start_flashcard_phase_timer",
+        window._timer_controller,
+        "start_flashcard_phase_timer",
         lambda _delay, callback: callbacks.append(callback),
     )
 
@@ -709,14 +709,14 @@ def test_zero_second_timer_starts_flashcards_immediately_and_resets_to_ready(
 
     window.timer_page.start_timer()
 
-    assert window._study_session.active is True
+    assert window._timer_controller.study_session.active is True
     assert window.timer_page.is_running is False
     assert window.timer_page.flashcard_question_label.text() == "Q1?"
     assert len(callbacks) == 1
 
     window.timer_page.stop_button.click()
 
-    assert window._study_session.active is False
+    assert window._timer_controller.study_session.active is False
     assert window.timer_page.timer_display.text() == "Ready?"
 
 
@@ -741,8 +741,8 @@ def test_zero_second_timer_advances_to_next_question_without_clearing_timer_view
     (biology_folder / "cards.csv").write_text("Q1?,A1.\nQ2?,A2.\n", encoding="utf-8")
     assert window.add_folder(biology_folder) is True
     monkeypatch.setattr(
-        window,
-        "_start_flashcard_phase_timer",
+        window._timer_controller,
+        "start_flashcard_phase_timer",
         lambda _delay, callback: callbacks.append(callback),
     )
     cleared_views: list[int] = []
@@ -801,14 +801,14 @@ def test_timer_cycle_restarts_countdown_when_probability_roll_fails(
     assert window.add_folder(biology_folder) is True
 
     window.timer_page.start_timer()
-    assert window._study_session.active is True
+    assert window._timer_controller.study_session.active is True
 
     window.timer_page.is_running = False
     window.handle_timer_cycle_completed()
 
     assert window.timer_page.is_running is True
     assert window.timer_page.flashcard_question_label.isHidden()
-    assert window._study_session.current_flashcard() is None
+    assert window._timer_controller.study_session.current_flashcard() is None
 
 
 def test_invalid_csv_folder_warns_and_loads_as_empty(
@@ -873,8 +873,8 @@ def test_scored_session_marks_wrong_then_correct_until_complete(
     (biology_folder / "cards.csv").write_text("Q1?,A1.\nQ2?,A2.\n", encoding="utf-8")
     assert window.add_folder(biology_folder) is True
     monkeypatch.setattr(
-        window,
-        "_start_flashcard_phase_timer",
+        window._timer_controller,
+        "start_flashcard_phase_timer",
         lambda _delay, callback: callbacks.append(callback),
     )
     window.timer_page.start_timer()
@@ -885,12 +885,12 @@ def test_scored_session_marks_wrong_then_correct_until_complete(
     assert len(callbacks) == 1
     callbacks.pop(0)()
     assert window.timer_page.flashcard_answer_label.text() == "A1."
-    assert window._study_session.current_flashcard_index == 0
+    assert window._timer_controller.study_session.current_flashcard_index == 0
     window.timer_page.wrong_button.click()
-    assert window._pending_flashcard_score == "wrong"
-    assert window._study_session.card_states[0].value == "pending"
+    assert window._timer_controller.pending_flashcard_score == "wrong"
+    assert window._timer_controller.study_session.card_states[0].value == "pending"
     callbacks.pop(0)()
-    assert window._study_session.card_states[0].value == "wrong_pending"
+    assert window._timer_controller.study_session.card_states[0].value == "wrong_pending"
     assert "0/2 completed | 2 remaining | 1 pending review" in (
         window.timer_page.folder_context_label.text()
     )
@@ -902,12 +902,12 @@ def test_scored_session_marks_wrong_then_correct_until_complete(
     assert len(callbacks) == 1
     callbacks.pop(0)()
     assert window.timer_page.flashcard_answer_label.text() == "A2."
-    assert window._study_session.current_flashcard_index == 1
+    assert window._timer_controller.study_session.current_flashcard_index == 1
     window.timer_page.correct_button.click()
-    assert window._pending_flashcard_score == "correct"
-    assert window._study_session.card_states[1].value == "pending"
+    assert window._timer_controller.pending_flashcard_score == "correct"
+    assert window._timer_controller.study_session.card_states[1].value == "pending"
     callbacks.pop(0)()
-    assert window._study_session.card_states[1].value == "completed"
+    assert window._timer_controller.study_session.card_states[1].value == "completed"
     assert "1/2 completed | 1 remaining | 1 pending review" in (
         window.timer_page.folder_context_label.text()
     )
@@ -921,7 +921,7 @@ def test_scored_session_marks_wrong_then_correct_until_complete(
     window.timer_page.correct_button.click()
     callbacks.pop(0)()
 
-    assert window._study_session.active is False
+    assert window._timer_controller.study_session.active is False
     assert window.timer_page.is_running is False
     assert window.timer_page.flashcard_question_label.isHidden()
     assert "completed" not in window.timer_page.folder_context_label.text()
@@ -951,8 +951,8 @@ def test_scored_session_mode_b_requires_more_correct_than_wrong_end_to_end(
     (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
     assert window.add_folder(biology_folder) is True
     monkeypatch.setattr(
-        window,
-        "_start_flashcard_phase_timer",
+        window._timer_controller,
+        "start_flashcard_phase_timer",
         lambda _delay, callback: callbacks.append(callback),
     )
     window.timer_page.start_timer()
@@ -962,17 +962,17 @@ def test_scored_session_mode_b_requires_more_correct_than_wrong_end_to_end(
     callbacks.pop(0)()
     window.timer_page.wrong_button.click()
     callbacks.pop(0)()
-    assert window._study_session.card_states[0].value == "wrong_pending"
-    assert window._study_session.card_counters[0].wrong_count == 1
+    assert window._timer_controller.study_session.card_states[0].value == "wrong_pending"
+    assert window._timer_controller.study_session.card_counters[0].wrong_count == 1
 
     window.timer_page.is_running = False
     window.handle_timer_cycle_completed()
     callbacks.pop(0)()
     window.timer_page.correct_button.click()
     callbacks.pop(0)()
-    assert window._study_session.card_states[0].value == "wrong_pending"
-    assert window._study_session.card_counters[0].correct_count == 1
-    assert window._study_session.active is True
+    assert window._timer_controller.study_session.card_states[0].value == "wrong_pending"
+    assert window._timer_controller.study_session.card_counters[0].correct_count == 1
+    assert window._timer_controller.study_session.active is True
 
     window.timer_page.is_running = False
     window.handle_timer_cycle_completed()
@@ -980,7 +980,7 @@ def test_scored_session_mode_b_requires_more_correct_than_wrong_end_to_end(
     window.timer_page.correct_button.click()
     callbacks.pop(0)()
 
-    assert window._study_session.active is False
+    assert window._timer_controller.study_session.active is False
     assert window.timer_page.is_running is False
 
 
@@ -1012,8 +1012,8 @@ def test_wrong_answer_after_x_reinsertion_returns_card_after_requested_gap(
     )
     assert window.add_folder(biology_folder) is True
     monkeypatch.setattr(
-        window,
-        "_start_flashcard_phase_timer",
+        window._timer_controller,
+        "start_flashcard_phase_timer",
         lambda _delay, callback: callbacks.append(callback),
     )
     window.timer_page.start_timer()
@@ -1024,7 +1024,7 @@ def test_wrong_answer_after_x_reinsertion_returns_card_after_requested_gap(
     callbacks.pop(0)()
     window.timer_page.wrong_button.click()
     callbacks.pop(0)()
-    assert window._study_session.queued_flashcard_indexes() == [1, 0, 2]
+    assert window._timer_controller.study_session.queued_flashcard_indexes() == [1, 0, 2]
 
     window.timer_page.is_running = False
     window.handle_timer_cycle_completed()
@@ -1048,12 +1048,12 @@ def test_stop_button_resets_runtime_study_session_state(
     (biology_folder / "cards.csv").write_text("Q1?,A1.\nQ2?,A2.\n", encoding="utf-8")
     assert window.add_folder(biology_folder) is True
     window.timer_page.start_timer()
-    window._next_flashcard_index = 2
+    window._timer_controller.flashcard_sequence.next_flashcard_index = 2
 
     window.timer_page.stop_button.click()
 
-    assert window._study_session.active is False
-    assert window._next_flashcard_index == 0
+    assert window._timer_controller.study_session.active is False
+    assert window._timer_controller.flashcard_sequence.next_flashcard_index == 0
     assert "completed" not in window.timer_page.folder_context_label.text()
     assert window.timer_page.start_button.isEnabled()
 
@@ -1080,8 +1080,8 @@ def test_study_progress_persists_between_windows_and_skips_completed_cards(
     first_window = MainWindow()
     assert first_window.add_folder(biology_folder) is True
     monkeypatch.setattr(
-        first_window,
-        "_start_flashcard_phase_timer",
+        first_window._timer_controller,
+        "start_flashcard_phase_timer",
         lambda _delay, callback: callbacks.append(callback),
     )
     first_window.timer_page.start_timer()
@@ -1095,15 +1095,15 @@ def test_study_progress_persists_between_windows_and_skips_completed_cards(
     callbacks = []
     second_window = MainWindow()
     monkeypatch.setattr(
-        second_window,
-        "_start_flashcard_phase_timer",
+        second_window._timer_controller,
+        "start_flashcard_phase_timer",
         lambda _delay, callback: callbacks.append(callback),
     )
     second_window.timer_page.start_timer()
 
-    assert second_window._study_session.card_counters[0].wrong_count == 1
-    assert second_window._study_session.card_counters[0].correct_count == 0
-    assert second_window._study_session.card_states[0].value == "wrong_pending"
+    assert second_window._timer_controller.study_session.card_counters[0].wrong_count == 1
+    assert second_window._timer_controller.study_session.card_counters[0].correct_count == 0
+    assert second_window._timer_controller.study_session.card_states[0].value == "wrong_pending"
 
     second_window.timer_page.is_running = False
     second_window.handle_timer_cycle_completed()
@@ -1116,17 +1116,17 @@ def test_study_progress_persists_between_windows_and_skips_completed_cards(
     callbacks = []
     third_window = MainWindow()
     monkeypatch.setattr(
-        third_window,
-        "_start_flashcard_phase_timer",
+        third_window._timer_controller,
+        "start_flashcard_phase_timer",
         lambda _delay, callback: callbacks.append(callback),
     )
     third_window.timer_page.start_timer()
 
-    assert third_window._study_session.card_counters[0].wrong_count == 1
-    assert third_window._study_session.card_counters[0].correct_count == 1
-    assert third_window._study_session.card_states[0].value == "completed"
-    assert third_window._study_session.progress().completed_count == 1
-    assert third_window._study_session.progress().remaining_count == 1
+    assert third_window._timer_controller.study_session.card_counters[0].wrong_count == 1
+    assert third_window._timer_controller.study_session.card_counters[0].correct_count == 1
+    assert third_window._timer_controller.study_session.card_states[0].value == "completed"
+    assert third_window._timer_controller.study_session.progress().completed_count == 1
+    assert third_window._timer_controller.study_session.progress().remaining_count == 1
 
     third_window.timer_page.is_running = False
     third_window.handle_timer_cycle_completed()
@@ -1160,8 +1160,8 @@ def test_study_progress_isolated_by_folder_and_survives_folder_rename(
     assert first_window.add_folder(biology_folder) is True
     assert first_window.add_folder(chemistry_folder) is True
     monkeypatch.setattr(
-        first_window,
-        "_start_flashcard_phase_timer",
+        first_window._timer_controller,
+        "start_flashcard_phase_timer",
         lambda _delay, callback: callbacks.append(callback),
     )
     first_window.timer_page.start_timer()
@@ -1180,16 +1180,16 @@ def test_study_progress_isolated_by_folder_and_survives_folder_rename(
     callbacks = []
     second_window = MainWindow()
     monkeypatch.setattr(
-        second_window,
-        "_start_flashcard_phase_timer",
+        second_window._timer_controller,
+        "start_flashcard_phase_timer",
         lambda _delay, callback: callbacks.append(callback),
     )
     second_window.timer_page.start_timer()
 
-    assert second_window._study_session.card_counters[0].correct_count == 1
-    assert second_window._study_session.card_counters[1].correct_count == 0
-    assert second_window._study_session.progress().completed_count == 1
-    assert second_window._study_session.progress().remaining_count == 1
+    assert second_window._timer_controller.study_session.card_counters[0].correct_count == 1
+    assert second_window._timer_controller.study_session.card_counters[1].correct_count == 0
+    assert second_window._timer_controller.study_session.progress().completed_count == 1
+    assert second_window._timer_controller.study_session.progress().remaining_count == 1
 
     second_window.timer_page.is_running = False
     second_window.handle_timer_cycle_completed()
@@ -1233,11 +1233,11 @@ def test_forget_sidebar_folder_progress_clears_persisted_counts_and_refreshes_se
         ]
     )
 
-    assert window._start_study_session() is True
-    assert window._study_session.card_counters[0].correct_count == 1
-    assert window._study_session.card_states[0].value == "completed"
-    assert window._study_session.progress().completed_count == 1
-    assert window._study_session.progress().remaining_count == 1
+    assert window._timer_controller.start_study_session() is True
+    assert window._timer_controller.study_session.card_counters[0].correct_count == 1
+    assert window._timer_controller.study_session.card_states[0].value == "completed"
+    assert window._timer_controller.study_session.progress().completed_count == 1
+    assert window._timer_controller.study_session.progress().remaining_count == 1
 
     monkeypatch.setattr(
         "estudai.ui.main_window.QMessageBox.question",
@@ -1247,12 +1247,12 @@ def test_forget_sidebar_folder_progress_clears_persisted_counts_and_refreshes_se
 
     assert load_folder_progress(folder_id) == {}
     assert len(window.flashcards_by_folder[folder_id]) == 2
-    assert window._study_session.active is True
-    assert window._study_session.card_counters[0].correct_count == 0
-    assert window._study_session.card_counters[0].wrong_count == 0
-    assert window._study_session.card_states[0].value == "pending"
-    assert window._study_session.progress().completed_count == 0
-    assert window._study_session.progress().remaining_count == 2
+    assert window._timer_controller.study_session.active is True
+    assert window._timer_controller.study_session.card_counters[0].correct_count == 0
+    assert window._timer_controller.study_session.card_counters[0].wrong_count == 0
+    assert window._timer_controller.study_session.card_states[0].value == "pending"
+    assert window._timer_controller.study_session.progress().completed_count == 0
+    assert window._timer_controller.study_session.progress().remaining_count == 2
     assert (
         window.timer_page.folder_context_label.text()
         == "Session: 0/2 completed | 2 remaining | 0 pending review"
@@ -1280,8 +1280,8 @@ def test_legacy_managed_folder_migrates_and_persists_progress(
     callbacks: list[object] = []
     first_window = MainWindow()
     monkeypatch.setattr(
-        first_window,
-        "_start_flashcard_phase_timer",
+        first_window._timer_controller,
+        "start_flashcard_phase_timer",
         lambda _delay, callback: callbacks.append(callback),
     )
     first_window.timer_page.start_timer()
@@ -1303,14 +1303,14 @@ def test_legacy_managed_folder_migrates_and_persists_progress(
     callbacks = []
     second_window = MainWindow()
     monkeypatch.setattr(
-        second_window,
-        "_start_flashcard_phase_timer",
+        second_window._timer_controller,
+        "start_flashcard_phase_timer",
         lambda _delay, callback: callbacks.append(callback),
     )
     second_window.timer_page.start_timer()
 
-    assert second_window._study_session.card_counters[0].wrong_count == 1
-    assert second_window._study_session.card_states[0].value == "wrong_pending"
+    assert second_window._timer_controller.study_session.card_counters[0].wrong_count == 1
+    assert second_window._timer_controller.study_session.card_states[0].value == "wrong_pending"
 
 
 def test_timer_completion_uses_queue_shuffle_when_setting_enabled(
@@ -1334,7 +1334,7 @@ def test_timer_completion_uses_queue_shuffle_when_setting_enabled(
         ),
     )
     monkeypatch.setattr(
-        "estudai.ui.main_window.random.choice", lambda flashcards: flashcards[-1]
+        "estudai.ui.controllers.timer_page_controller.random.choice", lambda flashcards: flashcards[-1]
     )
     window = MainWindow()
     biology_folder = tmp_path / "biology"
@@ -1350,7 +1350,7 @@ def test_timer_completion_uses_queue_shuffle_when_setting_enabled(
     window.handle_timer_cycle_completed()
 
     assert shown_flashcards == ["Q2?"]
-    assert window._study_session.current_flashcard_index == 1
+    assert window._timer_controller.study_session.current_flashcard_index == 1
 
 
 def test_true_random_mode_can_repeat_same_wrong_card_end_to_end(
@@ -1373,7 +1373,7 @@ def test_true_random_mode_can_repeat_same_wrong_card_end_to_end(
         ),
     )
     monkeypatch.setattr(
-        "estudai.ui.main_window.random.choice", lambda flashcards: flashcards[-1]
+        "estudai.ui.controllers.timer_page_controller.random.choice", lambda flashcards: flashcards[-1]
     )
     window = MainWindow()
     biology_folder = tmp_path / "biology"
@@ -1384,15 +1384,15 @@ def test_true_random_mode_can_repeat_same_wrong_card_end_to_end(
     )
     assert window.add_folder(biology_folder) is True
     monkeypatch.setattr(
-        window,
-        "_start_flashcard_phase_timer",
+        window._timer_controller,
+        "start_flashcard_phase_timer",
         lambda _delay, callback: callbacks.append(callback),
     )
     window.timer_page.start_timer()
 
     window.timer_page.is_running = False
     window.handle_timer_cycle_completed()
-    assert window._study_session.study_order_mode is StudyOrderMode.TRUE_RANDOM
+    assert window._timer_controller.study_session.study_order_mode is StudyOrderMode.TRUE_RANDOM
     assert window.timer_page.flashcard_question_label.text() == "Q3?"
     callbacks.pop(0)()
     window.timer_page.wrong_button.click()
@@ -1402,7 +1402,7 @@ def test_true_random_mode_can_repeat_same_wrong_card_end_to_end(
     window.handle_timer_cycle_completed()
 
     assert window.timer_page.flashcard_question_label.text() == "Q3?"
-    assert window._can_shuffle_remaining_queue() is False
+    assert window._timer_controller.can_shuffle_remaining_queue() is False
 
 
 def test_flashcard_sequence_plays_sound_for_question_and_answer(
@@ -1417,7 +1417,7 @@ def test_flashcard_sequence_plays_sound_for_question_and_answer(
     restart_calls: list[str] = []
     window = MainWindow()
     player = _FakePlayer()
-    window._flashcard_sound_controller.set_player(player)
+    window._timer_controller.flashcard_sound_controller.set_player(player)
     flashcard = Flashcard(
         question="Q?",
         answer="A.",
@@ -1426,8 +1426,8 @@ def test_flashcard_sequence_plays_sound_for_question_and_answer(
     )
 
     monkeypatch.setattr(
-        window,
-        "_start_flashcard_phase_timer",
+        window._timer_controller,
+        "start_flashcard_phase_timer",
         lambda _delay, callback: callbacks.append(callback),
     )
     monkeypatch.setattr(
@@ -1479,7 +1479,7 @@ def test_flashcard_sequence_uses_default_sound_for_both_phases_when_unset(
     callbacks: list[object] = []
     window = MainWindow()
     player = _FakePlayer()
-    window._flashcard_sound_controller.set_player(player)
+    window._timer_controller.flashcard_sound_controller.set_player(player)
     flashcard = Flashcard(
         question="Q?",
         answer="A.",
@@ -1500,8 +1500,8 @@ def test_flashcard_sequence_uses_default_sound_for_both_phases_when_unset(
         ),
     )
     monkeypatch.setattr(
-        window,
-        "_start_flashcard_phase_timer",
+        window._timer_controller,
+        "start_flashcard_phase_timer",
         lambda _delay, callback: callbacks.append(callback),
     )
 
@@ -1523,7 +1523,7 @@ def test_flashcard_sequence_stops_sound_when_question_phase_ends(
     callbacks: list[object] = []
     window = MainWindow()
     player = _FakePlayer()
-    window._flashcard_sound_controller.set_player(player)
+    window._timer_controller.flashcard_sound_controller.set_player(player)
     flashcard = Flashcard(
         question="Q?",
         answer="A.",
@@ -1532,8 +1532,8 @@ def test_flashcard_sequence_stops_sound_when_question_phase_ends(
     )
 
     monkeypatch.setattr(
-        window,
-        "_start_flashcard_phase_timer",
+        window._timer_controller,
+        "start_flashcard_phase_timer",
         lambda _delay, callback: callbacks.append(callback),
     )
     monkeypatch.setattr(
@@ -1568,7 +1568,7 @@ def test_stop_button_stops_active_flashcard_sound(
     question_sound_path.write_bytes(b"RIFF....WAVEfmt ")
     window = MainWindow()
     player = _FakePlayer()
-    window._flashcard_sound_controller.set_player(player)
+    window._timer_controller.flashcard_sound_controller.set_player(player)
     flashcard = Flashcard(
         question="Q?",
         answer="A.",
@@ -1577,8 +1577,8 @@ def test_stop_button_stops_active_flashcard_sound(
     )
 
     monkeypatch.setattr(
-        window,
-        "_start_flashcard_phase_timer",
+        window._timer_controller,
+        "start_flashcard_phase_timer",
         lambda _delay, callback: None,
     )
     monkeypatch.setattr(
@@ -1620,8 +1620,8 @@ def test_unanswered_flashcard_returns_after_other_cards(
     (biology_folder / "cards.csv").write_text("Q1?,A1.\nQ2?,A2.\n", encoding="utf-8")
     assert window.add_folder(biology_folder) is True
     monkeypatch.setattr(
-        window,
-        "_start_flashcard_phase_timer",
+        window._timer_controller,
+        "start_flashcard_phase_timer",
         lambda _delay, callback: callbacks.append(callback),
     )
     window.timer_page.start_timer()
@@ -1631,7 +1631,7 @@ def test_unanswered_flashcard_returns_after_other_cards(
     callbacks.pop(0)()
     assert window.timer_page.flashcard_answer_label.text() == "A1."
     callbacks.pop(0)()
-    assert window._study_session.card_states[0].value == "pending"
+    assert window._timer_controller.study_session.card_states[0].value == "pending"
     assert window.timer_page.is_running is True
 
     window.timer_page.is_running = False
@@ -1679,8 +1679,8 @@ def test_paused_flashcard_edit_updates_current_display_and_future_retry(
         _FakeEditDialog,
     )
     monkeypatch.setattr(
-        window,
-        "_start_flashcard_phase_timer",
+        window._timer_controller,
+        "start_flashcard_phase_timer",
         lambda _delay, callback: callbacks.append(callback),
     )
 
@@ -1732,8 +1732,8 @@ def test_paused_flashcard_delete_removes_card_from_active_session(
     assert window.add_folder(biology_folder) is True
     folder_id = window.sidebar_folder_list.item(0).data(Qt.UserRole)
     monkeypatch.setattr(
-        window,
-        "_start_flashcard_phase_timer",
+        window._timer_controller,
+        "start_flashcard_phase_timer",
         lambda _delay, callback: callbacks.append(callback),
     )
 
@@ -1744,8 +1744,8 @@ def test_paused_flashcard_delete_removes_card_from_active_session(
     window.timer_page.delete_flashcard_button.click()
 
     assert [card.question for card in window.flashcards_by_folder[folder_id]] == ["Q2?"]
-    assert window._study_session.current_flashcard() is None
-    assert window._study_session.queued_flashcard_indexes() == [0]
+    assert window._timer_controller.study_session.current_flashcard() is None
+    assert window._timer_controller.study_session.queued_flashcard_indexes() == [0]
     assert window.timer_page.pause_button.text() == "Resume"
     assert window.timer_page.flashcard_question_label.isHidden()
 
@@ -1781,8 +1781,8 @@ def test_deleting_last_paused_flashcard_completes_session_cleanly(
     (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
     assert window.add_folder(biology_folder) is True
     monkeypatch.setattr(
-        window,
-        "_start_flashcard_phase_timer",
+        window._timer_controller,
+        "start_flashcard_phase_timer",
         lambda _delay, callback: None,
     )
 
@@ -1792,7 +1792,7 @@ def test_deleting_last_paused_flashcard_completes_session_cleanly(
     window.timer_page.pause_timer()
     window.timer_page.delete_flashcard_button.click()
 
-    assert window._study_session.active is False
+    assert window._timer_controller.study_session.active is False
     assert window.timer_page.start_button.isEnabled()
     assert not window.timer_page.pause_button.isEnabled()
     assert not window.timer_page.stop_button.isEnabled()
@@ -1852,8 +1852,8 @@ def test_paused_flashcard_delete_keeps_next_card_editable(
         _FakeEditDialog,
     )
     monkeypatch.setattr(
-        window,
-        "_start_flashcard_phase_timer",
+        window._timer_controller,
+        "start_flashcard_phase_timer",
         lambda _delay, callback: callbacks.append(callback),
     )
 
@@ -1882,7 +1882,7 @@ def test_flashcard_pause_handler_stops_and_resumes_phase_timer(
 ) -> None:
     """Verify pause/resume preserves live session state during a flashcard phase."""
     window = MainWindow()
-    window._study_session.start(
+    window._timer_controller.study_session.start(
         [
             Flashcard(
                 question="Q?",
@@ -1898,9 +1898,9 @@ def test_flashcard_pause_handler_stops_and_resumes_phase_timer(
         queue_start_shuffled=False,
         choice_func=lambda indexes: indexes[0],
     )
-    window._study_session.set_current_flashcard(0)
+    window._timer_controller.study_session.set_current_flashcard(0)
     window.timer_page.show_flashcard_question("Q?", display_duration_seconds=5)
-    window._pending_flashcard_phase_callback = lambda: None
+    window._timer_controller.flashcard_sequence.pending_phase_callback = lambda: None
 
     class _FakePhaseTimer:
         def __init__(self) -> None:
@@ -1923,16 +1923,16 @@ def test_flashcard_pause_handler_stops_and_resumes_phase_timer(
             self.active = True
 
     fake_timer = _FakePhaseTimer()
-    monkeypatch.setattr(window, "_flashcard_phase_timer", fake_timer)
+    monkeypatch.setattr(window._timer_controller.flashcard_sequence, "phase_timer", fake_timer)
 
     window.handle_flashcard_pause_toggled(True)
     assert fake_timer.stopped is True
-    assert window._flashcard_phase_remaining_ms == 1500
-    assert window._study_session.current_flashcard_index == 0
+    assert window._timer_controller.flashcard_sequence.phase_remaining_ms == 1500
+    assert window._timer_controller.study_session.current_flashcard_index == 0
 
     window.handle_flashcard_pause_toggled(False)
     assert fake_timer.started_with == 1500
-    assert window._study_session.card_states[0].value == "pending"
+    assert window._timer_controller.study_session.card_states[0].value == "pending"
 
 
 def test_create_folder_from_prompt(
@@ -2071,14 +2071,14 @@ def test_sidebar_progress_percentage_updates_after_scoring(
     assert window.add_folder(biology_folder) is True
     callbacks: list[object] = []
     monkeypatch.setattr(
-        window,
-        "_start_flashcard_phase_timer",
+        window._timer_controller,
+        "start_flashcard_phase_timer",
         lambda _delay, callback: callbacks.append(callback),
     )
 
     assert window.sidebar_folder_list.item(0).text() == "biology (2 cards | 0% done)"
-    assert window._start_study_session() is True
-    flashcard = window._next_flashcard_for_display()
+    assert window._timer_controller.start_study_session() is True
+    flashcard = window._timer_controller.next_flashcard_for_display()
     assert flashcard is not None
 
     window.show_flashcard_popup(flashcard)
@@ -2388,31 +2388,31 @@ def test_in_app_timer_shortcuts_control_timer(
     (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
     assert window.add_folder(biology_folder) is True
 
-    assert window._timer_page_pause_resume_shortcut.context() == Qt.ApplicationShortcut
-    assert window._timer_page_pause_resume_shortcut.key().toString() == "Space"
+    assert window._hotkey_controller.timer_page_pause_resume_shortcut.context() == Qt.ApplicationShortcut
+    assert window._hotkey_controller.timer_page_pause_resume_shortcut.key().toString() == "Space"
     assert {
         shortcut.toString()
-        for shortcut in window._timer_page_start_stop_shortcut.keys()
+        for shortcut in window._hotkey_controller.timer_page_start_stop_shortcut.keys()
     } == {"Return", "Enter"}
-    assert window._timer_page_skip_phase_shortcut.context() == Qt.ApplicationShortcut
-    assert window._timer_page_skip_phase_shortcut.key().toString() == "Right"
-    assert window._timer_page_mark_correct_shortcut.context() == Qt.ApplicationShortcut
-    assert window._timer_page_mark_correct_shortcut.key().toString() == "Up"
-    assert window._timer_page_mark_wrong_shortcut.context() == Qt.ApplicationShortcut
-    assert window._timer_page_mark_wrong_shortcut.key().toString() == "Down"
-    assert window._timer_page_copy_question_shortcut.context() == Qt.ApplicationShortcut
-    assert window._timer_page_copy_question_shortcut.key().toString() == "C"
+    assert window._hotkey_controller.timer_page_skip_phase_shortcut.context() == Qt.ApplicationShortcut
+    assert window._hotkey_controller.timer_page_skip_phase_shortcut.key().toString() == "Right"
+    assert window._hotkey_controller.timer_page_mark_correct_shortcut.context() == Qt.ApplicationShortcut
+    assert window._hotkey_controller.timer_page_mark_correct_shortcut.key().toString() == "Up"
+    assert window._hotkey_controller.timer_page_mark_wrong_shortcut.context() == Qt.ApplicationShortcut
+    assert window._hotkey_controller.timer_page_mark_wrong_shortcut.key().toString() == "Down"
+    assert window._hotkey_controller.timer_page_copy_question_shortcut.context() == Qt.ApplicationShortcut
+    assert window._hotkey_controller.timer_page_copy_question_shortcut.key().toString() == "C"
 
-    window._timer_page_start_stop_shortcut.activated.emit()
+    window._hotkey_controller.timer_page_start_stop_shortcut.activated.emit()
     assert window.timer_page.is_running is True
 
-    window._timer_page_pause_resume_shortcut.activated.emit()
+    window._hotkey_controller.timer_page_pause_resume_shortcut.activated.emit()
     assert window.timer_page.is_running is False
 
-    window._timer_page_pause_resume_shortcut.activated.emit()
+    window._hotkey_controller.timer_page_pause_resume_shortcut.activated.emit()
     assert window.timer_page.is_running is True
 
-    window._timer_page_start_stop_shortcut.activated.emit()
+    window._hotkey_controller.timer_page_start_stop_shortcut.activated.emit()
     assert window.timer_page.is_running is False
     assert window.timer_page.start_button.isEnabled() is True
     assert window.timer_page.stop_button.isEnabled() is False
@@ -2429,7 +2429,7 @@ def test_modified_global_binding_does_not_trigger_local_space_shortcut(
     (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
     assert window.add_folder(biology_folder) is True
 
-    window._timer_page_start_stop_shortcut.activated.emit()
+    window._hotkey_controller.timer_page_start_stop_shortcut.activated.emit()
     assert window.timer_page.is_running is True
 
     modified_space_event = QKeyEvent(
@@ -2451,13 +2451,13 @@ def test_fullscreen_shortcuts_use_app_scope_and_expected_handlers(
     """Verify F11 toggles fullscreen and Escape exits it through shortcuts."""
     window = _FullscreenSpyWindow()
 
-    assert window._toggle_fullscreen_shortcut.context() == Qt.ApplicationShortcut
-    assert window._toggle_fullscreen_shortcut.key().toString() == "F11"
-    assert window._exit_fullscreen_shortcut.context() == Qt.ApplicationShortcut
-    assert window._exit_fullscreen_shortcut.key().toString() == "Esc"
+    assert window._hotkey_controller.toggle_fullscreen_shortcut.context() == Qt.ApplicationShortcut
+    assert window._hotkey_controller.toggle_fullscreen_shortcut.key().toString() == "F11"
+    assert window._hotkey_controller.exit_fullscreen_shortcut.context() == Qt.ApplicationShortcut
+    assert window._hotkey_controller.exit_fullscreen_shortcut.key().toString() == "Esc"
 
-    window._toggle_fullscreen_shortcut.activated.emit()
-    window._exit_fullscreen_shortcut.activated.emit()
+    window._hotkey_controller.toggle_fullscreen_shortcut.activated.emit()
+    window._hotkey_controller.exit_fullscreen_shortcut.activated.emit()
 
     assert window.toggle_fullscreen_call_count == 1
     assert window.exit_fullscreen_call_count == 1
@@ -2518,20 +2518,20 @@ def test_global_hotkeys_score_flashcards_through_existing_controls(
     biology_folder.mkdir()
     (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
     assert window.add_folder(biology_folder) is True
-    assert window._start_study_session() is True
+    assert window._timer_controller.start_study_session() is True
 
-    flashcard = window._next_flashcard_for_display()
+    flashcard = window._timer_controller.next_flashcard_for_display()
     assert flashcard is not None
     window.show_flashcard_popup(flashcard)
-    window._show_current_flashcard_answer(window._active_flashcard_sequence_id, 8)
+    window._timer_controller.show_current_flashcard_answer(window._timer_controller.flashcard_sequence.active_sequence_id, 8)
 
     backend.trigger("ctrl+alt+up")
     assert window.timer_page.selected_flashcard_score() == "correct"
-    assert window._pending_flashcard_score == "correct"
+    assert window._timer_controller.pending_flashcard_score == "correct"
 
     backend.trigger("ctrl+alt+down")
     assert window.timer_page.selected_flashcard_score() == "wrong"
-    assert window._pending_flashcard_score == "wrong"
+    assert window._timer_controller.pending_flashcard_score == "wrong"
 
 
 def test_global_hotkey_skips_flashcard_phases_through_existing_flow(
@@ -2550,9 +2550,9 @@ def test_global_hotkey_skips_flashcard_phases_through_existing_flow(
     biology_folder.mkdir()
     (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
     assert window.add_folder(biology_folder) is True
-    assert window._start_study_session() is True
+    assert window._timer_controller.start_study_session() is True
 
-    flashcard = window._next_flashcard_for_display()
+    flashcard = window._timer_controller.next_flashcard_for_display()
     assert flashcard is not None
     window.show_flashcard_popup(flashcard)
 
@@ -2562,7 +2562,7 @@ def test_global_hotkey_skips_flashcard_phases_through_existing_flow(
     window.timer_page.correct_button.click()
     backend.trigger("ctrl+alt+right")
 
-    assert window._study_session.active is False
+    assert window._timer_controller.study_session.active is False
     assert window.timer_page.flashcard_question_label.isHidden() is True
     assert window.timer_page.flashcard_answer_label.isHidden() is True
 
@@ -2577,9 +2577,9 @@ def test_global_hotkey_copies_visible_flashcard_question(
     biology_folder.mkdir()
     (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
     assert window.add_folder(biology_folder) is True
-    assert window._start_study_session() is True
+    assert window._timer_controller.start_study_session() is True
 
-    flashcard = window._next_flashcard_for_display()
+    flashcard = window._timer_controller.next_flashcard_for_display()
     assert flashcard is not None
     window.show_flashcard_popup(flashcard)
 
@@ -2605,20 +2605,20 @@ def test_in_app_hotkeys_score_flashcards_through_existing_controls(
     biology_folder.mkdir()
     (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
     assert window.add_folder(biology_folder) is True
-    assert window._start_study_session() is True
+    assert window._timer_controller.start_study_session() is True
 
-    flashcard = window._next_flashcard_for_display()
+    flashcard = window._timer_controller.next_flashcard_for_display()
     assert flashcard is not None
     window.show_flashcard_popup(flashcard)
-    window._show_current_flashcard_answer(window._active_flashcard_sequence_id, 8)
+    window._timer_controller.show_current_flashcard_answer(window._timer_controller.flashcard_sequence.active_sequence_id, 8)
 
-    window._timer_page_mark_correct_shortcut.activated.emit()
+    window._hotkey_controller.timer_page_mark_correct_shortcut.activated.emit()
     assert window.timer_page.selected_flashcard_score() == "correct"
-    assert window._pending_flashcard_score == "correct"
+    assert window._timer_controller.pending_flashcard_score == "correct"
 
-    window._timer_page_mark_wrong_shortcut.activated.emit()
+    window._hotkey_controller.timer_page_mark_wrong_shortcut.activated.emit()
     assert window.timer_page.selected_flashcard_score() == "wrong"
-    assert window._pending_flashcard_score == "wrong"
+    assert window._timer_controller.pending_flashcard_score == "wrong"
 
 
 def test_in_app_skip_shortcut_preserves_unanswered_flow(
@@ -2637,19 +2637,19 @@ def test_in_app_skip_shortcut_preserves_unanswered_flow(
     biology_folder.mkdir()
     (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
     assert window.add_folder(biology_folder) is True
-    assert window._start_study_session() is True
+    assert window._timer_controller.start_study_session() is True
 
-    flashcard = window._next_flashcard_for_display()
+    flashcard = window._timer_controller.next_flashcard_for_display()
     assert flashcard is not None
     window.show_flashcard_popup(flashcard)
 
-    window._timer_page_skip_phase_shortcut.activated.emit()
+    window._hotkey_controller.timer_page_skip_phase_shortcut.activated.emit()
     assert window.timer_page.flashcard_answer_label.isHidden() is False
 
-    window._timer_page_skip_phase_shortcut.activated.emit()
+    window._hotkey_controller.timer_page_skip_phase_shortcut.activated.emit()
 
-    assert window._study_session.active is True
-    assert window._study_session.progress().remaining_count == 1
+    assert window._timer_controller.study_session.active is True
+    assert window._timer_controller.study_session.progress().remaining_count == 1
     assert window.timer_page.is_running is True
     assert window.timer_page.flashcard_question_label.isHidden() is True
     assert window.timer_page.flashcard_answer_label.isHidden() is True
@@ -2664,14 +2664,14 @@ def test_in_app_copy_shortcut_copies_visible_flashcard_question(
     biology_folder.mkdir()
     (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
     assert window.add_folder(biology_folder) is True
-    assert window._start_study_session() is True
+    assert window._timer_controller.start_study_session() is True
 
-    flashcard = window._next_flashcard_for_display()
+    flashcard = window._timer_controller.next_flashcard_for_display()
     assert flashcard is not None
     window.show_flashcard_popup(flashcard)
 
     QApplication.clipboard().clear()
-    window._timer_page_copy_question_shortcut.activated.emit()
+    window._hotkey_controller.timer_page_copy_question_shortcut.activated.emit()
 
     assert QApplication.clipboard().text() == "Q1?"
     assert window.timer_page.copy_feedback_label.isHidden() is False
@@ -2775,10 +2775,10 @@ def test_saving_settings_can_disable_hotkeys_and_in_app_shortcuts(
     assert persisted.in_app_skip_phase_shortcut == ""
     assert {
         shortcut.toString()
-        for shortcut in window._timer_page_start_stop_shortcut.keys()
+        for shortcut in window._hotkey_controller.timer_page_start_stop_shortcut.keys()
     } == {""}
-    assert window._timer_page_pause_resume_shortcut.key().toString() == ""
-    assert window._timer_page_skip_phase_shortcut.key().toString() == ""
+    assert window._hotkey_controller.timer_page_pause_resume_shortcut.key().toString() == ""
+    assert window._hotkey_controller.timer_page_skip_phase_shortcut.key().toString() == ""
 
     with pytest.raises(HotkeyRegistrationError, match="ctrl\\+alt\\+enter"):
         backend.trigger("ctrl+alt+enter")
@@ -2816,19 +2816,19 @@ def test_saving_settings_rebinds_active_in_app_shortcuts(
     assert persisted.in_app_mark_wrong_shortcut == "Ctrl+Left"
     assert persisted.in_app_copy_question_shortcut == "Ctrl+C"
 
-    assert window._timer_page_start_stop_shortcut.key().toString() == "Ctrl+S"
-    assert window._timer_page_pause_resume_shortcut.key().toString() == "Ctrl+P"
-    assert window._timer_page_skip_phase_shortcut.key().toString() == "Ctrl+L"
-    assert window._timer_page_mark_correct_shortcut.key().toString() == "Ctrl+Right"
-    assert window._timer_page_mark_wrong_shortcut.key().toString() == "Ctrl+Left"
-    assert window._timer_page_copy_question_shortcut.key().toString() == "Ctrl+C"
-    assert window._toggle_fullscreen_shortcut.key().toString() == "F11"
-    assert window._exit_fullscreen_shortcut.key().toString() == "Esc"
+    assert window._hotkey_controller.timer_page_start_stop_shortcut.key().toString() == "Ctrl+S"
+    assert window._hotkey_controller.timer_page_pause_resume_shortcut.key().toString() == "Ctrl+P"
+    assert window._hotkey_controller.timer_page_skip_phase_shortcut.key().toString() == "Ctrl+L"
+    assert window._hotkey_controller.timer_page_mark_correct_shortcut.key().toString() == "Ctrl+Right"
+    assert window._hotkey_controller.timer_page_mark_wrong_shortcut.key().toString() == "Ctrl+Left"
+    assert window._hotkey_controller.timer_page_copy_question_shortcut.key().toString() == "Ctrl+C"
+    assert window._hotkey_controller.toggle_fullscreen_shortcut.key().toString() == "F11"
+    assert window._hotkey_controller.exit_fullscreen_shortcut.key().toString() == "Esc"
 
     window.switch_to_timer()
-    window._timer_page_start_stop_shortcut.activated.emit()
+    window._hotkey_controller.timer_page_start_stop_shortcut.activated.emit()
     assert window.timer_page.is_running is True
-    window._timer_page_pause_resume_shortcut.activated.emit()
+    window._hotkey_controller.timer_page_pause_resume_shortcut.activated.emit()
     assert window.timer_page.is_running is False
 
 
