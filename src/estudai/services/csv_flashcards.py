@@ -17,6 +17,7 @@ SUPPORTED_FLASHCARD_IMAGE_EXTENSIONS = frozenset(
 FLASHCARD_IMAGE_FILE_DIALOG_FILTER = (
     "Image files (*.png *.jpg *.jpeg *.bmp *.gif *.webp)"
 )
+_IMAGE_PATH_UNSPECIFIED = object()
 
 
 @dataclass(frozen=True)
@@ -86,8 +87,8 @@ class _FlashcardRecord:
     answer: str
     origin_relative_path: str | None
     origin_line: int | None
-    question_image_path: str | None
-    answer_image_path: str | None
+    question_image_path: str | None | object
+    answer_image_path: str | None | object
 
 
 def get_managed_csv_path(folder_path: Path) -> Path:
@@ -338,15 +339,27 @@ def _parse_optional_int(value: str) -> int | None:
     return parsed_value if parsed_value > 0 else None
 
 
-def _record_from_flashcard(flashcard: Flashcard) -> _FlashcardRecord:
+def _record_from_flashcard(
+    flashcard: Flashcard,
+    *,
+    preserve_image_paths: bool = False,
+) -> _FlashcardRecord:
     """Build a reconciliation record from one loaded flashcard."""
     return _FlashcardRecord(
         question=flashcard.question,
         answer=flashcard.answer,
         origin_relative_path=flashcard.origin_relative_path,
         origin_line=flashcard.origin_line,
-        question_image_path=flashcard.question_image_path,
-        answer_image_path=flashcard.answer_image_path,
+        question_image_path=(
+            _IMAGE_PATH_UNSPECIFIED
+            if preserve_image_paths
+            else flashcard.question_image_path
+        ),
+        answer_image_path=(
+            _IMAGE_PATH_UNSPECIFIED
+            if preserve_image_paths
+            else flashcard.answer_image_path
+        ),
     )
 
 
@@ -383,7 +396,13 @@ def _build_managed_rows(
         list[_ManagedFlashcardRow]: Managed CSV rows ready to persist.
     """
     return _reconcile_managed_rows(
-        [_record_from_flashcard(flashcard) for flashcard in flashcards],
+        [
+            _record_from_flashcard(
+                flashcard,
+                preserve_image_paths=True,
+            )
+            for flashcard in flashcards
+        ],
         previous_flashcards=previous_flashcards,
     )
 
@@ -434,11 +453,21 @@ def _reconcile_managed_rows(
         if origin_line is None and previous_flashcard is not None:
             origin_line = previous_flashcard.origin_line
         question_image_path = record.question_image_path
-        if question_image_path is None and previous_flashcard is not None:
+        if (
+            question_image_path is _IMAGE_PATH_UNSPECIFIED
+            and previous_flashcard is not None
+        ):
             question_image_path = previous_flashcard.question_image_path
+        elif question_image_path is _IMAGE_PATH_UNSPECIFIED:
+            question_image_path = None
         answer_image_path = record.answer_image_path
-        if answer_image_path is None and previous_flashcard is not None:
+        if (
+            answer_image_path is _IMAGE_PATH_UNSPECIFIED
+            and previous_flashcard is not None
+        ):
             answer_image_path = previous_flashcard.answer_image_path
+        elif answer_image_path is _IMAGE_PATH_UNSPECIFIED:
+            answer_image_path = None
         managed_rows.append(
             _ManagedFlashcardRow(
                 question=record.question,

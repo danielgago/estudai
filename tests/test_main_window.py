@@ -8,7 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, Qt
-from PySide6.QtGui import QKeyEvent, QMouseEvent
+from PySide6.QtGui import QImage, QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from estudai.services.csv_flashcards import Flashcard
 from estudai.services.csv_flashcards import get_managed_csv_path
+from estudai.services.csv_flashcards import update_flashcard_in_folder
 from estudai.services.folder_storage import (
     create_managed_folder,
     list_persisted_folders,
@@ -56,6 +57,14 @@ def app() -> QApplication:
 def isolated_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Use an isolated app data directory for each test."""
     monkeypatch.setenv("ESTUDAI_DATA_DIR", str(tmp_path / "app-data"))
+
+
+def _write_test_image(path: Path, *, width: int = 64, height: int = 64) -> str:
+    """Create a simple raster image fixture and return its path."""
+    image = QImage(width, height, QImage.Format.Format_ARGB32)
+    image.fill(0xFF3366CC)
+    assert image.save(str(path))
+    return str(path)
 
 
 class _FakeHotkeyBackend:
@@ -3024,6 +3033,68 @@ def test_management_save_validates_non_empty_fields(
 
     assert warnings
     assert window.stacked_widget.currentWidget() is window.management_page
+
+
+def test_management_save_persists_explicit_image_removal(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify removing an attached image in the dialog survives save and reopen."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text(
+        "What is shown?,A diagram.\n",
+        encoding="utf-8",
+    )
+    assert window.add_folder(biology_folder) is True
+    folder_id = window.sidebar_folder_list.item(0).data(Qt.UserRole)
+    assert folder_id is not None
+    stored_folder_path = window._app_state.persisted_folder_paths[folder_id]
+    image_path = _write_test_image(tmp_path / "attached.png")
+    update_flashcard_in_folder(
+        stored_folder_path,
+        0,
+        "What is shown?",
+        "A diagram.",
+        question_image_path=image_path,
+    )
+    window.handle_management_data_changed()
+    window.handle_sidebar_folder_double_click(window.sidebar_folder_list.item(0))
+    window.management_page.flashcards_table.selectRow(0)
+
+    class _FakeEditDialog:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def exec(self) -> int:
+            return QDialog.Accepted
+
+        def question_text(self) -> str:
+            return "What is shown?"
+
+        def answer_text(self) -> str:
+            return "A diagram."
+
+        def question_image_path(self) -> str | None:
+            return None
+
+        def answer_image_path(self) -> str | None:
+            return None
+
+    monkeypatch.setattr(
+        "estudai.ui.main_window.FlashcardEditDialog",
+        _FakeEditDialog,
+    )
+
+    window.management_page.edit_flashcard_button.click()
+    window.save_management_changes()
+    window.handle_sidebar_folder_double_click(window.sidebar_folder_list.item(0))
+
+    assert window.flashcards_by_folder[folder_id][0].question_image_path is None
+    selected_row = window.management_page.selected_flashcard_row()
+    assert selected_row is None
+    row_data = window.management_page.flashcard_row_data(0)
+    assert row_data.question_image_path is None
 
 
 def test_import_notebooklm_csv_appends_rows_to_selected_folder(

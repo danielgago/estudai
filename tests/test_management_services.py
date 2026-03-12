@@ -230,6 +230,35 @@ def test_replace_flashcards_preserves_existing_relative_image_paths(
     assert (folder_path / managed_image_path).exists()
 
 
+def test_replace_flashcards_allows_explicit_image_removal(tmp_path: Path) -> None:
+    """Verify replace can explicitly remove a previously attached image."""
+    created_folder = create_managed_folder("Pathology")
+    folder_path = Path(created_folder.stored_path)
+    source_image = _write_png(tmp_path / "attached.png")
+    added_flashcards = add_flashcard_to_folder(
+        folder_path,
+        "Q1?",
+        "A1.",
+        question_image_path=str(source_image),
+    )
+    managed_image_path = added_flashcards[0].question_image_path
+    assert managed_image_path is not None
+
+    replaced = replace_flashcards_in_folder(
+        folder_path,
+        [
+            FlashcardRowData(
+                question="Q1?",
+                answer="A1.",
+                question_image_path=None,
+            )
+        ],
+    )
+
+    assert replaced[0].question_image_path is None
+    assert (folder_path / managed_image_path).exists() is False
+
+
 def test_sort_flashcard_rows_by_question_uses_normalized_question_text() -> None:
     """Verify alphabetical flashcard sort is deterministic and normalized."""
     sorted_rows = sort_flashcard_rows_by_question(
