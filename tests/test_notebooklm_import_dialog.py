@@ -140,3 +140,15 @@ def test_create_target_folder_paths(
     assert dialog.target_folder_combo.count() == 1
     assert dialog.selected_folder_id() is not None
     assert dialog.target_folder_combo.currentText() == "Physics"
+
+
+def test_reload_folders_shows_hierarchical_labels(app: QApplication) -> None:
+    """Verify nested folders are labeled by path in the target combo box."""
+    root_folder = create_managed_folder("Biology")
+    create_managed_folder("Genetics", parent_id=root_folder.id)
+
+    dialog = NotebookLMCsvImportDialog()
+
+    assert dialog.target_folder_combo.count() == 2
+    assert dialog.target_folder_combo.itemText(0) == "Biology"
+    assert dialog.target_folder_combo.itemText(1) == "Biology / Genetics"

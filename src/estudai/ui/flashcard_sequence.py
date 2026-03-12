@@ -102,6 +102,12 @@ class FlashcardSequenceController:
         self.pending_phase_callback = None
         self.phase_remaining_ms = 0
 
+    def skip_phase(self) -> Callable[[], None] | None:
+        """Return the pending phase callback after cancelling the active timer."""
+        callback = self.pending_phase_callback
+        self.cancel_phase_timer()
+        return callback
+
     def handle_pause_toggle(
         self,
         paused: bool,

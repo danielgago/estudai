@@ -124,10 +124,25 @@ class NotebookLMCsvImportDialog(QDialog):
         Args:
             preferred_folder_id: Folder id selected after reload when available.
         """
+        persisted_folders = list_persisted_folders()
+        folders_by_id = {folder.id: folder for folder in persisted_folders}
+        folder_labels_by_id: dict[str, str] = {}
+
+        def build_folder_label(folder_id: str) -> str:
+            if folder_id in folder_labels_by_id:
+                return folder_labels_by_id[folder_id]
+            folder = folders_by_id[folder_id]
+            if folder.parent_id is None or folder.parent_id not in folders_by_id:
+                folder_labels_by_id[folder_id] = folder.name
+                return folder.name
+            parent_label = build_folder_label(folder.parent_id)
+            folder_labels_by_id[folder_id] = f"{parent_label} / {folder.name}"
+            return folder_labels_by_id[folder_id]
+
         self.target_folder_combo.blockSignals(True)
         self.target_folder_combo.clear()
-        for folder in list_persisted_folders():
-            self.target_folder_combo.addItem(folder.name, folder.id)
+        for folder in persisted_folders:
+            self.target_folder_combo.addItem(build_folder_label(folder.id), folder.id)
         if self.target_folder_combo.count() == 0:
             self.target_folder_combo.addItem("No folders available", None)
         elif preferred_folder_id is not None:

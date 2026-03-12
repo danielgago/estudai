@@ -15,9 +15,13 @@ from estudai.services.settings import (
     MAX_TIMER_DURATION_SECONDS,
     SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_DISPLAY_NAME,
     SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_PATH,
+    SETTINGS_KEY_FLASHCARD_QUEUE_START_SHUFFLED,
+    SETTINGS_KEY_FLASHCARD_RANDOM_ORDER_ENABLED,
+    SETTINGS_KEY_FLASHCARD_STUDY_ORDER_MODE,
     SETTINGS_KEY_LEGACY_NOTIFICATION_SOUND_PATH,
     SETTINGS_KEY_QUESTION_NOTIFICATION_SOUND_DISPLAY_NAME,
     SETTINGS_KEY_QUESTION_NOTIFICATION_SOUND_PATH,
+    StudyOrderMode,
     WrongAnswerCompletionMode,
     WrongAnswerReinsertionMode,
     _open_settings,
@@ -72,7 +76,8 @@ def test_settings_defaults_and_persistence() -> None:
     expected = AppSettings(
         timer_duration_seconds=120,
         flashcard_probability_percent=55,
-        flashcard_random_order_enabled=True,
+        flashcard_study_order_mode=StudyOrderMode.TRUE_RANDOM,
+        flashcard_queue_start_shuffled=True,
         question_display_duration_seconds=4,
         answer_display_duration_seconds=7,
         question_notification_sound_path="/tmp/question-sound.wav",
@@ -99,6 +104,18 @@ def test_settings_defaults_and_persistence() -> None:
 
     restored = load_app_settings()
     assert restored == expected
+
+
+def test_settings_migrate_legacy_random_order_to_queue_shuffle() -> None:
+    """Verify the legacy random-order boolean becomes queue mode plus shuffling."""
+    qsettings = _open_settings()
+    qsettings.setValue(SETTINGS_KEY_FLASHCARD_RANDOM_ORDER_ENABLED, True)
+    qsettings.sync()
+
+    restored = load_app_settings()
+
+    assert restored.flashcard_study_order_mode is StudyOrderMode.QUEUE
+    assert restored.flashcard_queue_start_shuffled is True
 
 
 def test_settings_persist_wrong_answer_reinsert_after_zero() -> None:
@@ -168,8 +185,15 @@ def test_settings_default_hotkeys_match_expected_bindings() -> None:
         restored.start_stop_hotkey == DEFAULT_HOTKEY_BINDINGS[HotkeyAction.START_STOP]
     )
     assert (
+        restored.skip_phase_hotkey == DEFAULT_HOTKEY_BINDINGS[HotkeyAction.SKIP_PHASE]
+    )
+    assert (
         restored.mark_correct_hotkey
         == DEFAULT_HOTKEY_BINDINGS[HotkeyAction.MARK_CORRECT]
+    )
+    assert (
+        restored.in_app_skip_phase_shortcut
+        == DEFAULT_IN_APP_SHORTCUT_BINDINGS[InAppShortcutAction.SKIP_PHASE]
     )
     assert (
         restored.mark_wrong_hotkey == DEFAULT_HOTKEY_BINDINGS[HotkeyAction.MARK_WRONG]
@@ -307,6 +331,27 @@ def test_settings_save_clears_legacy_notification_sound_key() -> None:
     )
 
 
+def test_settings_save_clears_legacy_random_order_key() -> None:
+    """Verify saving new study-order settings removes the deprecated boolean key."""
+    qsettings = _open_settings()
+    qsettings.setValue(SETTINGS_KEY_FLASHCARD_RANDOM_ORDER_ENABLED, True)
+    qsettings.sync()
+
+    save_app_settings(
+        AppSettings(
+            flashcard_study_order_mode=StudyOrderMode.TRUE_RANDOM,
+            flashcard_queue_start_shuffled=False,
+        )
+    )
+
+    qsettings = _open_settings()
+    assert qsettings.contains(SETTINGS_KEY_FLASHCARD_RANDOM_ORDER_ENABLED) is False
+    assert qsettings.value(SETTINGS_KEY_FLASHCARD_STUDY_ORDER_MODE) == (
+        StudyOrderMode.TRUE_RANDOM.value
+    )
+    assert qsettings.value(SETTINGS_KEY_FLASHCARD_QUEUE_START_SHUFFLED) is False
+
+
 def test_settings_upgrade_from_1_0_preserves_legacy_sound_path_on_save() -> None:
     """Verify a 1.0-style sound setting survives the first 1.1 save."""
     qsettings = _open_settings()
@@ -333,7 +378,8 @@ def test_settings_page_only_persists_changes_after_save(app: QApplication) -> No
 
     page.timer_duration_spinbox.setValue(90)
     page.flashcard_probability_spinbox.setValue(80)
-    page.flashcard_random_order_checkbox.setChecked(True)
+    page.flashcard_study_order_combo.setCurrentIndex(1)
+    page.flashcard_queue_start_shuffled_checkbox.setChecked(True)
     page.question_duration_spinbox.setValue(5)
     page.answer_duration_spinbox.setValue(11)
     page.wrong_answer_completion_mode_combo.setCurrentIndex(1)
@@ -341,11 +387,13 @@ def test_settings_page_only_persists_changes_after_save(app: QApplication) -> No
     page.wrong_answer_reinsert_after_spinbox.setValue(6)
     page.pause_resume_hotkey_edit.setKeySequence("Ctrl+Alt+P")
     page.start_stop_hotkey_edit.setKeySequence("Ctrl+Alt+S")
+    page.skip_phase_hotkey_edit.setKeySequence("Ctrl+Alt+K")
     page.mark_correct_hotkey_edit.setKeySequence("Ctrl+Alt+Right")
     page.mark_wrong_hotkey_edit.setKeySequence("Ctrl+Alt+Left")
     page.copy_question_hotkey_edit.setKeySequence("Ctrl+Alt+C")
     page.in_app_pause_resume_shortcut_edit.setKeySequence("Ctrl+P")
     page.in_app_start_stop_shortcut_edit.setKeySequence("Ctrl+Return")
+    page.in_app_skip_phase_shortcut_edit.setKeySequence("Ctrl+L")
     page.in_app_mark_correct_shortcut_edit.setKeySequence("Ctrl+Up")
     page.in_app_mark_wrong_shortcut_edit.setKeySequence("Ctrl+Down")
     page.in_app_copy_question_shortcut_edit.setKeySequence("C")
@@ -357,7 +405,8 @@ def test_settings_page_only_persists_changes_after_save(app: QApplication) -> No
     persisted = load_app_settings()
     assert persisted.timer_duration_seconds == 90
     assert persisted.flashcard_probability_percent == 80
-    assert persisted.flashcard_random_order_enabled is True
+    assert persisted.flashcard_study_order_mode is StudyOrderMode.TRUE_RANDOM
+    assert persisted.flashcard_queue_start_shuffled is True
     assert persisted.question_display_duration_seconds == 5
     assert persisted.answer_display_duration_seconds == 11
     assert (
@@ -371,11 +420,13 @@ def test_settings_page_only_persists_changes_after_save(app: QApplication) -> No
     assert persisted.wrong_answer_reinsert_after_count == 6
     assert persisted.pause_resume_hotkey == "Ctrl+Alt+P"
     assert persisted.start_stop_hotkey == "Ctrl+Alt+S"
+    assert persisted.skip_phase_hotkey == "Ctrl+Alt+K"
     assert persisted.mark_correct_hotkey == "Ctrl+Alt+Right"
     assert persisted.mark_wrong_hotkey == "Ctrl+Alt+Left"
     assert persisted.copy_question_hotkey == "Ctrl+Alt+C"
     assert persisted.in_app_pause_resume_shortcut == "Ctrl+P"
     assert persisted.in_app_start_stop_shortcut == "Ctrl+Return"
+    assert persisted.in_app_skip_phase_shortcut == "Ctrl+L"
     assert persisted.in_app_mark_correct_shortcut == "Ctrl+Up"
     assert persisted.in_app_mark_wrong_shortcut == "Ctrl+Down"
     assert persisted.in_app_copy_question_shortcut == "C"
@@ -384,9 +435,9 @@ def test_settings_page_only_persists_changes_after_save(app: QApplication) -> No
 def test_settings_page_checkbox_keeps_native_indicator_styles(
     app: QApplication,
 ) -> None:
-    """Verify random-order checkbox avoids fragile indicator stylesheet overrides."""
+    """Verify queue-shuffle checkbox avoids fragile indicator stylesheet overrides."""
     page = SettingsPage()
-    stylesheet = page.flashcard_random_order_checkbox.styleSheet()
+    stylesheet = page.flashcard_queue_start_shuffled_checkbox.styleSheet()
 
     assert stylesheet == ""
 
@@ -429,6 +480,7 @@ def test_settings_page_disables_global_hotkeys_when_unavailable(
 
     assert not page.pause_resume_hotkey_edit.isEnabled()
     assert not page.start_stop_hotkey_edit.isEnabled()
+    assert not page.skip_phase_hotkey_edit.isEnabled()
     assert "unsupported" in page.hotkey_help_label.text().lower()
 
 
@@ -448,6 +500,18 @@ def test_settings_page_enables_after_x_only_for_matching_mode(
     page.wrong_answer_reinsertion_mode_combo.setCurrentIndex(0)
 
     assert page.wrong_answer_reinsert_after_spinbox.isEnabled() is True
+
+
+def test_settings_page_hides_queue_behavior_in_true_random_mode(
+    app: QApplication,
+) -> None:
+    """Verify queue-only controls disappear when true-random mode is selected."""
+    page = SettingsPage()
+
+    page.flashcard_study_order_combo.setCurrentIndex(1)
+
+    assert page.queue_behavior_group.isHidden() is True
+    assert page.wrong_answer_reinsert_after_spinbox.isEnabled() is False
 
 
 def test_settings_page_blocks_save_when_spinbox_text_is_out_of_range(
@@ -614,7 +678,8 @@ def test_settings_page_cancel_restores_persisted_values(app: QApplication) -> No
         AppSettings(
             timer_duration_seconds=120,
             flashcard_probability_percent=55,
-            flashcard_random_order_enabled=True,
+            flashcard_study_order_mode=StudyOrderMode.QUEUE,
+            flashcard_queue_start_shuffled=True,
             question_display_duration_seconds=4,
             answer_display_duration_seconds=7,
             wrong_answer_completion_mode=(
@@ -629,7 +694,8 @@ def test_settings_page_cancel_restores_persisted_values(app: QApplication) -> No
     page = SettingsPage()
     page.timer_duration_spinbox.setValue(999)
     page.flashcard_probability_spinbox.setValue(1)
-    page.flashcard_random_order_checkbox.setChecked(False)
+    page.flashcard_study_order_combo.setCurrentIndex(1)
+    page.flashcard_queue_start_shuffled_checkbox.setChecked(False)
     page.wrong_answer_completion_mode_combo.setCurrentIndex(0)
     page.wrong_answer_reinsertion_mode_combo.setCurrentIndex(1)
     page.wrong_answer_reinsert_after_spinbox.setValue(2)
@@ -638,7 +704,8 @@ def test_settings_page_cancel_restores_persisted_values(app: QApplication) -> No
 
     assert page.timer_duration_spinbox.value() == 120
     assert page.flashcard_probability_spinbox.value() == 55
-    assert page.flashcard_random_order_checkbox.isChecked() is True
+    assert page.flashcard_study_order_combo.currentData() == StudyOrderMode.QUEUE.value
+    assert page.flashcard_queue_start_shuffled_checkbox.isChecked() is True
     assert page.wrong_answer_completion_mode_combo.currentData() == (
         WrongAnswerCompletionMode.UNTIL_CORRECT_MORE_THAN_WRONG.value
     )

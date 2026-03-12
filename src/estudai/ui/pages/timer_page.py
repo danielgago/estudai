@@ -3,13 +3,14 @@
 from PySide6.QtCore import (
     QEasingCurve,
     QEvent,
+    QPoint,
     QPropertyAnimation,
     QTime,
     Qt,
     QTimer,
     Signal,
 )
-from PySide6.QtGui import QColor, QFont, QPalette
+from PySide6.QtGui import QColor, QFont, QPalette, QPixmap, QTextDocument
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -38,11 +39,19 @@ class TimerPage(QWidget):
     timer_running_changed = Signal(bool)
     timer_cycle_completed = Signal()
     flashcard_pause_toggled = Signal(bool)
+    flashcard_queue_shuffle_requested = Signal()
+    flashcard_phase_skip_requested = Signal()
     flashcard_marked_correct = Signal()
     flashcard_marked_wrong = Signal()
     flashcard_edit_requested = Signal()
     flashcard_delete_requested = Signal()
     stop_requested = Signal()
+
+    _FLASHCARD_QUESTION_BASE_POINT_SIZE = 40
+    _FLASHCARD_ANSWER_BASE_POINT_SIZE = 34
+    _FLASHCARD_IMAGE_MAX_HEIGHT = 220
+    _FLASHCARD_IMAGE_MIN_HEIGHT = 80
+    _IMAGE_PATH_UNCHANGED = object()
 
     def __init__(self, default_duration_seconds: int = 25 * 60):
         super().__init__()
@@ -58,10 +67,15 @@ class TimerPage(QWidget):
         self._flashcard_progress_active = False
         self._selected_flashcard_score: str | None = None
         self._current_flashcard_question: str = ""
+        self._current_flashcard_answer: str = ""
+        self._current_question_image_path: str | None = None
+        self._current_answer_image_path: str | None = None
         self._folder_name: str = "No folders selected"
         self._card_count: int = 0
         self._session_progress_text: str = ""
+        self._queue_shuffle_available = False
         self._copy_feedback_animation: QPropertyAnimation | None = None
+        self._updating_flashcard_content_presentation = False
         self.init_ui()
 
     def init_ui(self):
@@ -95,7 +109,7 @@ class TimerPage(QWidget):
         self._flashcard_view = flashcard_view
         flashcard_layout = QVBoxLayout(flashcard_view)
         flashcard_layout.setContentsMargins(0, 0, 0, 0)
-        flashcard_layout.setSpacing(14)
+        flashcard_layout.setSpacing(10)
         self.flashcard_actions_container = QWidget()
         actions_size_policy = self.flashcard_actions_container.sizePolicy()
         actions_size_policy.setRetainSizeWhenHidden(True)
@@ -135,6 +149,21 @@ class TimerPage(QWidget):
         flashcard_pause_actions_layout.setContentsMargins(0, 0, 0, 0)
         flashcard_pause_actions_layout.setSpacing(10)
         flashcard_pause_actions_layout.addStretch(1)
+        self.skip_phase_button = QPushButton("Skip")
+        self.skip_phase_button.setToolTip("Advance the current flashcard phase")
+        self.skip_phase_button.clicked.connect(self.flashcard_phase_skip_requested.emit)
+        self.skip_phase_button.setMinimumWidth(130)
+        self.skip_phase_button.setEnabled(False)
+        flashcard_pause_actions_layout.addWidget(self.skip_phase_button)
+        self.shuffle_queue_button = QPushButton("Shuffle Queue")
+        self.shuffle_queue_button.setToolTip("Shuffle remaining queue")
+        self.shuffle_queue_button.clicked.connect(
+            self.flashcard_queue_shuffle_requested.emit
+        )
+        self.shuffle_queue_button.setMinimumWidth(140)
+        self.shuffle_queue_button.setVisible(False)
+        self.shuffle_queue_button.setEnabled(False)
+        flashcard_pause_actions_layout.addWidget(self.shuffle_queue_button)
         self.edit_flashcard_button = QPushButton("Edit")
         self.edit_flashcard_button.setToolTip("Edit current flashcard")
         self.edit_flashcard_button.clicked.connect(self.flashcard_edit_requested.emit)
@@ -157,19 +186,54 @@ class TimerPage(QWidget):
             self.flashcard_pause_actions_container,
             Qt.AlignTop | Qt.AlignRight,
         )
-        flashcard_layout.addStretch(1)
+        self.flashcard_content_widget = QWidget()
+        self.flashcard_content_widget.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+        self.flashcard_content_layout = QVBoxLayout(self.flashcard_content_widget)
+        self.flashcard_content_layout.setContentsMargins(8, 0, 8, 0)
+        self.flashcard_content_layout.setSpacing(12)
+        self.flashcard_content_layout.addStretch(1)
         self.flashcard_question_label = QLabel("")
         self.flashcard_question_label.setAlignment(Qt.AlignCenter)
         self.flashcard_question_label.setWordWrap(True)
         self.flashcard_question_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.flashcard_question_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Minimum,
+        )
         question_font = QFont(self.flashcard_question_label.font())
-        question_font.setPointSize(40)
+        question_font.setPointSize(self._FLASHCARD_QUESTION_BASE_POINT_SIZE)
         question_font.setWeight(QFont.ExtraBold)
         self.flashcard_question_label.setFont(question_font)
         self.flashcard_question_label.setVisible(False)
-        flashcard_layout.addWidget(self.flashcard_question_label)
+        self.flashcard_content_layout.addWidget(self.flashcard_question_label)
+        self.flashcard_question_image_label = QLabel("")
+        self._configure_flashcard_image_label(self.flashcard_question_image_label)
+        self.flashcard_content_layout.addWidget(self.flashcard_question_image_label)
 
-        self.copy_feedback_label = QLabel("Copied", flashcard_view)
+        self.flashcard_answer_label = QLabel("")
+        self.flashcard_answer_label.setAlignment(Qt.AlignCenter)
+        self.flashcard_answer_label.setWordWrap(True)
+        self.flashcard_answer_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.flashcard_answer_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Minimum,
+        )
+        answer_font = QFont(self.flashcard_answer_label.font())
+        answer_font.setPointSize(self._FLASHCARD_ANSWER_BASE_POINT_SIZE)
+        answer_font.setWeight(QFont.DemiBold)
+        self.flashcard_answer_label.setFont(answer_font)
+        self.flashcard_answer_label.setVisible(False)
+        self.flashcard_content_layout.addWidget(self.flashcard_answer_label)
+        self.flashcard_answer_image_label = QLabel("")
+        self._configure_flashcard_image_label(self.flashcard_answer_image_label)
+        self.flashcard_content_layout.addWidget(self.flashcard_answer_image_label)
+        self.flashcard_content_layout.addStretch(1)
+        flashcard_layout.addWidget(self.flashcard_content_widget, 1)
+
+        self.copy_feedback_label = QLabel("Copied", self._flashcard_view)
         self.copy_feedback_label.setAlignment(Qt.AlignCenter)
         self.copy_feedback_label.setVisible(False)
         self.copy_feedback_label.setAttribute(
@@ -189,18 +253,6 @@ class TimerPage(QWidget):
         self._copy_feedback_effect.setOpacity(0.0)
         self.copy_feedback_label.setGraphicsEffect(self._copy_feedback_effect)
         self.copy_feedback_label.raise_()
-
-        self.flashcard_answer_label = QLabel("")
-        self.flashcard_answer_label.setAlignment(Qt.AlignCenter)
-        self.flashcard_answer_label.setWordWrap(True)
-        self.flashcard_answer_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        answer_font = QFont(self.flashcard_answer_label.font())
-        answer_font.setPointSize(34)
-        answer_font.setWeight(QFont.DemiBold)
-        self.flashcard_answer_label.setFont(answer_font)
-        self.flashcard_answer_label.setVisible(False)
-        flashcard_layout.addWidget(self.flashcard_answer_label)
-        flashcard_layout.addStretch(1)
         flashcard_layout.addWidget(self.flashcard_actions_container)
 
         self.content_stack.addWidget(flashcard_view)
@@ -264,8 +316,8 @@ class TimerPage(QWidget):
 
     def resizeEvent(self, event: QEvent) -> None:  # noqa: N802
         """Keep overlay feedback aligned without moving the flashcard layout."""
-        self._position_copy_feedback()
         super().resizeEvent(event)
+        self._update_flashcard_content_presentation()
 
     def _apply_palette_styles(self) -> None:
         """Apply palette-aware styles for non-native progress visuals."""
@@ -462,7 +514,10 @@ class TimerPage(QWidget):
             self.timer_cycle_completed.emit()
 
     def show_flashcard_answer(
-        self, answer: str, display_duration_seconds: int = 0
+        self,
+        answer: str,
+        image_path: str | None = None,
+        display_duration_seconds: int = 0,
     ) -> None:
         """Show flashcard answer under current question.
 
@@ -476,12 +531,22 @@ class TimerPage(QWidget):
         )
         self.set_flashcard_scoring_actions_visible(True)
         self.set_flashcard_scoring_actions_enabled(True)
+        self._current_flashcard_answer = answer
+        self._current_answer_image_path = image_path
         self._set_flashcard_label_text(self.flashcard_answer_label, answer)
         self.flashcard_answer_label.setVisible(True)
+        self._set_flashcard_image_visibility(
+            self.flashcard_answer_image_label,
+            image_path,
+        )
+        self._update_flashcard_content_presentation()
         self._start_flashcard_progress(display_duration_seconds)
 
     def show_flashcard_question(
-        self, question: str, display_duration_seconds: int = 0
+        self,
+        question: str,
+        image_path: str | None = None,
+        display_duration_seconds: int = 0,
     ) -> None:
         """Show flashcard question and hide timer display.
 
@@ -496,23 +561,39 @@ class TimerPage(QWidget):
             pause_enabled=display_duration_seconds > 0,
         )
         self._current_flashcard_question = question
+        self._current_flashcard_answer = ""
+        self._current_question_image_path = image_path
+        self._current_answer_image_path = None
         self.set_flashcard_scoring_actions_visible(False)
         self.set_flashcard_scoring_actions_enabled(False)
         self.flashcard_question_label.setVisible(True)
         self._set_flashcard_label_text(self.flashcard_question_label, question)
         self.flashcard_answer_label.setText("")
         self.flashcard_answer_label.setVisible(False)
+        self._set_flashcard_image_visibility(
+            self.flashcard_question_image_label,
+            image_path,
+        )
+        self.flashcard_answer_image_label.clear()
+        self.flashcard_answer_image_label.setVisible(False)
         self._hide_copy_feedback()
-        self._position_copy_feedback()
+        self._update_flashcard_content_presentation()
         self._start_flashcard_progress(display_duration_seconds)
 
     def clear_flashcard_display(self) -> None:
         """Hide flashcard question/answer and show timer display."""
         self._current_flashcard_question = ""
+        self._current_flashcard_answer = ""
+        self._current_question_image_path = None
+        self._current_answer_image_path = None
         self.flashcard_question_label.setText("")
         self.flashcard_question_label.setVisible(False)
+        self.flashcard_question_image_label.clear()
+        self.flashcard_question_image_label.setVisible(False)
         self.flashcard_answer_label.setText("")
         self.flashcard_answer_label.setVisible(False)
+        self.flashcard_answer_image_label.clear()
+        self.flashcard_answer_image_label.setVisible(False)
         self._hide_copy_feedback()
         self.content_stack.setCurrentIndex(0)
         self.set_flashcard_controls_active(False)
@@ -521,18 +602,328 @@ class TimerPage(QWidget):
         self.set_flashcard_scoring_actions_enabled(False)
         self._stop_flashcard_progress()
 
-    def update_displayed_flashcard(self, question: str, answer: str) -> None:
+    def update_displayed_flashcard(
+        self,
+        question: str,
+        answer: str,
+        question_image_path: str | None | object = _IMAGE_PATH_UNCHANGED,
+        answer_image_path: str | None | object = _IMAGE_PATH_UNCHANGED,
+    ) -> None:
         """Refresh the currently shown flashcard text in place."""
         self._current_flashcard_question = question
+        self._current_flashcard_answer = answer
+        if question_image_path is not self._IMAGE_PATH_UNCHANGED:
+            self._current_question_image_path = question_image_path
+        if answer_image_path is not self._IMAGE_PATH_UNCHANGED:
+            self._current_answer_image_path = answer_image_path
         if not self.flashcard_question_label.isHidden():
             self._set_flashcard_label_text(self.flashcard_question_label, question)
+            self._set_flashcard_image_visibility(
+                self.flashcard_question_image_label,
+                self._current_question_image_path,
+            )
         if not self.flashcard_answer_label.isHidden():
             self._set_flashcard_label_text(self.flashcard_answer_label, answer)
+            self._set_flashcard_image_visibility(
+                self.flashcard_answer_image_label,
+                self._current_answer_image_path,
+            )
+        self._update_flashcard_content_presentation()
 
     def _set_flashcard_label_text(self, label: QLabel, text: str) -> None:
         """Render flashcard text as plain text unless inline LaTeX needs rich text."""
         label.setTextFormat(Qt.RichText if has_inline_latex(text) else Qt.PlainText)
         label.setText(render_inline_latex_html(text))
+
+    def _configure_flashcard_image_label(self, label: QLabel) -> None:
+        """Apply consistent presentation defaults for flashcard image widgets."""
+        label.setAlignment(Qt.AlignCenter)
+        label.setWordWrap(True)
+        label.setTextInteractionFlags(Qt.NoTextInteraction)
+        label.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Maximum,
+        )
+        label.setVisible(False)
+
+    def _set_flashcard_image_visibility(
+        self,
+        label: QLabel,
+        image_path: str | None,
+    ) -> None:
+        """Show or hide an image label based on whether a path is attached."""
+        if image_path is None:
+            label.clear()
+            label.setVisible(False)
+            return
+        label.setVisible(True)
+
+    def _update_flashcard_content_presentation(self) -> None:
+        """Refresh flashcard typography and overlay placement for current bounds."""
+        if self._updating_flashcard_content_presentation:
+            return
+        self._updating_flashcard_content_presentation = True
+        flashcard_layout = self._flashcard_view.layout()
+        try:
+            if flashcard_layout is not None:
+                flashcard_layout.activate()
+            self.flashcard_content_layout.activate()
+            self._apply_flashcard_content_fonts()
+            self._refresh_flashcard_images()
+            self._position_copy_feedback()
+        finally:
+            self._updating_flashcard_content_presentation = False
+
+    def _apply_flashcard_content_fonts(self) -> None:
+        """Fit visible flashcard text into the available content area."""
+        label_specs = (
+            (
+                self.flashcard_question_label,
+                self._FLASHCARD_QUESTION_BASE_POINT_SIZE,
+            ),
+            (
+                self.flashcard_answer_label,
+                self._FLASHCARD_ANSWER_BASE_POINT_SIZE,
+            ),
+        )
+        if (
+            self.flashcard_content_widget.width() <= 1
+            or self.flashcard_content_widget.height() <= 1
+        ):
+            for label, base_point_size in label_specs:
+                self._set_flashcard_label_point_size(label, base_point_size)
+            return
+
+        visible_label_specs = [
+            (label, base_point_size)
+            for label, base_point_size in label_specs
+            if not label.isHidden() and bool(label.text())
+        ]
+        available_width = self._flashcard_content_available_width()
+        visible_image_count = sum(
+            not label.isHidden() and path is not None
+            for label, path in (
+                (
+                    self.flashcard_question_image_label,
+                    self._current_question_image_path,
+                ),
+                (
+                    self.flashcard_answer_image_label,
+                    self._current_answer_image_path,
+                ),
+            )
+        )
+        total_available_height = self._flashcard_content_available_height(
+            visible_label_count=len(visible_label_specs) + visible_image_count
+        )
+        reserved_image_height = self._reserved_flashcard_image_height(
+            total_available_height=total_available_height,
+            visible_item_count=len(visible_label_specs) + visible_image_count,
+            visible_image_count=visible_image_count,
+        )
+        available_height = max(1, total_available_height - reserved_image_height)
+        resolved_point_sizes = self._resolve_flashcard_point_sizes(
+            visible_label_specs,
+            available_width=available_width,
+            available_height=available_height,
+        )
+
+        for label, base_point_size in label_specs:
+            self._set_flashcard_label_point_size(
+                label,
+                resolved_point_sizes.get(label, base_point_size),
+            )
+
+    def _reserved_flashcard_image_height(
+        self,
+        *,
+        total_available_height: int,
+        visible_item_count: int,
+        visible_image_count: int,
+    ) -> int:
+        """Return the total height budget reserved for visible image attachments."""
+        if visible_image_count <= 0:
+            return 0
+        max_height_per_image = min(
+            self._FLASHCARD_IMAGE_MAX_HEIGHT,
+            max(
+                self._FLASHCARD_IMAGE_MIN_HEIGHT,
+                total_available_height // max(1, visible_item_count),
+            ),
+        )
+        return max_height_per_image * visible_image_count
+
+    def _refresh_flashcard_images(self) -> None:
+        """Scale visible flashcard images to fit the current content bounds."""
+        available_width = self._flashcard_content_available_width()
+        visible_image_count = sum(
+            not label.isHidden() and path is not None
+            for label, path in (
+                (
+                    self.flashcard_question_image_label,
+                    self._current_question_image_path,
+                ),
+                (
+                    self.flashcard_answer_image_label,
+                    self._current_answer_image_path,
+                ),
+            )
+        )
+        if visible_image_count <= 0:
+            return
+        visible_text_count = sum(
+            not label.isHidden() and bool(label.text())
+            for label in (
+                self.flashcard_question_label,
+                self.flashcard_answer_label,
+            )
+        )
+        total_available_height = self._flashcard_content_available_height(
+            visible_label_count=visible_text_count + visible_image_count
+        )
+        max_height_per_image = min(
+            self._FLASHCARD_IMAGE_MAX_HEIGHT,
+            max(
+                self._FLASHCARD_IMAGE_MIN_HEIGHT,
+                total_available_height
+                // max(1, visible_text_count + visible_image_count),
+            ),
+        )
+        self._refresh_flashcard_image_label(
+            self.flashcard_question_image_label,
+            self._current_question_image_path,
+            unavailable_text="Question image unavailable.",
+            available_width=available_width,
+            max_height=max_height_per_image,
+        )
+        self._refresh_flashcard_image_label(
+            self.flashcard_answer_image_label,
+            self._current_answer_image_path,
+            unavailable_text="Answer image unavailable.",
+            available_width=available_width,
+            max_height=max_height_per_image,
+        )
+
+    def _refresh_flashcard_image_label(
+        self,
+        label: QLabel,
+        image_path: str | None,
+        *,
+        unavailable_text: str,
+        available_width: int,
+        max_height: int,
+    ) -> None:
+        """Update one image label with a scaled pixmap or fallback text."""
+        if image_path is None or label.isHidden():
+            label.clear()
+            return
+        pixmap = QPixmap(image_path)
+        if pixmap.isNull():
+            label.setPixmap(QPixmap())
+            label.setTextFormat(Qt.PlainText)
+            label.setText(unavailable_text)
+            set_muted_label_color(label)
+            return
+        scaled_pixmap = pixmap.scaled(
+            available_width,
+            max_height,
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation,
+        )
+        label.setText("")
+        label.setPixmap(scaled_pixmap)
+
+    def _set_flashcard_label_point_size(self, label: QLabel, point_size: int) -> None:
+        """Apply one point size to a flashcard label."""
+        font = QFont(label.font())
+        if font.pointSize() == point_size:
+            return
+        font.setPointSize(point_size)
+        label.setFont(font)
+
+    def _flashcard_content_available_width(self) -> int:
+        """Return the available text width inside the flashcard content area."""
+        margins = self.flashcard_content_layout.contentsMargins()
+        available_width = (
+            self.flashcard_content_widget.width() - margins.left() - margins.right()
+        )
+        return max(120, available_width)
+
+    def _flashcard_content_available_height(self, *, visible_label_count: int) -> int:
+        """Return the total text height available inside the flashcard area."""
+        margins = self.flashcard_content_layout.contentsMargins()
+        available_height = (
+            self.flashcard_content_widget.height() - margins.top() - margins.bottom()
+        )
+        spacing_height = self.flashcard_content_layout.spacing() * max(
+            0, visible_label_count - 1
+        )
+        return max(1, available_height - spacing_height)
+
+    def _resolve_flashcard_point_sizes(
+        self,
+        visible_label_specs: list[tuple[QLabel, int]],
+        *,
+        available_width: int,
+        available_height: int,
+    ) -> dict[QLabel, int]:
+        """Shrink visible labels until their combined height fits the content area."""
+        point_sizes = {
+            label: base_point_size for label, base_point_size in visible_label_specs
+        }
+        if not point_sizes:
+            return point_sizes
+
+        while True:
+            measured_heights = {
+                label: self._measure_flashcard_text_height(
+                    label,
+                    rendered_text=label.text(),
+                    point_size=point_sizes[label],
+                    available_width=available_width,
+                )
+                for label, _base_point_size in visible_label_specs
+            }
+            if sum(measured_heights.values()) <= available_height:
+                return point_sizes
+
+            shrinkable_labels = [
+                label
+                for label, _base_point_size in visible_label_specs
+                if point_sizes[label] > 1
+            ]
+            if not shrinkable_labels:
+                return point_sizes
+
+            label_to_shrink = max(
+                shrinkable_labels,
+                key=lambda current_label: (
+                    measured_heights[current_label],
+                    point_sizes[current_label],
+                ),
+            )
+            point_sizes[label_to_shrink] -= 1
+
+    def _measure_flashcard_text_height(
+        self,
+        label: QLabel,
+        *,
+        rendered_text: str,
+        point_size: int,
+        available_width: int,
+    ) -> float:
+        """Measure the rendered text height for a candidate flashcard font size."""
+        candidate_font = QFont(label.font())
+        candidate_font.setPointSize(point_size)
+        document = QTextDocument()
+        document.setDocumentMargin(0)
+        document.setDefaultFont(candidate_font)
+        if label.textFormat() == Qt.RichText:
+            document.setHtml(rendered_text)
+        else:
+            document.setPlainText(rendered_text)
+        document.setTextWidth(max(1, available_width))
+        return document.size().height()
 
     def current_flashcard_question_text(self) -> str:
         """Return the raw question text for the currently visible flashcard."""
@@ -570,6 +961,10 @@ class TimerPage(QWidget):
     def _has_countdown_duration(self) -> bool:
         """Return whether the timer should run a countdown before flashcards."""
         return self._default_duration_seconds > 0
+
+    def has_countdown_duration(self) -> bool:
+        """Return whether study cycles should return through the timer countdown."""
+        return self._has_countdown_duration()
 
     def _idle_timer_display_text(self) -> str:
         """Return the idle timer label for the current mode."""
@@ -656,10 +1051,26 @@ class TimerPage(QWidget):
 
     def _update_flashcard_pause_actions(self) -> None:
         """Refresh paused-session actions for the current flashcard visibility state."""
-        visible = self._flashcard_controls_active and self._flashcard_paused
-        self.flashcard_pause_actions_container.setVisible(visible)
-        self.edit_flashcard_button.setEnabled(visible)
-        self.delete_flashcard_button.setEnabled(visible)
+        actions_visible = self._flashcard_controls_active
+        paused_actions_visible = actions_visible and self._flashcard_paused
+        self.flashcard_pause_actions_container.setVisible(actions_visible)
+        self.skip_phase_button.setVisible(actions_visible)
+        self.skip_phase_button.setEnabled(actions_visible)
+        self.shuffle_queue_button.setVisible(
+            paused_actions_visible and self._queue_shuffle_available
+        )
+        self.shuffle_queue_button.setEnabled(
+            paused_actions_visible and self._queue_shuffle_available
+        )
+        self.edit_flashcard_button.setVisible(paused_actions_visible)
+        self.edit_flashcard_button.setEnabled(paused_actions_visible)
+        self.delete_flashcard_button.setVisible(paused_actions_visible)
+        self.delete_flashcard_button.setEnabled(paused_actions_visible)
+
+    def set_queue_shuffle_available(self, available: bool) -> None:
+        """Show the queue-shuffle action only when it is meaningful."""
+        self._queue_shuffle_available = available
+        self._update_flashcard_pause_actions()
 
     def is_flashcard_progress_active(self) -> bool:
         """Return whether the flashcard progress bar is visually active."""
@@ -803,12 +1214,16 @@ class TimerPage(QWidget):
             flashcard_layout.activate()
         self.copy_feedback_label.adjustSize()
         badge_size = self.copy_feedback_label.sizeHint()
+        question_top_left = self.flashcard_question_label.mapTo(
+            self._flashcard_view, QPoint(0, 0)
+        )
         x_position = max(
             0,
             (self._flashcard_view.width() - badge_size.width()) // 2,
         )
         y_position = max(
-            16,
-            self.flashcard_question_label.y() - badge_size.height() - 12,
+            8,
+            question_top_left.y() - badge_size.height() - 8,
         )
-        self.copy_feedback_label.move(x_position, y_position)
+        maximum_y = max(8, self._flashcard_view.height() - badge_size.height() - 8)
+        self.copy_feedback_label.move(x_position, min(y_position, maximum_y))

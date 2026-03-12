@@ -27,6 +27,7 @@ class HotkeyAction(StrEnum):
 
     PAUSE_RESUME = "pause_resume"
     START_STOP = "start_stop"
+    SKIP_PHASE = "skip_phase"
     MARK_CORRECT = "mark_correct"
     MARK_WRONG = "mark_wrong"
     COPY_QUESTION = "copy_question"
@@ -35,6 +36,7 @@ class HotkeyAction(StrEnum):
 DEFAULT_HOTKEY_BINDINGS: dict[HotkeyAction, str] = {
     HotkeyAction.PAUSE_RESUME: "Ctrl+Alt+Space",
     HotkeyAction.START_STOP: "Ctrl+Alt+Enter",
+    HotkeyAction.SKIP_PHASE: "Ctrl+Alt+Right",
     HotkeyAction.MARK_CORRECT: "Ctrl+Alt+Up",
     HotkeyAction.MARK_WRONG: "Ctrl+Alt+Down",
     HotkeyAction.COPY_QUESTION: "Ctrl+Alt+C",

@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 
 from estudai.services.csv_flashcards import (
     Flashcard,
+    FlashcardRowData,
     flashcard_question_sort_key,
     normalize_flashcard_fields,
 )
@@ -34,6 +35,9 @@ from estudai.ui.utils import (
     set_muted_label_color,
 )
 
+_QUESTION_IMAGE_ROLE = int(Qt.UserRole) + 1
+_ANSWER_IMAGE_ROLE = int(Qt.UserRole) + 2
+
 
 @dataclass(frozen=True)
 class FlashcardTableRowState:
@@ -41,6 +45,8 @@ class FlashcardTableRowState:
 
     question: str
     answer: str
+    question_image_path: str | None
+    answer_image_path: str | None
     checked: bool
     selected: bool
 
@@ -48,12 +54,15 @@ class FlashcardTableRowState:
 class ManagementPage(QWidget):
     """Page to edit flashcards inside one selected folder."""
 
+    edit_requested = Signal()
     delete_requested = Signal()
+    reset_progress_requested = Signal()
 
     def __init__(self) -> None:
         """Initialize the management page."""
         super().__init__()
         self.folder_id: str | None = None
+        self._loaded_table_row_states: list[FlashcardTableRowState] = []
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -83,6 +92,14 @@ class ManagementPage(QWidget):
         self.sort_flashcards_button = QPushButton("Sort by Question A-Z")
         self.sort_flashcards_button.clicked.connect(self.sort_flashcards_by_question)
         table_actions_layout.addWidget(self.sort_flashcards_button)
+        self.edit_flashcard_button = QPushButton("Edit")
+        self.edit_flashcard_button.setEnabled(False)
+        self.edit_flashcard_button.clicked.connect(self.edit_requested.emit)
+        table_actions_layout.addWidget(self.edit_flashcard_button)
+        self.reset_progress_button = QPushButton("Reset Progress")
+        self.reset_progress_button.setToolTip("Reset folder progress")
+        self.reset_progress_button.clicked.connect(self.reset_progress_requested.emit)
+        table_actions_layout.addWidget(self.reset_progress_button)
         table_actions_layout.addStretch()
         self.add_flashcard_button = QPushButton("+")
         self.add_flashcard_button.setFixedSize(34, 34)
@@ -105,11 +122,15 @@ class ManagementPage(QWidget):
                 checkbox_rect_resolver=centered_checkbox_rect,
             ),
         )
+        self.flashcards_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.flashcards_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.flashcards_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.flashcards_table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.flashcards_table.customContextMenuRequested.connect(
             self.open_flashcards_table_menu
+        )
+        self.flashcards_table.itemDoubleClicked.connect(
+            lambda _item: self.edit_requested.emit()
         )
         self.flashcards_table.itemSelectionChanged.connect(
             self._update_row_action_buttons
@@ -171,17 +192,24 @@ class ManagementPage(QWidget):
                 row_index=index,
                 question=flashcard.question,
                 answer=flashcard.answer,
+                question_image_path=flashcard.question_image_path,
+                answer_image_path=flashcard.answer_image_path,
                 checked=index in selected_indexes,
             )
         self.flashcards_table.blockSignals(False)
         self._sync_select_all_header()
         self._update_row_action_buttons()
+        self._loaded_table_row_states = self._collect_table_row_states(
+            include_selection=False
+        )
 
     def _insert_row(
         self,
         row_index: int,
         question: str,
         answer: str,
+        question_image_path: str | None,
+        answer_image_path: str | None,
         checked: bool,
     ) -> None:
         """Insert one editable row into the table.
@@ -190,22 +218,126 @@ class ManagementPage(QWidget):
             row_index: Target row index.
             question: Question text.
             answer: Answer text.
+            question_image_path: Optional question-side image path.
+            answer_image_path: Optional answer-side image path.
             checked: Whether this row is selected for timer usage.
         """
         self.flashcards_table.insertRow(row_index)
         checkbox_item = create_checkable_table_item(checked=checked)
         self.flashcards_table.setItem(row_index, 0, checkbox_item)
-        self.flashcards_table.setItem(row_index, 1, QTableWidgetItem(question))
-        self.flashcards_table.setItem(row_index, 2, QTableWidgetItem(answer))
+        question_item = QTableWidgetItem(question)
+        answer_item = QTableWidgetItem(answer)
+        question_item.setFlags(question_item.flags() & ~Qt.ItemIsEditable)
+        answer_item.setFlags(answer_item.flags() & ~Qt.ItemIsEditable)
+        question_item.setData(_QUESTION_IMAGE_ROLE, question_image_path)
+        answer_item.setData(_ANSWER_IMAGE_ROLE, answer_image_path)
+        self._apply_row_image_tooltips(
+            question_item,
+            answer_item,
+            question_image_path=question_image_path,
+            answer_image_path=answer_image_path,
+        )
+        self.flashcards_table.setItem(row_index, 1, question_item)
+        self.flashcards_table.setItem(row_index, 2, answer_item)
 
-    def add_empty_flashcard_row(self) -> None:
-        """Append an empty editable flashcard row and select it."""
+    def _apply_row_image_tooltips(
+        self,
+        question_item: QTableWidgetItem,
+        answer_item: QTableWidgetItem,
+        *,
+        question_image_path: str | None,
+        answer_image_path: str | None,
+    ) -> None:
+        """Expose whether each side currently has an attached image."""
+        question_item.setToolTip(
+            "Question image attached."
+            if question_image_path is not None
+            else "No question image attached."
+        )
+        answer_item.setToolTip(
+            "Answer image attached."
+            if answer_image_path is not None
+            else "No answer image attached."
+        )
+
+    def add_flashcard_row(
+        self,
+        question: str,
+        answer: str,
+        *,
+        question_image_path: str | None = None,
+        answer_image_path: str | None = None,
+        checked: bool = True,
+    ) -> None:
+        """Append one editable flashcard row and select it."""
         row_index = self.flashcards_table.rowCount()
-        self._insert_row(row_index, "", "", True)
+        self._insert_row(
+            row_index,
+            question,
+            answer,
+            question_image_path,
+            answer_image_path,
+            checked,
+        )
         self.flashcards_table.setCurrentCell(row_index, 1)
-        self.flashcards_table.editItem(self.flashcards_table.item(row_index, 1))
         self._sync_select_all_header()
         self._update_row_action_buttons()
+
+    def update_flashcard_row(
+        self,
+        row_index: int,
+        question: str,
+        answer: str,
+        *,
+        question_image_path: str | None = None,
+        answer_image_path: str | None = None,
+    ) -> None:
+        """Replace the editable payload for one table row."""
+        if not (0 <= row_index < self.flashcards_table.rowCount()):
+            msg = f"Flashcard row out of range: {row_index}"
+            raise IndexError(msg)
+        question_item = self.flashcards_table.item(row_index, 1)
+        answer_item = self.flashcards_table.item(row_index, 2)
+        if question_item is None or answer_item is None:
+            msg = f"Flashcard row is incomplete: {row_index}"
+            raise ValueError(msg)
+        question_item.setText(question)
+        answer_item.setText(answer)
+        question_item.setData(_QUESTION_IMAGE_ROLE, question_image_path)
+        answer_item.setData(_ANSWER_IMAGE_ROLE, answer_image_path)
+        self._apply_row_image_tooltips(
+            question_item,
+            answer_item,
+            question_image_path=question_image_path,
+            answer_image_path=answer_image_path,
+        )
+
+    def selected_flashcard_row(self) -> tuple[int, FlashcardRowData] | None:
+        """Return the selected row payload when exactly one row is selected."""
+        selected_rows = self.selected_table_rows()
+        if len(selected_rows) != 1:
+            return None
+        row_index = selected_rows[0]
+        return row_index, self.flashcard_row_data(row_index)
+
+    def flashcard_row_data(self, row_index: int) -> FlashcardRowData:
+        """Return one table row as editable flashcard data."""
+        question_item = self.flashcards_table.item(row_index, 1)
+        answer_item = self.flashcards_table.item(row_index, 2)
+        question = "" if question_item is None else question_item.text()
+        answer = "" if answer_item is None else answer_item.text()
+        return FlashcardRowData(
+            question=question,
+            answer=answer,
+            question_image_path=(
+                None
+                if question_item is None
+                else question_item.data(_QUESTION_IMAGE_ROLE)
+            ),
+            answer_image_path=(
+                None if answer_item is None else answer_item.data(_ANSWER_IMAGE_ROLE)
+            ),
+        )
 
     def open_flashcards_table_menu(self, position: QPoint) -> None:
         """Open right-click table menu for selected flashcard rows.
@@ -221,10 +353,14 @@ class ManagementPage(QWidget):
             return
 
         menu = QMenu(self)
+        edit_action = menu.addAction("Edit")
         delete_action = menu.addAction("Delete")
+        edit_action.setEnabled(len(self.selected_table_rows()) == 1)
         chosen_action = menu.exec(
             self.flashcards_table.viewport().mapToGlobal(position)
         )
+        if chosen_action is edit_action:
+            self.edit_requested.emit()
         if chosen_action is delete_action:
             self.delete_requested.emit()
 
@@ -352,9 +488,18 @@ class ManagementPage(QWidget):
         if sorted_rows != rows:
             self._set_table_row_states(sorted_rows)
 
-    def _collect_table_row_states(self) -> list[FlashcardTableRowState]:
-        """Return current table rows including checked and selected state."""
-        selected_rows = set(self.selected_table_rows())
+    def _collect_table_row_states(
+        self,
+        *,
+        include_selection: bool = True,
+    ) -> list[FlashcardTableRowState]:
+        """Return current table rows including persisted and optional UI state.
+
+        Args:
+            include_selection: Whether transient table-row selection should be
+                included in the collected state.
+        """
+        selected_rows = set(self.selected_table_rows()) if include_selection else set()
         rows: list[FlashcardTableRowState] = []
         for row_index in range(self.flashcards_table.rowCount()):
             question_item = self.flashcards_table.item(row_index, 1)
@@ -364,6 +509,16 @@ class ManagementPage(QWidget):
                 FlashcardTableRowState(
                     question="" if question_item is None else question_item.text(),
                     answer="" if answer_item is None else answer_item.text(),
+                    question_image_path=(
+                        None
+                        if question_item is None
+                        else question_item.data(_QUESTION_IMAGE_ROLE)
+                    ),
+                    answer_image_path=(
+                        None
+                        if answer_item is None
+                        else answer_item.data(_ANSWER_IMAGE_ROLE)
+                    ),
                     checked=(
                         selection_item is not None
                         and selection_item.checkState() == Qt.Checked
@@ -382,6 +537,8 @@ class ManagementPage(QWidget):
                 row_index,
                 row.question,
                 row.answer,
+                row.question_image_path,
+                row.answer_image_path,
                 checked=row.checked,
             )
         selection_model = self.flashcards_table.selectionModel()
@@ -399,6 +556,12 @@ class ManagementPage(QWidget):
         self._sync_select_all_header()
         self._update_row_action_buttons()
 
+    def is_dirty(self) -> bool:
+        """Return whether persisted flashcard data differs from the loaded state."""
+        return self._loaded_table_row_states != self._collect_table_row_states(
+            include_selection=False
+        )
+
     def _update_row_action_buttons(self) -> None:
         """Enable reorder actions only when the current selection can move."""
         row_count = self.flashcards_table.rowCount()
@@ -408,18 +571,21 @@ class ManagementPage(QWidget):
         self.move_down_button.setEnabled(
             has_selection and max(selected_rows) < row_count - 1
         )
+        self.edit_flashcard_button.setEnabled(len(selected_rows) == 1)
         self.sort_flashcards_button.setEnabled(row_count > 1)
 
-    def collect_flashcards_for_save(self) -> tuple[list[tuple[str, str]], set[int]]:
+    def collect_flashcards_for_save(
+        self,
+    ) -> tuple[list[FlashcardRowData], set[int]]:
         """Collect and validate table content before save.
 
         Returns:
-            tuple[list[tuple[str, str]], set[int]]: Rows and selected row indexes.
+            tuple[list[FlashcardRowData], set[int]]: Rows and selected row indexes.
 
         Raises:
             ValueError: If any row has an empty question or answer.
         """
-        rows: list[tuple[str, str]] = []
+        rows: list[FlashcardRowData] = []
         selected_indexes: set[int] = set()
         for row_index in range(self.flashcards_table.rowCount()):
             question_item = self.flashcards_table.item(row_index, 1)
@@ -431,11 +597,36 @@ class ManagementPage(QWidget):
                 normalized_question, normalized_answer = normalize_flashcard_fields(
                     question,
                     answer,
+                    question_image_path=(
+                        None
+                        if question_item is None
+                        else question_item.data(_QUESTION_IMAGE_ROLE)
+                    ),
+                    answer_image_path=(
+                        None
+                        if answer_item is None
+                        else answer_item.data(_ANSWER_IMAGE_ROLE)
+                    ),
                 )
             except ValueError as error:
                 msg = f"Row {row_index + 1}: {error}"
                 raise ValueError(msg)
-            rows.append((normalized_question, normalized_answer))
+            rows.append(
+                FlashcardRowData(
+                    question=normalized_question,
+                    answer=normalized_answer,
+                    question_image_path=(
+                        None
+                        if question_item is None
+                        else question_item.data(_QUESTION_IMAGE_ROLE)
+                    ),
+                    answer_image_path=(
+                        None
+                        if answer_item is None
+                        else answer_item.data(_ANSWER_IMAGE_ROLE)
+                    ),
+                )
+            )
             if selection_item is not None and selection_item.checkState() == Qt.Checked:
                 selected_indexes.add(row_index)
         return rows, selected_indexes

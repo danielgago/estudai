@@ -18,6 +18,8 @@ SOUNDS_FOLDER_NAME = "sounds"
 MAX_TIMER_DURATION_SECONDS = (59 * 60) + 59
 SETTINGS_KEY_TIMER_DURATION_SECONDS = "timer/duration_seconds"
 SETTINGS_KEY_FLASHCARD_PROBABILITY_PERCENT = "flashcard/probability_percent"
+SETTINGS_KEY_FLASHCARD_STUDY_ORDER_MODE = "flashcard/study_order_mode"
+SETTINGS_KEY_FLASHCARD_QUEUE_START_SHUFFLED = "flashcard/queue_start_shuffled"
 SETTINGS_KEY_FLASHCARD_RANDOM_ORDER_ENABLED = "flashcard/random_order_enabled"
 SETTINGS_KEY_QUESTION_DURATION_SECONDS = "flashcard/question_duration_seconds"
 SETTINGS_KEY_ANSWER_DURATION_SECONDS = "flashcard/answer_duration_seconds"
@@ -39,11 +41,13 @@ SETTINGS_KEY_WRONG_ANSWER_REINSERT_AFTER_COUNT = (
 )
 SETTINGS_KEY_HOTKEY_PAUSE_RESUME = "hotkeys/pause_resume"
 SETTINGS_KEY_HOTKEY_START_STOP = "hotkeys/start_stop"
+SETTINGS_KEY_HOTKEY_SKIP_PHASE = "hotkeys/skip_phase"
 SETTINGS_KEY_HOTKEY_MARK_CORRECT = "hotkeys/mark_correct"
 SETTINGS_KEY_HOTKEY_MARK_WRONG = "hotkeys/mark_wrong"
 SETTINGS_KEY_HOTKEY_COPY_QUESTION = "hotkeys/copy_question"
 SETTINGS_KEY_IN_APP_SHORTCUT_PAUSE_RESUME = "app_shortcuts/pause_resume"
 SETTINGS_KEY_IN_APP_SHORTCUT_START_STOP = "app_shortcuts/start_stop"
+SETTINGS_KEY_IN_APP_SHORTCUT_SKIP_PHASE = "app_shortcuts/skip_phase"
 SETTINGS_KEY_IN_APP_SHORTCUT_MARK_CORRECT = "app_shortcuts/mark_correct"
 SETTINGS_KEY_IN_APP_SHORTCUT_MARK_WRONG = "app_shortcuts/mark_wrong"
 SETTINGS_KEY_IN_APP_SHORTCUT_COPY_QUESTION = "app_shortcuts/copy_question"
@@ -64,11 +68,19 @@ class WrongAnswerReinsertionMode(StrEnum):
     PUSH_TO_END = "push_to_end"
 
 
+class StudyOrderMode(StrEnum):
+    """Selection strategy for choosing the next study flashcard."""
+
+    QUEUE = "queue"
+    TRUE_RANDOM = "true_random"
+
+
 class InAppShortcutAction(StrEnum):
     """Supported app-scoped shortcut actions handled inside the window."""
 
     PAUSE_RESUME = "pause_resume"
     START_STOP = "start_stop"
+    SKIP_PHASE = "skip_phase"
     MARK_CORRECT = "mark_correct"
     MARK_WRONG = "mark_wrong"
     COPY_QUESTION = "copy_question"
@@ -77,6 +89,7 @@ class InAppShortcutAction(StrEnum):
 DEFAULT_IN_APP_SHORTCUT_BINDINGS: dict[InAppShortcutAction, str] = {
     InAppShortcutAction.PAUSE_RESUME: "Space",
     InAppShortcutAction.START_STOP: "Enter",
+    InAppShortcutAction.SKIP_PHASE: "Right",
     InAppShortcutAction.MARK_CORRECT: "Up",
     InAppShortcutAction.MARK_WRONG: "Down",
     InAppShortcutAction.COPY_QUESTION: "C",
@@ -89,7 +102,8 @@ class AppSettings:
 
     timer_duration_seconds: int = 25 * 60
     flashcard_probability_percent: int = 30
-    flashcard_random_order_enabled: bool = False
+    flashcard_study_order_mode: StudyOrderMode = StudyOrderMode.QUEUE
+    flashcard_queue_start_shuffled: bool = False
     question_display_duration_seconds: int = 8
     answer_display_duration_seconds: int = 8
     question_notification_sound_path: str = ""
@@ -105,6 +119,7 @@ class AppSettings:
     wrong_answer_reinsert_after_count: int = 3
     pause_resume_hotkey: str = DEFAULT_HOTKEY_BINDINGS[HotkeyAction.PAUSE_RESUME]
     start_stop_hotkey: str = DEFAULT_HOTKEY_BINDINGS[HotkeyAction.START_STOP]
+    skip_phase_hotkey: str = DEFAULT_HOTKEY_BINDINGS[HotkeyAction.SKIP_PHASE]
     mark_correct_hotkey: str = DEFAULT_HOTKEY_BINDINGS[HotkeyAction.MARK_CORRECT]
     mark_wrong_hotkey: str = DEFAULT_HOTKEY_BINDINGS[HotkeyAction.MARK_WRONG]
     copy_question_hotkey: str = DEFAULT_HOTKEY_BINDINGS[HotkeyAction.COPY_QUESTION]
@@ -113,6 +128,9 @@ class AppSettings:
     ]
     in_app_start_stop_shortcut: str = DEFAULT_IN_APP_SHORTCUT_BINDINGS[
         InAppShortcutAction.START_STOP
+    ]
+    in_app_skip_phase_shortcut: str = DEFAULT_IN_APP_SHORTCUT_BINDINGS[
+        InAppShortcutAction.SKIP_PHASE
     ]
     in_app_mark_correct_shortcut: str = DEFAULT_IN_APP_SHORTCUT_BINDINGS[
         InAppShortcutAction.MARK_CORRECT
@@ -253,11 +271,57 @@ def _normalize_text(
     return default
 
 
+def _load_study_order_settings(qsettings: QSettings) -> tuple[StudyOrderMode, bool]:
+    """Load study-order settings, including migration from the legacy boolean.
+
+    Args:
+        qsettings: QSettings storage handle.
+
+    Returns:
+        tuple[StudyOrderMode, bool]: Study-order mode and queue-start shuffle
+            preference.
+    """
+    has_study_order_mode = qsettings.contains(SETTINGS_KEY_FLASHCARD_STUDY_ORDER_MODE)
+    has_queue_start_shuffled = qsettings.contains(
+        SETTINGS_KEY_FLASHCARD_QUEUE_START_SHUFFLED
+    )
+    if has_study_order_mode or has_queue_start_shuffled:
+        return (
+            _normalize_enum(
+                qsettings.value(
+                    SETTINGS_KEY_FLASHCARD_STUDY_ORDER_MODE,
+                    AppSettings.flashcard_study_order_mode.value,
+                ),
+                enum_type=StudyOrderMode,
+                default=AppSettings.flashcard_study_order_mode,
+            ),
+            _normalize_bool(
+                qsettings.value(
+                    SETTINGS_KEY_FLASHCARD_QUEUE_START_SHUFFLED,
+                    AppSettings.flashcard_queue_start_shuffled,
+                ),
+                default=AppSettings.flashcard_queue_start_shuffled,
+            ),
+        )
+
+    return (
+        StudyOrderMode.QUEUE,
+        _normalize_bool(
+            qsettings.value(
+                SETTINGS_KEY_FLASHCARD_RANDOM_ORDER_ENABLED,
+                AppSettings.flashcard_queue_start_shuffled,
+            ),
+            default=AppSettings.flashcard_queue_start_shuffled,
+        ),
+    )
+
+
 def hotkey_bindings_from_settings(settings: AppSettings) -> dict[HotkeyAction, str]:
     """Return the persisted hotkey bindings keyed by app action."""
     return {
         HotkeyAction.PAUSE_RESUME: settings.pause_resume_hotkey,
         HotkeyAction.START_STOP: settings.start_stop_hotkey,
+        HotkeyAction.SKIP_PHASE: settings.skip_phase_hotkey,
         HotkeyAction.MARK_CORRECT: settings.mark_correct_hotkey,
         HotkeyAction.MARK_WRONG: settings.mark_wrong_hotkey,
         HotkeyAction.COPY_QUESTION: settings.copy_question_hotkey,
@@ -271,6 +335,7 @@ def in_app_shortcut_bindings_from_settings(
     return {
         InAppShortcutAction.PAUSE_RESUME: settings.in_app_pause_resume_shortcut,
         InAppShortcutAction.START_STOP: settings.in_app_start_stop_shortcut,
+        InAppShortcutAction.SKIP_PHASE: settings.in_app_skip_phase_shortcut,
         InAppShortcutAction.MARK_CORRECT: settings.in_app_mark_correct_shortcut,
         InAppShortcutAction.MARK_WRONG: settings.in_app_mark_wrong_shortcut,
         InAppShortcutAction.COPY_QUESTION: settings.in_app_copy_question_shortcut,
@@ -304,6 +369,9 @@ def load_app_settings() -> AppSettings:
         AppSettings: Persisted settings or default values.
     """
     qsettings = _open_settings()
+    flashcard_study_order_mode, flashcard_queue_start_shuffled = (
+        _load_study_order_settings(qsettings)
+    )
     legacy_notification_sound_path = _normalize_text(
         qsettings.value(
             SETTINGS_KEY_LEGACY_NOTIFICATION_SOUND_PATH,
@@ -387,13 +455,8 @@ def load_app_settings() -> AppSettings:
             minimum=0,
             maximum=100,
         ),
-        flashcard_random_order_enabled=_normalize_bool(
-            qsettings.value(
-                SETTINGS_KEY_FLASHCARD_RANDOM_ORDER_ENABLED,
-                AppSettings.flashcard_random_order_enabled,
-            ),
-            default=AppSettings.flashcard_random_order_enabled,
-        ),
+        flashcard_study_order_mode=flashcard_study_order_mode,
+        flashcard_queue_start_shuffled=flashcard_queue_start_shuffled,
         question_display_duration_seconds=_normalize_int(
             qsettings.value(
                 SETTINGS_KEY_QUESTION_DURATION_SECONDS,
@@ -459,6 +522,14 @@ def load_app_settings() -> AppSettings:
             default=AppSettings.start_stop_hotkey,
             allow_empty=True,
         ),
+        skip_phase_hotkey=_normalize_text(
+            qsettings.value(
+                SETTINGS_KEY_HOTKEY_SKIP_PHASE,
+                AppSettings.skip_phase_hotkey,
+            ),
+            default=AppSettings.skip_phase_hotkey,
+            allow_empty=True,
+        ),
         mark_correct_hotkey=_normalize_text(
             qsettings.value(
                 SETTINGS_KEY_HOTKEY_MARK_CORRECT,
@@ -497,6 +568,14 @@ def load_app_settings() -> AppSettings:
                 AppSettings.in_app_start_stop_shortcut,
             ),
             default=AppSettings.in_app_start_stop_shortcut,
+            allow_empty=True,
+        ),
+        in_app_skip_phase_shortcut=_normalize_text(
+            qsettings.value(
+                SETTINGS_KEY_IN_APP_SHORTCUT_SKIP_PHASE,
+                AppSettings.in_app_skip_phase_shortcut,
+            ),
+            default=AppSettings.in_app_skip_phase_shortcut,
             allow_empty=True,
         ),
         in_app_mark_correct_shortcut=_normalize_text(
@@ -552,8 +631,16 @@ def save_app_settings(settings: AppSettings) -> None:
         ),
     )
     qsettings.setValue(
-        SETTINGS_KEY_FLASHCARD_RANDOM_ORDER_ENABLED,
-        bool(settings.flashcard_random_order_enabled),
+        SETTINGS_KEY_FLASHCARD_STUDY_ORDER_MODE,
+        _normalize_enum(
+            settings.flashcard_study_order_mode,
+            enum_type=StudyOrderMode,
+            default=AppSettings.flashcard_study_order_mode,
+        ).value,
+    )
+    qsettings.setValue(
+        SETTINGS_KEY_FLASHCARD_QUEUE_START_SHUFFLED,
+        bool(settings.flashcard_queue_start_shuffled),
     )
     qsettings.setValue(
         SETTINGS_KEY_QUESTION_DURATION_SECONDS,
@@ -610,6 +697,7 @@ def save_app_settings(settings: AppSettings) -> None:
         ),
     )
     qsettings.remove(SETTINGS_KEY_LEGACY_NOTIFICATION_SOUND_PATH)
+    qsettings.remove(SETTINGS_KEY_FLASHCARD_RANDOM_ORDER_ENABLED)
     qsettings.setValue(
         SETTINGS_KEY_WRONG_ANSWER_COMPLETION_MODE,
         _normalize_enum(
@@ -652,6 +740,14 @@ def save_app_settings(settings: AppSettings) -> None:
         ),
     )
     qsettings.setValue(
+        SETTINGS_KEY_HOTKEY_SKIP_PHASE,
+        _normalize_text(
+            settings.skip_phase_hotkey,
+            default=AppSettings.skip_phase_hotkey,
+            allow_empty=True,
+        ),
+    )
+    qsettings.setValue(
         SETTINGS_KEY_HOTKEY_MARK_CORRECT,
         _normalize_text(
             settings.mark_correct_hotkey,
@@ -688,6 +784,14 @@ def save_app_settings(settings: AppSettings) -> None:
         _normalize_text(
             settings.in_app_start_stop_shortcut,
             default=AppSettings.in_app_start_stop_shortcut,
+            allow_empty=True,
+        ),
+    )
+    qsettings.setValue(
+        SETTINGS_KEY_IN_APP_SHORTCUT_SKIP_PHASE,
+        _normalize_text(
+            settings.in_app_skip_phase_shortcut,
+            default=AppSettings.in_app_skip_phase_shortcut,
             allow_empty=True,
         ),
     )
