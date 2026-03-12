@@ -83,20 +83,29 @@ class SidebarFolderController:
         folder_name = item.data(self._folder_name_role)
         return folder_name if isinstance(folder_name, str) else item.text()
 
-    def format_folder_label(self, folder_name: str, flashcard_count: int) -> str:
-        """Build sidebar folder label with card count."""
-        return f"{folder_name} ({format_card_count(flashcard_count)})"
+    def format_folder_label(
+        self,
+        folder_name: str,
+        flashcard_count: int,
+        progress_percent: int,
+    ) -> str:
+        """Build sidebar folder label with card count and completion progress."""
+        return (
+            f"{folder_name} "
+            f"({format_card_count(flashcard_count)} | {progress_percent}% done)"
+        )
 
     def create_folder_item(
         self,
         folder_id: str,
         folder_name: str,
         flashcard_count: int,
+        progress_percent: int,
         checked: bool,
     ) -> QListWidgetItem:
         """Create one folder item for the sidebar list."""
         folder_item = QListWidgetItem(
-            self.format_folder_label(folder_name, flashcard_count)
+            self.format_folder_label(folder_name, flashcard_count, progress_percent)
         )
         folder_item.setData(Qt.UserRole, folder_id)
         folder_item.setData(self._folder_name_role, folder_name)

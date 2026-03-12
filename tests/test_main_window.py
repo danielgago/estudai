@@ -33,6 +33,12 @@ from estudai.services.settings import (
     load_app_settings,
     save_app_settings,
 )
+from estudai.services.study_progress import (
+    FlashcardProgress,
+    FlashcardProgressEntry,
+    load_folder_progress,
+    save_progress_entries,
+)
 from estudai.ui.main_window import MainWindow, SidebarCheckboxDelegate
 
 
@@ -285,11 +291,9 @@ def test_sidebar_button_order_is_welcoming(app: QApplication) -> None:
         if isinstance(sidebar_layout.itemAt(index).widget(), QPushButton)
     ]
 
-    assert reorder_button_texts == [
-        "Move Up",
-        "Move Down",
-    ]
+    assert reorder_button_texts == ["Move Up", "Move Down"]
     assert action_button_texts == [
+        "Reset Progress",
         "Create Folder",
         "Import NotebookLM CSV",
         "Import Existing Folder",
@@ -409,7 +413,7 @@ def test_add_folder_loads_csv_flashcards(app: QApplication, tmp_path: Path) -> N
 
     assert added is True
     assert window.sidebar_folder_list.count() == 1
-    assert window.sidebar_folder_list.item(0).text() == "biology (2 cards)"
+    assert window.sidebar_folder_list.item(0).text() == "biology (2 cards | 0% done)"
     assert window.current_folder_name == "biology"
     assert len(window.loaded_flashcards) == 2
     assert len(persisted) == 1
@@ -485,7 +489,7 @@ def test_sidebar_folder_context_actions_rename_and_delete(
     window.rename_sidebar_folder(folder_item)
     folder_item.setText("Biology Updated")
     renamed_item = window.sidebar_folder_list.item(0)
-    assert renamed_item.text() == "Biology Updated (1 card)"
+    assert renamed_item.text() == "Biology Updated (1 card | 0% done)"
 
     monkeypatch.setattr(
         "estudai.ui.main_window.QMessageBox.question",
@@ -1194,6 +1198,67 @@ def test_study_progress_isolated_by_folder_and_survives_folder_rename(
     assert second_window.current_folder_name == "2 folders selected"
 
 
+def test_forget_sidebar_folder_progress_clears_persisted_counts_and_refreshes_session(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify forgetting progress clears persisted counters and refreshes session UI."""
+    monkeypatch.setattr(
+        "estudai.ui.main_window.load_app_settings",
+        lambda: AppSettings(
+            timer_duration_seconds=1500,
+            flashcard_probability_percent=100,
+            flashcard_study_order_mode=StudyOrderMode.QUEUE,
+            question_display_duration_seconds=2,
+            answer_display_duration_seconds=3,
+        ),
+    )
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\nQ2?,A2.\n", encoding="utf-8")
+
+    window = MainWindow()
+    assert window.add_folder(biology_folder) is True
+    folder_item = window.sidebar_folder_list.item(0)
+    folder_id = folder_item.data(Qt.UserRole)
+    assert folder_id is not None
+    first_flashcard = window.flashcards_by_folder[folder_id][0]
+    assert first_flashcard.stable_id is not None
+    save_progress_entries(
+        [
+            FlashcardProgressEntry(
+                folder_id=folder_id,
+                flashcard_id=first_flashcard.stable_id,
+                progress=FlashcardProgress(correct_count=1, wrong_count=0),
+            )
+        ]
+    )
+
+    assert window._start_study_session() is True
+    assert window._study_session.card_counters[0].correct_count == 1
+    assert window._study_session.card_states[0].value == "completed"
+    assert window._study_session.progress().completed_count == 1
+    assert window._study_session.progress().remaining_count == 1
+
+    monkeypatch.setattr(
+        "estudai.ui.main_window.QMessageBox.question",
+        lambda *_args, **_kwargs: QMessageBox.Yes,
+    )
+    window.forget_sidebar_folder_progress([folder_item])
+
+    assert load_folder_progress(folder_id) == {}
+    assert len(window.flashcards_by_folder[folder_id]) == 2
+    assert window._study_session.active is True
+    assert window._study_session.card_counters[0].correct_count == 0
+    assert window._study_session.card_counters[0].wrong_count == 0
+    assert window._study_session.card_states[0].value == "pending"
+    assert window._study_session.progress().completed_count == 0
+    assert window._study_session.progress().remaining_count == 2
+    assert (
+        window.timer_page.folder_context_label.text()
+        == "Session: 0/2 completed | 2 remaining | 0 pending review"
+    )
+
+
 def test_legacy_managed_folder_migrates_and_persists_progress(
     app: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1883,7 +1948,7 @@ def test_create_folder_from_prompt(
     window.prompt_and_create_folder()
 
     assert window.sidebar_folder_list.count() == 1
-    assert window.sidebar_folder_list.item(0).text() == "Biology (0 cards)"
+    assert window.sidebar_folder_list.item(0).text() == "Biology (0 cards | 0% done)"
 
 
 def test_double_click_folder_opens_management_and_save_updates_selection(
@@ -1977,11 +2042,139 @@ def test_management_add_button_is_plus_at_top(
         "Move Up",
         "Move Down",
         "Sort by Question A-Z",
+        "Reset Progress",
         "+",
     ]
     assert management_layout.itemAt(3).widget() is table
     window.management_page.add_flashcard_button.click()
     assert table.rowCount() == 2
+
+
+def test_sidebar_progress_percentage_updates_after_scoring(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify sidebar progress labels refresh immediately after a scored review."""
+    monkeypatch.setattr(
+        "estudai.ui.main_window.load_app_settings",
+        lambda: AppSettings(
+            timer_duration_seconds=1500,
+            flashcard_probability_percent=100,
+            flashcard_study_order_mode=StudyOrderMode.QUEUE,
+            question_display_duration_seconds=2,
+            answer_display_duration_seconds=3,
+        ),
+    )
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\nQ2?,A2.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+    callbacks: list[object] = []
+    monkeypatch.setattr(
+        window,
+        "_start_flashcard_phase_timer",
+        lambda _delay, callback: callbacks.append(callback),
+    )
+
+    assert window.sidebar_folder_list.item(0).text() == "biology (2 cards | 0% done)"
+    assert window._start_study_session() is True
+    flashcard = window._next_flashcard_for_display()
+    assert flashcard is not None
+
+    window.show_flashcard_popup(flashcard)
+    callbacks.pop(0)()
+    window.timer_page.correct_button.click()
+    callbacks.pop(0)()
+
+    assert window.sidebar_folder_list.item(0).text() == "biology (2 cards | 50% done)"
+
+
+def test_reset_all_progress_button_clears_all_sidebar_progress(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify the sidebar Reset Progress button clears persisted progress globally."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    chemistry_folder = tmp_path / "chemistry"
+    biology_folder.mkdir()
+    chemistry_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\nQ2?,A2.\n", encoding="utf-8")
+    (chemistry_folder / "cards.csv").write_text("Q3?,A3.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+    assert window.add_folder(chemistry_folder) is True
+    biology_folder_id = window.sidebar_folder_list.item(0).data(Qt.UserRole)
+    chemistry_folder_id = window.sidebar_folder_list.item(1).data(Qt.UserRole)
+    assert biology_folder_id is not None
+    assert chemistry_folder_id is not None
+    biology_flashcard_id = window.flashcards_by_folder[biology_folder_id][0].stable_id
+    chemistry_flashcard_id = window.flashcards_by_folder[chemistry_folder_id][0].stable_id
+    assert biology_flashcard_id is not None
+    assert chemistry_flashcard_id is not None
+    save_progress_entries(
+        [
+            FlashcardProgressEntry(
+                folder_id=biology_folder_id,
+                flashcard_id=biology_flashcard_id,
+                progress=FlashcardProgress(correct_count=1, wrong_count=0),
+            ),
+            FlashcardProgressEntry(
+                folder_id=chemistry_folder_id,
+                flashcard_id=chemistry_flashcard_id,
+                progress=FlashcardProgress(correct_count=1, wrong_count=0),
+            ),
+        ]
+    )
+    window.handle_management_data_changed()
+
+    monkeypatch.setattr(
+        "estudai.ui.main_window.QMessageBox.question",
+        lambda *_args, **_kwargs: QMessageBox.Yes,
+    )
+    assert window.sidebar_folder_list.item(0).text() == "biology (2 cards | 50% done)"
+    assert window.sidebar_folder_list.item(1).text() == "chemistry (1 card | 100% done)"
+
+    window.reset_all_progress_button.click()
+
+    assert load_folder_progress(biology_folder_id) == {}
+    assert load_folder_progress(chemistry_folder_id) == {}
+    assert window.sidebar_folder_list.item(0).text() == "biology (2 cards | 0% done)"
+    assert window.sidebar_folder_list.item(1).text() == "chemistry (1 card | 0% done)"
+
+
+def test_management_reset_progress_button_clears_current_folder_progress(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify management-page Reset Progress clears persisted progress for that folder."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\nQ2?,A2.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+    folder_id = window.sidebar_folder_list.item(0).data(Qt.UserRole)
+    assert folder_id is not None
+    flashcard_id = window.flashcards_by_folder[folder_id][0].stable_id
+    assert flashcard_id is not None
+    save_progress_entries(
+        [
+            FlashcardProgressEntry(
+                folder_id=folder_id,
+                flashcard_id=flashcard_id,
+                progress=FlashcardProgress(correct_count=1, wrong_count=0),
+            )
+        ]
+    )
+    window.handle_management_data_changed()
+    window.handle_sidebar_folder_double_click(window.sidebar_folder_list.item(0))
+    monkeypatch.setattr(
+        "estudai.ui.main_window.QMessageBox.question",
+        lambda *_args, **_kwargs: QMessageBox.Yes,
+    )
+
+    assert window.sidebar_folder_list.item(0).text() == "biology (2 cards | 50% done)"
+    window.management_page.reset_progress_button.click()
+
+    assert load_folder_progress(folder_id) == {}
+    assert window.sidebar_folder_list.item(0).text() == "biology (2 cards | 0% done)"
 
 
 def test_management_table_keeps_native_checkbox_indicator_styles(

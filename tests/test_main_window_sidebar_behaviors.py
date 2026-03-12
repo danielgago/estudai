@@ -8,6 +8,12 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from estudai.services.folder_storage import PersistedFolder, list_persisted_folders
+from estudai.services.study_progress import (
+    FlashcardProgress,
+    FlashcardProgressEntry,
+    load_folder_progress,
+    save_progress_entries,
+)
 from estudai.ui.main_window import MainWindow
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -78,7 +84,7 @@ def test_inline_rename_invalid_name_shows_warning(
     folder_item.setText("   ")
 
     assert warnings
-    assert window.sidebar_folder_list.item(0).text() == "biology (1 card)"
+    assert window.sidebar_folder_list.item(0).text() == "biology (1 card | 0% done)"
 
 
 def test_sidebar_editor_closed_clears_tracking(app: QApplication) -> None:
@@ -146,6 +152,11 @@ def test_open_sidebar_menu_rename_action_uses_expected_labels(
         window, "rename_sidebar_folder", lambda _item: called.append("rename")
     )
     monkeypatch.setattr(
+        window,
+        "forget_sidebar_folder_progress",
+        lambda _items: called.append("forget"),
+    )
+    monkeypatch.setattr(
         window, "delete_sidebar_folders", lambda _items: called.append("delete")
     )
 
@@ -154,12 +165,91 @@ def test_open_sidebar_menu_rename_action_uses_expected_labels(
     assert called == ["rename"]
     assert [action.text for action in _FakeMenu.last_instance.actions] == [
         "Rename",
+        "Forget progress",
         "Delete",
     ]
     assert [action.tooltip for action in _FakeMenu.last_instance.actions] == [
         "Rename",
+        "Reset folder progress",
         "Delete",
     ]
+
+
+def test_open_sidebar_menu_forget_progress_dispatch_and_cancel_reset(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify forget-progress dispatch and cancellation preserve persisted counts."""
+    window = MainWindow()
+    _add_sample_folder(window, tmp_path, "biology")
+    _add_sample_folder(window, tmp_path, "chemistry")
+    first_item = window.sidebar_folder_list.item(0)
+    second_item = window.sidebar_folder_list.item(1)
+    first_folder_id = first_item.data(Qt.UserRole)
+    assert first_folder_id is not None
+    called: list[str] = []
+
+    save_progress_entries(
+        [
+            FlashcardProgressEntry(
+                folder_id=first_folder_id,
+                flashcard_id="card-1",
+                progress=FlashcardProgress(correct_count=2, wrong_count=1),
+            )
+        ]
+    )
+
+    class _FakeAction:
+        def __init__(self, text: str) -> None:
+            self.text = text
+            self.enabled = True
+
+        def setToolTip(self, _value: str) -> None:  # noqa: N802
+            pass
+
+        def setEnabled(self, enabled: bool) -> None:  # noqa: N802
+            self.enabled = enabled
+
+    class _FakeMenu:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.actions: list[_FakeAction] = []
+
+        def addAction(self, text: str) -> _FakeAction:  # noqa: N802
+            action = _FakeAction(text)
+            self.actions.append(action)
+            return action
+
+        def exec(self, *_args, **_kwargs):  # noqa: A003
+            return self.actions[1]
+
+    monkeypatch.setattr("estudai.ui.main_window.QMenu", _FakeMenu)
+    monkeypatch.setattr(window.sidebar_folder_list, "itemAt", lambda _pos: first_item)
+    monkeypatch.setattr(
+        window, "_selected_folder_items", lambda: [first_item, second_item]
+    )
+    monkeypatch.setattr(
+        window, "rename_sidebar_folder", lambda _item: called.append("rename")
+    )
+    monkeypatch.setattr(
+        window,
+        "forget_sidebar_folder_progress",
+        lambda _items: called.append("forget"),
+    )
+    monkeypatch.setattr(
+        window, "delete_sidebar_folders", lambda _items: called.append("delete")
+    )
+
+    window.open_sidebar_folder_menu(QPoint(0, 0))
+    assert called == ["forget"]
+
+    monkeypatch.setattr(
+        "estudai.ui.main_window.QMessageBox.question",
+        lambda *_args, **_kwargs: QMessageBox.No,
+    )
+    window.forget_sidebar_folder_progress([first_item])
+
+    assert load_folder_progress(first_folder_id) == {
+        "card-1": FlashcardProgress(correct_count=2, wrong_count=1)
+    }
 
 
 def test_open_sidebar_menu_delete_dispatch_and_cancel_delete(
@@ -194,7 +284,7 @@ def test_open_sidebar_menu_delete_dispatch_and_cancel_delete(
             return action
 
         def exec(self, *_args, **_kwargs):  # noqa: A003
-            return self.actions[1]
+            return self.actions[2]
 
     monkeypatch.setattr("estudai.ui.main_window.QMenu", _FakeMenu)
     monkeypatch.setattr(window.sidebar_folder_list, "itemAt", lambda _pos: first_item)
@@ -203,6 +293,11 @@ def test_open_sidebar_menu_delete_dispatch_and_cancel_delete(
     )
     monkeypatch.setattr(
         window, "rename_sidebar_folder", lambda _item: called.append("rename")
+    )
+    monkeypatch.setattr(
+        window,
+        "forget_sidebar_folder_progress",
+        lambda _items: called.append("forget"),
     )
     monkeypatch.setattr(
         window, "delete_sidebar_folders", lambda _items: called.append("delete")

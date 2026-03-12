@@ -11,6 +11,7 @@ from estudai.services.settings import (
     WrongAnswerCompletionMode,
     WrongAnswerReinsertionMode,
 )
+from estudai.services.study_progress import is_review_complete
 
 __all__ = [
     "SessionCardCounters",
@@ -337,12 +338,11 @@ class StudySessionController:
 
     def _is_completed_from_counters(self, counters: SessionCardCounters) -> bool:
         """Return whether counters satisfy the configured completion rule."""
-        if (
-            self.wrong_answer_completion_mode
-            is WrongAnswerCompletionMode.UNTIL_CORRECT_MORE_THAN_WRONG
-        ):
-            return counters.correct_count > counters.wrong_count
-        return counters.correct_count >= 1
+        return is_review_complete(
+            counters.correct_count,
+            counters.wrong_count,
+            self.wrong_answer_completion_mode,
+        )
 
     def _initial_state_for(self, flashcard_index: int) -> StudyCardState:
         """Return the correct opening state for one flashcard."""

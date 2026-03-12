@@ -8,13 +8,18 @@ import pytest
 
 from estudai.services.csv_flashcards import load_flashcards_from_folder
 from estudai.services.folder_storage import import_folder
+from estudai.services.settings import WrongAnswerCompletionMode
 from estudai.services.study_progress import (
     FlashcardProgress,
     FlashcardProgressEntry,
+    FolderProgressSummary,
+    delete_folder_progress,
     get_study_progress_path,
+    is_review_complete,
     load_folder_progress,
     prune_folder_progress,
     save_progress_entries,
+    summarize_folder_progress,
 )
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -148,3 +153,78 @@ def test_prune_folder_progress_removes_deleted_flashcards_only() -> None:
     assert load_folder_progress("chemistry") == {
         "card-3": FlashcardProgress(correct_count=3, wrong_count=1)
     }
+
+
+def test_delete_folder_progress_removes_selected_folder_only() -> None:
+    """Verify deleting one folder's progress leaves unrelated folders intact."""
+    save_progress_entries(
+        [
+            FlashcardProgressEntry(
+                folder_id="biology",
+                flashcard_id="card-1",
+                progress=FlashcardProgress(correct_count=1, wrong_count=0),
+            ),
+            FlashcardProgressEntry(
+                folder_id="chemistry",
+                flashcard_id="card-2",
+                progress=FlashcardProgress(correct_count=0, wrong_count=2),
+            ),
+        ]
+    )
+
+    delete_folder_progress("biology")
+
+    assert load_folder_progress("biology") == {}
+    assert load_folder_progress("chemistry") == {
+        "card-2": FlashcardProgress(correct_count=0, wrong_count=2)
+    }
+
+
+def test_summarize_folder_progress_uses_completion_mode_rules() -> None:
+    """Verify folder summaries follow the configured completion mode."""
+    folder_progress = {
+        "card-1": FlashcardProgress(correct_count=1, wrong_count=1),
+        "card-2": FlashcardProgress(correct_count=2, wrong_count=1),
+    }
+
+    once_summary = summarize_folder_progress(
+        ["card-1", "card-2", "card-3"],
+        folder_progress,
+        WrongAnswerCompletionMode.UNTIL_CORRECT_ONCE,
+    )
+    more_than_wrong_summary = summarize_folder_progress(
+        ["card-1", "card-2", "card-3"],
+        folder_progress,
+        WrongAnswerCompletionMode.UNTIL_CORRECT_MORE_THAN_WRONG,
+    )
+
+    assert once_summary == FolderProgressSummary(
+        total_flashcards=3,
+        completed_flashcards=2,
+    )
+    assert once_summary.percent_done == 67
+    assert more_than_wrong_summary == FolderProgressSummary(
+        total_flashcards=3,
+        completed_flashcards=1,
+    )
+    assert more_than_wrong_summary.percent_done == 33
+
+
+def test_is_review_complete_matches_supported_completion_modes() -> None:
+    """Verify the shared completion helper matches both study completion rules."""
+    assert (
+        is_review_complete(
+            1,
+            2,
+            WrongAnswerCompletionMode.UNTIL_CORRECT_ONCE,
+        )
+        is True
+    )
+    assert (
+        is_review_complete(
+            1,
+            2,
+            WrongAnswerCompletionMode.UNTIL_CORRECT_MORE_THAN_WRONG,
+        )
+        is False
+    )

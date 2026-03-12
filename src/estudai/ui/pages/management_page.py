@@ -49,6 +49,7 @@ class ManagementPage(QWidget):
     """Page to edit flashcards inside one selected folder."""
 
     delete_requested = Signal()
+    reset_progress_requested = Signal()
 
     def __init__(self) -> None:
         """Initialize the management page."""
@@ -83,6 +84,10 @@ class ManagementPage(QWidget):
         self.sort_flashcards_button = QPushButton("Sort by Question A-Z")
         self.sort_flashcards_button.clicked.connect(self.sort_flashcards_by_question)
         table_actions_layout.addWidget(self.sort_flashcards_button)
+        self.reset_progress_button = QPushButton("Reset Progress")
+        self.reset_progress_button.setToolTip("Reset folder progress")
+        self.reset_progress_button.clicked.connect(self.reset_progress_requested.emit)
+        table_actions_layout.addWidget(self.reset_progress_button)
         table_actions_layout.addStretch()
         self.add_flashcard_button = QPushButton("+")
         self.add_flashcard_button.setFixedSize(34, 34)

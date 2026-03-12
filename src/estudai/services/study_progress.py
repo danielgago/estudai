@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 import json
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -41,6 +42,28 @@ class FlashcardProgressEntry:
     progress: FlashcardProgress
 
 
+@dataclass(frozen=True)
+class FolderProgressSummary:
+    """Completion summary for one folder's persisted study progress.
+
+    Args:
+        total_flashcards: Total flashcards currently present in the folder.
+        completed_flashcards: Flashcards considered completed by progress rules.
+    """
+
+    total_flashcards: int = 0
+    completed_flashcards: int = 0
+
+    @property
+    def percent_done(self) -> int:
+        """Return the rounded completion percentage for display."""
+        if self.total_flashcards <= 0:
+            return 0
+        return int(
+            round((self.completed_flashcards / self.total_flashcards) * 100)
+        )
+
+
 def get_study_progress_path() -> Path:
     """Return the study-progress JSON file path.
 
@@ -66,6 +89,64 @@ def reviewed_progress(correct_count: int, wrong_count: int) -> FlashcardProgress
         correct_count=max(0, correct_count),
         wrong_count=max(0, wrong_count),
         last_reviewed_at=datetime.now(UTC).isoformat(),
+    )
+
+
+def is_review_complete(
+    correct_count: int,
+    wrong_count: int,
+    completion_mode: WrongAnswerCompletionMode,
+) -> bool:
+    """Return whether counters satisfy the configured completion rule.
+
+    Args:
+        correct_count: Persisted or in-memory correct-answer count.
+        wrong_count: Persisted or in-memory wrong-answer count.
+        completion_mode: Completion rule configured in settings.
+
+    Returns:
+        bool: True when the counters count as completed.
+    """
+    from .settings import WrongAnswerCompletionMode
+
+    if completion_mode is WrongAnswerCompletionMode.UNTIL_CORRECT_MORE_THAN_WRONG:
+        return correct_count > wrong_count
+    return correct_count >= 1
+
+
+def summarize_folder_progress(
+    flashcard_ids: Iterable[str | None],
+    folder_progress: Mapping[str, FlashcardProgress],
+    completion_mode: WrongAnswerCompletionMode,
+) -> FolderProgressSummary:
+    """Summarize persisted completion state for one folder.
+
+    Args:
+        flashcard_ids: Stable flashcard ids currently present in the folder.
+        folder_progress: Persisted progress indexed by stable flashcard id.
+        completion_mode: Completion rule configured in settings.
+
+    Returns:
+        FolderProgressSummary: Folder completion summary for display.
+    """
+    total_flashcards = 0
+    completed_flashcards = 0
+    for flashcard_id in flashcard_ids:
+        total_flashcards += 1
+        if flashcard_id is None:
+            continue
+        progress = folder_progress.get(flashcard_id)
+        if progress is None:
+            continue
+        if is_review_complete(
+            progress.correct_count,
+            progress.wrong_count,
+            completion_mode,
+        ):
+            completed_flashcards += 1
+    return FolderProgressSummary(
+        total_flashcards=total_flashcards,
+        completed_flashcards=completed_flashcards,
     )
 
 

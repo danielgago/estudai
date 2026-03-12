@@ -80,10 +80,12 @@ from estudai.services.settings import (
 )
 from estudai.services.study_progress import (
     FlashcardProgressEntry,
+    delete_folder_progress,
     load_folder_progress,
     prune_folder_progress,
     reviewed_progress,
     save_progress_entries,
+    summarize_folder_progress,
 )
 from estudai.ui.utils import (
     NativeCheckboxDelegate,
@@ -236,6 +238,9 @@ class MainWindow(QMainWindow):
         self.management_page.delete_requested.connect(
             self.delete_selected_flashcards_from_management
         )
+        self.management_page.reset_progress_requested.connect(
+            self.reset_management_folder_progress
+        )
         self.management_page.save_button.clicked.connect(self.save_management_changes)
         self.management_page.cancel_button.clicked.connect(self.switch_to_timer)
         self.settings_page.cancel_requested.connect(self.switch_to_timer)
@@ -309,6 +314,11 @@ class MainWindow(QMainWindow):
         )
         reorder_button_layout.addWidget(self.move_folder_down_button)
         sidebar_layout.addLayout(reorder_button_layout)
+
+        self.reset_all_progress_button = QPushButton("Reset Progress")
+        self.reset_all_progress_button.setToolTip("Reset progress for all folders")
+        self.reset_all_progress_button.clicked.connect(self.reset_all_sidebar_progress)
+        sidebar_layout.addWidget(self.reset_all_progress_button)
 
         create_folder_button = QPushButton("Create Folder")
         create_folder_button.clicked.connect(self.prompt_and_create_folder)
@@ -551,6 +561,7 @@ class MainWindow(QMainWindow):
 
     def _handle_settings_saved(self, _settings: AppSettings) -> None:
         """Return to the timer page after a successful settings save."""
+        self._refresh_sidebar_folder_progress_labels()
         self._refresh_queue_shuffle_action()
         self.switch_to_timer()
 
@@ -930,11 +941,13 @@ class MainWindow(QMainWindow):
         ):
             return
         progress_entries: list[FlashcardProgressEntry] = []
+        updated_folder_ids: set[str] = set()
         for session_index in session_indexes:
             if not (0 <= session_index < len(self._active_study_session_keys)):
                 continue
             folder_id, flashcard_id = self._active_study_session_keys[session_index]
             counters = self._study_session.card_counters[session_index]
+            updated_folder_ids.add(folder_id)
             progress_entries.append(
                 FlashcardProgressEntry(
                     folder_id=folder_id,
@@ -946,6 +959,7 @@ class MainWindow(QMainWindow):
                 )
             )
         save_progress_entries(progress_entries)
+        self._refresh_sidebar_folder_progress_labels(updated_folder_ids)
 
     def _update_study_session_progress(self) -> None:
         """Refresh visible study progress for the timer page."""
@@ -1465,6 +1479,64 @@ class MainWindow(QMainWindow):
         """
         return self._sidebar_folders.checked_folder_ids()
 
+    def _folder_ids_from_items(self, folder_items: list[QListWidgetItem]) -> set[str]:
+        """Return managed folder ids represented by sidebar items.
+
+        Args:
+            folder_items: Sidebar folder items to inspect.
+
+        Returns:
+            set[str]: Folder ids found in the provided items.
+        """
+        folder_ids: set[str] = set()
+        for item in folder_items:
+            folder_id = item.data(Qt.UserRole)
+            if folder_id is None:
+                continue
+            folder_ids.add(folder_id)
+        return folder_ids
+
+    def _sidebar_progress_percent(self, folder_id: str) -> int:
+        """Return the current completion percentage for one folder."""
+        completion_mode = load_app_settings().wrong_answer_completion_mode
+        folder_flashcards = self.flashcards_by_folder.get(folder_id, [])
+        summary = summarize_folder_progress(
+            (flashcard.stable_id for flashcard in folder_flashcards),
+            load_folder_progress(folder_id),
+            completion_mode,
+        )
+        return summary.percent_done
+
+    def _refresh_sidebar_folder_progress_labels(
+        self,
+        folder_ids: set[str] | None = None,
+    ) -> None:
+        """Refresh sidebar labels for one or many folders without rebuilding the list.
+
+        Args:
+            folder_ids: Optional subset of folder ids to refresh.
+        """
+        were_signals_blocked = self.sidebar_folder_list.blockSignals(True)
+        try:
+            for item in self._iter_sidebar_folder_items():
+                folder_id = item.data(Qt.UserRole)
+                if folder_id is None:
+                    continue
+                if folder_ids is not None and folder_id not in folder_ids:
+                    continue
+                if folder_id == self._renaming_folder_id:
+                    continue
+                folder_flashcards = self.flashcards_by_folder.get(folder_id, [])
+                item.setText(
+                    self._format_sidebar_folder_label(
+                        self._folder_item_name(item),
+                        len(folder_flashcards),
+                        self._sidebar_progress_percent(folder_id),
+                    )
+                )
+        finally:
+            self.sidebar_folder_list.blockSignals(were_signals_blocked)
+
     def _refresh_loaded_flashcards(self) -> None:
         """Refresh selected flashcards from checked folders."""
         checked_folders: list[CheckedFolderData] = []
@@ -1580,6 +1652,8 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         rename_action = menu.addAction("Rename")
         rename_action.setToolTip("Rename")
+        forget_progress_action = menu.addAction("Forget progress")
+        forget_progress_action.setToolTip("Reset folder progress")
         delete_action = menu.addAction("Delete")
         delete_action.setToolTip("Delete")
         rename_action.setEnabled(len(selected_folder_items) == 1)
@@ -1588,6 +1662,8 @@ class MainWindow(QMainWindow):
         )
         if chosen_action is rename_action and len(selected_folder_items) == 1:
             self.rename_sidebar_folder(selected_folder_items[0])
+        if chosen_action is forget_progress_action:
+            self.forget_sidebar_folder_progress(selected_folder_items)
         if chosen_action is delete_action:
             self.delete_sidebar_folders(selected_folder_items)
 
@@ -1605,11 +1681,7 @@ class MainWindow(QMainWindow):
         Args:
             folder_items: Folder items selected for deletion.
         """
-        folder_ids = {
-            item.data(Qt.UserRole)
-            for item in folder_items
-            if item.data(Qt.UserRole) is not None
-        }
+        folder_ids = self._folder_ids_from_items(folder_items)
         if not folder_ids:
             return
         confirmation = QMessageBox.question(
@@ -1626,6 +1698,110 @@ class MainWindow(QMainWindow):
         for folder_id in folder_ids:
             delete_persisted_folder(folder_id)
         self.handle_management_data_changed(preferred_checked_ids=checked_ids)
+
+    def forget_sidebar_folder_progress(
+        self,
+        folder_items: list[QListWidgetItem],
+    ) -> None:
+        """Reset persisted study progress for one or many folders.
+
+        Args:
+            folder_items: Folder items selected for progress reset.
+        """
+        folder_ids = self._folder_ids_from_items(folder_items)
+        if not folder_ids:
+            return
+        self._reset_persisted_study_progress(
+            folder_ids,
+            title="Forget progress",
+            message=(
+                f"Forget study progress for {len(folder_ids)} selected folder(s)?\n\n"
+                "This resets study statistics only. Flashcards will stay intact."
+            ),
+        )
+
+    def reset_all_sidebar_progress(self) -> None:
+        """Reset persisted study progress across all currently loaded folders."""
+        folder_ids = set(self.flashcards_by_folder)
+        if not folder_ids:
+            return
+        self._reset_persisted_study_progress(
+            folder_ids,
+            title="Reset progress",
+            message=(
+                "Reset study progress for all folders?\n\n"
+                "This resets study statistics only. Flashcards will stay intact."
+            ),
+        )
+
+    def reset_management_folder_progress(self) -> None:
+        """Reset persisted study progress for the folder open in management."""
+        if self._editing_folder_id is None:
+            QMessageBox.warning(
+                self,
+                "Reset progress",
+                "No folder is open in flashcard management.",
+            )
+            return
+        self._reset_persisted_study_progress(
+            {self._editing_folder_id},
+            title="Reset progress",
+            message=(
+                f'Reset study progress for "{self.management_page.title_label.text()}"?\n\n'
+                "This resets study statistics only. Flashcards will stay intact."
+            ),
+        )
+
+    def _reset_persisted_study_progress(
+        self,
+        folder_ids: set[str],
+        *,
+        title: str,
+        message: str,
+    ) -> None:
+        """Confirm and reset persisted study progress for selected folders.
+
+        Args:
+            folder_ids: Folder ids whose persisted study progress should be cleared.
+            title: Dialog title for the confirmation prompt.
+            message: Confirmation prompt body.
+        """
+        if not folder_ids:
+            return
+        confirmation = QMessageBox.question(
+            self,
+            title,
+            message,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirmation != QMessageBox.Yes:
+            return
+        for folder_id in folder_ids:
+            delete_folder_progress(folder_id)
+        self._refresh_sidebar_folder_progress_labels(folder_ids)
+        self._refresh_active_study_session_after_progress_reset(folder_ids)
+
+    def _refresh_active_study_session_after_progress_reset(
+        self,
+        folder_ids: set[str],
+    ) -> None:
+        """Rebuild the active study session when reset affects selected folders.
+
+        Args:
+            folder_ids: Folder ids whose persisted progress was reset.
+        """
+        if not self._study_session.active:
+            return
+        session_folder_ids = {
+            folder_id for folder_id, _flashcard_id in self._active_study_session_keys
+        }
+        if not folder_ids.intersection(session_folder_ids):
+            return
+        self._reset_study_session_state()
+        if not self.selected_folder_ids or not self.loaded_flashcards:
+            return
+        self._start_study_session()
 
     def move_selected_sidebar_folder_up(self) -> None:
         """Move the selected sidebar folder one position upward."""
@@ -1887,7 +2063,12 @@ class MainWindow(QMainWindow):
         return True
 
     def _create_sidebar_folder_item(
-        self, folder_id: str, folder_name: str, flashcard_count: int, checked: bool
+        self,
+        folder_id: str,
+        folder_name: str,
+        flashcard_count: int,
+        progress_percent: int,
+        checked: bool,
     ) -> QListWidgetItem:
         """Create one folder item for the sidebar list.
 
@@ -1895,6 +2076,7 @@ class MainWindow(QMainWindow):
             folder_id: Folder identifier.
             folder_name: Display name.
             flashcard_count: Number of flashcards in folder.
+            progress_percent: Percent of flashcards completed for the folder.
             checked: Whether the item starts checked.
 
         Returns:
@@ -1904,6 +2086,7 @@ class MainWindow(QMainWindow):
             folder_id,
             folder_name,
             flashcard_count,
+            progress_percent,
             checked,
         )
 
@@ -1943,10 +2126,17 @@ class MainWindow(QMainWindow):
         )
 
     def _format_sidebar_folder_label(
-        self, folder_name: str, flashcard_count: int
+        self,
+        folder_name: str,
+        flashcard_count: int,
+        progress_percent: int,
     ) -> str:
         """Build sidebar folder label with card count."""
-        return self._sidebar_folders.format_folder_label(folder_name, flashcard_count)
+        return self._sidebar_folders.format_folder_label(
+            folder_name,
+            flashcard_count,
+            progress_percent,
+        )
 
     def handle_management_data_changed(
         self,
@@ -1964,6 +2154,7 @@ class MainWindow(QMainWindow):
         remaining_folder_ids: set[str] = set()
         preferred_current_row: int | None = None
         folder_load_errors: list[str] = []
+        completion_mode = load_app_settings().wrong_answer_completion_mode
         self.sidebar_folder_list.blockSignals(True)
         self.sidebar_folder_list.clear()
 
@@ -2001,10 +2192,16 @@ class MainWindow(QMainWindow):
                 if preferred_checked_ids is None
                 else persisted_folder.id in preferred_checked_ids
             )
+            progress_percent = summarize_folder_progress(
+                (flashcard.stable_id for flashcard in folder_flashcards),
+                load_folder_progress(persisted_folder.id),
+                completion_mode,
+            ).percent_done
             folder_item = self._create_sidebar_folder_item(
                 persisted_folder.id,
                 persisted_folder.name,
                 flashcard_count=len(folder_flashcards),
+                progress_percent=progress_percent,
                 checked=is_checked,
             )
             self.sidebar_folder_list.addItem(folder_item)
@@ -2026,6 +2223,7 @@ class MainWindow(QMainWindow):
             if folder_id in remaining_folder_ids
         }
         self._refresh_loaded_flashcards()
+        self.reset_all_progress_button.setEnabled(bool(self.flashcards_by_folder))
         self._update_sidebar_reorder_buttons()
         self._show_folder_load_warning(folder_load_errors)
 
