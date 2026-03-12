@@ -4,6 +4,7 @@ from pathlib import Path
 
 from estudai.services.csv_flashcards import Flashcard
 from estudai.services.settings import (
+    StudyOrderMode,
     WrongAnswerCompletionMode,
     WrongAnswerReinsertionMode,
 )
@@ -26,6 +27,8 @@ def _flashcards(count: int) -> list[Flashcard]:
 def _start_session(
     flashcard_count: int,
     *,
+    study_order_mode: StudyOrderMode = StudyOrderMode.QUEUE,
+    queue_start_shuffled: bool = False,
     completion_mode: WrongAnswerCompletionMode = (
         WrongAnswerCompletionMode.UNTIL_CORRECT_ONCE
     ),
@@ -33,16 +36,16 @@ def _start_session(
         WrongAnswerReinsertionMode.PUSH_TO_END
     ),
     reinsert_after_count: int = 3,
-    random_order: bool = False,
 ) -> StudySessionController:
     """Create and start a study session with configurable retry rules."""
     session = StudySessionController()
     started = session.start(
         _flashcards(flashcard_count),
+        study_order_mode=study_order_mode,
+        queue_start_shuffled=queue_start_shuffled,
         wrong_answer_completion_mode=completion_mode,
         wrong_answer_reinsertion_mode=reinsertion_mode,
         wrong_answer_reinsert_after_count=reinsert_after_count,
-        random_order=random_order,
         choice_func=lambda indexes: indexes[-1],
     )
 
@@ -150,15 +153,15 @@ def test_repeated_wrong_answers_keep_card_in_queue_without_dropping_it() -> None
     assert session.queued_flashcard_indexes() == [0]
 
 
-def test_random_order_builds_predictable_initial_queue_and_keeps_wrong_card_active() -> (
+def test_queue_shuffle_builds_predictable_initial_queue_and_keeps_wrong_card_active() -> (
     None
 ):
-    """Verify random-order sessions preserve reinsertion behavior deterministically."""
+    """Verify queue shuffling preserves deterministic retry behavior."""
     session = _start_session(
         3,
+        queue_start_shuffled=True,
         reinsertion_mode=WrongAnswerReinsertionMode.AFTER_X_FLASHCARDS,
         reinsert_after_count=1,
-        random_order=True,
     )
 
     assert session.queued_flashcard_indexes() == [2, 1, 0]
@@ -167,6 +170,44 @@ def test_random_order_builds_predictable_initial_queue_and_keeps_wrong_card_acti
 
     assert session.queued_flashcard_indexes() == [1, 2, 0]
     assert session.next_flashcard().question == "Q1?"
+
+
+def test_true_random_repeats_from_active_pool_without_queue_reinsertion() -> None:
+    """Verify true-random mode draws from active cards instead of a managed queue."""
+    session = _start_session(
+        3,
+        study_order_mode=StudyOrderMode.TRUE_RANDOM,
+        reinsertion_mode=WrongAnswerReinsertionMode.AFTER_X_FLASHCARDS,
+        reinsert_after_count=1,
+    )
+
+    assert session.next_flashcard().question == "Q2?"
+    assert session.apply_current_score("wrong") is True
+    assert session.queued_flashcard_indexes() == [0, 1, 2]
+
+    # The same wrong card can be picked again immediately because every draw
+    # comes from the active pool rather than a reinserted queue position.
+    assert session.next_flashcard().question == "Q2?"
+
+
+def test_shuffle_remaining_queue_only_reorders_upcoming_queue() -> None:
+    """Verify runtime queue shuffling leaves the active flashcard untouched."""
+    session = _start_session(4)
+
+    assert session.next_flashcard().question == "Q0?"
+    assert session.shuffle_remaining_queue() is True
+    assert session.current_flashcard_index == 0
+    assert session.queued_flashcard_indexes() == [3, 2, 1]
+
+
+def test_shuffle_remaining_queue_is_disabled_in_true_random_mode() -> None:
+    """Verify queue shuffling is unavailable outside queue mode."""
+    session = _start_session(
+        3,
+        study_order_mode=StudyOrderMode.TRUE_RANDOM,
+    )
+
+    assert session.shuffle_remaining_queue() is False
 
 
 def test_replace_current_flashcard_updates_future_retries() -> None:

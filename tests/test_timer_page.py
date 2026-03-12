@@ -218,6 +218,7 @@ def test_flashcard_phase_keeps_pause_and_stop_enabled() -> None:
     assert page.pause_button.text() == "Resume"
     assert pause_events == [True]
     assert not page.flashcard_pause_actions_container.isHidden()
+    assert page.shuffle_queue_button.isHidden()
     assert page.edit_flashcard_button.isEnabled()
     assert page.delete_flashcard_button.isEnabled()
 
@@ -266,6 +267,29 @@ def test_paused_flashcard_actions_are_positioned_above_question() -> None:
     assert flashcard_layout.itemAt(0).widget() is page.flashcard_pause_actions_container
     assert flashcard_layout.itemAt(2).widget() is page.flashcard_question_label
     assert flashcard_layout.itemAt(0).alignment() == (Qt.AlignTop | Qt.AlignRight)
+
+
+def test_queue_shuffle_action_only_shows_when_available_and_paused() -> None:
+    """Verify queue shuffle appears only for paused queue-mode sessions."""
+    _get_app()
+    page = TimerPage()
+    shuffle_events: list[str] = []
+    page.flashcard_queue_shuffle_requested.connect(
+        lambda: shuffle_events.append("shuffle")
+    )
+
+    page.set_queue_shuffle_available(True)
+    page.show_flashcard_question("Question?", display_duration_seconds=5)
+    assert page.shuffle_queue_button.isHidden() is True
+
+    page.pause_timer()
+    assert page.shuffle_queue_button.isHidden() is False
+
+    page.shuffle_queue_button.click()
+    assert shuffle_events == ["shuffle"]
+
+    page.set_queue_shuffle_available(False)
+    assert page.shuffle_queue_button.isHidden() is True
 
 
 def test_flashcard_score_buttons_emit_actions() -> None:

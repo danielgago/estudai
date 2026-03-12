@@ -25,6 +25,7 @@ from estudai.services.folder_storage import (
 from estudai.services.hotkeys import GlobalHotkeyService, HotkeyRegistrationError
 from estudai.services.settings import (
     AppSettings,
+    StudyOrderMode,
     WrongAnswerCompletionMode,
     WrongAnswerReinsertionMode,
     load_app_settings,
@@ -682,7 +683,7 @@ def test_zero_second_timer_starts_flashcards_immediately_and_resets_to_ready(
         lambda: AppSettings(
             timer_duration_seconds=0,
             flashcard_probability_percent=0,
-            flashcard_random_order_enabled=False,
+            flashcard_study_order_mode=StudyOrderMode.QUEUE,
             question_display_duration_seconds=2,
             answer_display_duration_seconds=3,
         ),
@@ -722,7 +723,7 @@ def test_timer_cycle_restarts_countdown_when_probability_roll_fails(
         lambda: AppSettings(
             timer_duration_seconds=120,
             flashcard_probability_percent=0,
-            flashcard_random_order_enabled=False,
+            flashcard_study_order_mode=StudyOrderMode.QUEUE,
             question_display_duration_seconds=2,
             answer_display_duration_seconds=3,
         ),
@@ -795,7 +796,7 @@ def test_scored_session_marks_wrong_then_correct_until_complete(
         lambda: AppSettings(
             timer_duration_seconds=1500,
             flashcard_probability_percent=100,
-            flashcard_random_order_enabled=False,
+            flashcard_study_order_mode=StudyOrderMode.QUEUE,
             question_display_duration_seconds=2,
             answer_display_duration_seconds=3,
         ),
@@ -870,7 +871,7 @@ def test_scored_session_mode_b_requires_more_correct_than_wrong_end_to_end(
         lambda: AppSettings(
             timer_duration_seconds=1500,
             flashcard_probability_percent=100,
-            flashcard_random_order_enabled=False,
+            flashcard_study_order_mode=StudyOrderMode.QUEUE,
             question_display_duration_seconds=2,
             answer_display_duration_seconds=3,
             wrong_answer_completion_mode=(
@@ -927,7 +928,7 @@ def test_wrong_answer_after_x_reinsertion_returns_card_after_requested_gap(
         lambda: AppSettings(
             timer_duration_seconds=1500,
             flashcard_probability_percent=100,
-            flashcard_random_order_enabled=False,
+            flashcard_study_order_mode=StudyOrderMode.QUEUE,
             question_display_duration_seconds=2,
             answer_display_duration_seconds=3,
             wrong_answer_reinsertion_mode=(
@@ -991,10 +992,10 @@ def test_stop_button_resets_runtime_study_session_state(
     assert window.timer_page.start_button.isEnabled()
 
 
-def test_timer_completion_uses_random_choice_when_setting_enabled(
+def test_timer_completion_uses_queue_shuffle_when_setting_enabled(
     app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Verify session selection uses the random-order path when configured."""
+    """Verify queue mode can start with a shuffled remaining order."""
     shown_flashcards: list[str] = []
     monkeypatch.setattr(
         "estudai.ui.main_window.MainWindow.show_flashcard_popup",
@@ -1005,7 +1006,8 @@ def test_timer_completion_uses_random_choice_when_setting_enabled(
         lambda: AppSettings(
             timer_duration_seconds=1500,
             flashcard_probability_percent=100,
-            flashcard_random_order_enabled=True,
+            flashcard_study_order_mode=StudyOrderMode.QUEUE,
+            flashcard_queue_start_shuffled=True,
             question_display_duration_seconds=2,
             answer_display_duration_seconds=3,
         ),
@@ -1028,6 +1030,58 @@ def test_timer_completion_uses_random_choice_when_setting_enabled(
 
     assert shown_flashcards == ["Q2?"]
     assert window._study_session.current_flashcard_index == 1
+
+
+def test_true_random_mode_can_repeat_same_wrong_card_end_to_end(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify true-random mode can redraw a wrong card immediately."""
+    callbacks: list[object] = []
+    monkeypatch.setattr(
+        "estudai.ui.main_window.load_app_settings",
+        lambda: AppSettings(
+            timer_duration_seconds=1500,
+            flashcard_probability_percent=100,
+            flashcard_study_order_mode=StudyOrderMode.TRUE_RANDOM,
+            question_display_duration_seconds=2,
+            answer_display_duration_seconds=3,
+            wrong_answer_reinsertion_mode=(
+                WrongAnswerReinsertionMode.AFTER_X_FLASHCARDS
+            ),
+            wrong_answer_reinsert_after_count=1,
+        ),
+    )
+    monkeypatch.setattr(
+        "estudai.ui.main_window.random.choice", lambda flashcards: flashcards[-1]
+    )
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text(
+        "Q1?,A1.\nQ2?,A2.\nQ3?,A3.\n",
+        encoding="utf-8",
+    )
+    assert window.add_folder(biology_folder) is True
+    monkeypatch.setattr(
+        window,
+        "_start_flashcard_phase_timer",
+        lambda _delay, callback: callbacks.append(callback),
+    )
+    window.timer_page.start_timer()
+
+    window.timer_page.is_running = False
+    window.handle_timer_cycle_completed()
+    assert window._study_session.study_order_mode is StudyOrderMode.TRUE_RANDOM
+    assert window.timer_page.flashcard_question_label.text() == "Q3?"
+    callbacks.pop(0)()
+    window.timer_page.wrong_button.click()
+    callbacks.pop(0)()
+
+    window.timer_page.is_running = False
+    window.handle_timer_cycle_completed()
+
+    assert window.timer_page.flashcard_question_label.text() == "Q3?"
+    assert window._can_shuffle_remaining_queue() is False
 
 
 def test_flashcard_sequence_plays_sound_for_question_and_answer(
@@ -1234,7 +1288,7 @@ def test_unanswered_flashcard_returns_after_other_cards(
         lambda: AppSettings(
             timer_duration_seconds=1500,
             flashcard_probability_percent=100,
-            flashcard_random_order_enabled=False,
+            flashcard_study_order_mode=StudyOrderMode.QUEUE,
             question_display_duration_seconds=2,
             answer_display_duration_seconds=3,
         ),
@@ -1274,7 +1328,7 @@ def test_paused_flashcard_edit_updates_current_display_and_future_retry(
         lambda: AppSettings(
             timer_duration_seconds=1500,
             flashcard_probability_percent=100,
-            flashcard_random_order_enabled=False,
+            flashcard_study_order_mode=StudyOrderMode.QUEUE,
             question_display_duration_seconds=2,
             answer_display_duration_seconds=3,
         ),
@@ -1341,7 +1395,7 @@ def test_paused_flashcard_delete_removes_card_from_active_session(
         lambda: AppSettings(
             timer_duration_seconds=1500,
             flashcard_probability_percent=100,
-            flashcard_random_order_enabled=False,
+            flashcard_study_order_mode=StudyOrderMode.QUEUE,
             question_display_duration_seconds=2,
             answer_display_duration_seconds=3,
         ),
@@ -1391,7 +1445,7 @@ def test_deleting_last_paused_flashcard_completes_session_cleanly(
         lambda: AppSettings(
             timer_duration_seconds=1500,
             flashcard_probability_percent=100,
-            flashcard_random_order_enabled=False,
+            flashcard_study_order_mode=StudyOrderMode.QUEUE,
             question_display_duration_seconds=2,
             answer_display_duration_seconds=3,
         ),
@@ -1436,7 +1490,7 @@ def test_paused_flashcard_delete_keeps_next_card_editable(
         lambda: AppSettings(
             timer_duration_seconds=1500,
             flashcard_probability_percent=100,
-            flashcard_random_order_enabled=False,
+            flashcard_study_order_mode=StudyOrderMode.QUEUE,
             question_display_duration_seconds=2,
             answer_display_duration_seconds=3,
         ),
@@ -1519,7 +1573,8 @@ def test_flashcard_pause_handler_stops_and_resumes_phase_timer(
         wrong_answer_completion_mode=WrongAnswerCompletionMode.UNTIL_CORRECT_ONCE,
         wrong_answer_reinsertion_mode=WrongAnswerReinsertionMode.PUSH_TO_END,
         wrong_answer_reinsert_after_count=3,
-        random_order=False,
+        study_order_mode=StudyOrderMode.QUEUE,
+        queue_start_shuffled=False,
         choice_func=lambda indexes: indexes[0],
     )
     window._study_session.set_current_flashcard(0)
@@ -2141,7 +2196,8 @@ def test_settings_cancel_returns_to_timer_without_saving(
         AppSettings(
             timer_duration_seconds=120,
             flashcard_probability_percent=55,
-            flashcard_random_order_enabled=True,
+            flashcard_study_order_mode=StudyOrderMode.QUEUE,
+            flashcard_queue_start_shuffled=True,
         )
     )
     window = MainWindow()
@@ -2149,7 +2205,7 @@ def test_settings_cancel_returns_to_timer_without_saving(
     window.switch_to_settings()
     window.settings_page.timer_duration_spinbox.setValue(999)
     window.settings_page.flashcard_probability_spinbox.setValue(1)
-    window.settings_page.flashcard_random_order_checkbox.setChecked(False)
+    window.settings_page.flashcard_queue_start_shuffled_checkbox.setChecked(False)
 
     window.settings_page.cancel_button.click()
 
@@ -2157,12 +2213,14 @@ def test_settings_cancel_returns_to_timer_without_saving(
     persisted = load_app_settings()
     assert persisted.timer_duration_seconds == 120
     assert persisted.flashcard_probability_percent == 55
-    assert persisted.flashcard_random_order_enabled is True
+    assert persisted.flashcard_queue_start_shuffled is True
 
     window.switch_to_settings()
     assert window.settings_page.timer_duration_spinbox.value() == 120
     assert window.settings_page.flashcard_probability_spinbox.value() == 55
-    assert window.settings_page.flashcard_random_order_checkbox.isChecked() is True
+    assert (
+        window.settings_page.flashcard_queue_start_shuffled_checkbox.isChecked() is True
+    )
 
 
 def test_saving_settings_can_disable_hotkeys_and_in_app_shortcuts(

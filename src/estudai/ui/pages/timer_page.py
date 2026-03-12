@@ -38,6 +38,7 @@ class TimerPage(QWidget):
     timer_running_changed = Signal(bool)
     timer_cycle_completed = Signal()
     flashcard_pause_toggled = Signal(bool)
+    flashcard_queue_shuffle_requested = Signal()
     flashcard_marked_correct = Signal()
     flashcard_marked_wrong = Signal()
     flashcard_edit_requested = Signal()
@@ -61,6 +62,7 @@ class TimerPage(QWidget):
         self._folder_name: str = "No folders selected"
         self._card_count: int = 0
         self._session_progress_text: str = ""
+        self._queue_shuffle_available = False
         self._copy_feedback_animation: QPropertyAnimation | None = None
         self.init_ui()
 
@@ -135,6 +137,15 @@ class TimerPage(QWidget):
         flashcard_pause_actions_layout.setContentsMargins(0, 0, 0, 0)
         flashcard_pause_actions_layout.setSpacing(10)
         flashcard_pause_actions_layout.addStretch(1)
+        self.shuffle_queue_button = QPushButton("Shuffle Queue")
+        self.shuffle_queue_button.setToolTip("Shuffle remaining queue")
+        self.shuffle_queue_button.clicked.connect(
+            self.flashcard_queue_shuffle_requested.emit
+        )
+        self.shuffle_queue_button.setMinimumWidth(140)
+        self.shuffle_queue_button.setVisible(False)
+        self.shuffle_queue_button.setEnabled(False)
+        flashcard_pause_actions_layout.addWidget(self.shuffle_queue_button)
         self.edit_flashcard_button = QPushButton("Edit")
         self.edit_flashcard_button.setToolTip("Edit current flashcard")
         self.edit_flashcard_button.clicked.connect(self.flashcard_edit_requested.emit)
@@ -658,8 +669,15 @@ class TimerPage(QWidget):
         """Refresh paused-session actions for the current flashcard visibility state."""
         visible = self._flashcard_controls_active and self._flashcard_paused
         self.flashcard_pause_actions_container.setVisible(visible)
+        self.shuffle_queue_button.setVisible(visible and self._queue_shuffle_available)
+        self.shuffle_queue_button.setEnabled(visible and self._queue_shuffle_available)
         self.edit_flashcard_button.setEnabled(visible)
         self.delete_flashcard_button.setEnabled(visible)
+
+    def set_queue_shuffle_available(self, available: bool) -> None:
+        """Show the queue-shuffle action only when it is meaningful."""
+        self._queue_shuffle_available = available
+        self._update_flashcard_pause_actions()
 
     def is_flashcard_progress_active(self) -> bool:
         """Return whether the flashcard progress bar is visually active."""

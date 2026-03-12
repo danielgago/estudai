@@ -42,6 +42,7 @@ from estudai.services.settings import (
     AppSettings,
     InAppShortcutAction,
     MAX_TIMER_DURATION_SECONDS,
+    StudyOrderMode,
     WrongAnswerCompletionMode,
     WrongAnswerReinsertionMode,
     copy_notification_sound_file,
@@ -161,6 +162,8 @@ class SettingsPage(QWidget):
 
         self._muted_labels = (
             self.description_label,
+            self.flashcard_study_order_help_label,
+            self.flashcard_queue_behavior_help_label,
             self.question_notification_sound_label,
             self.answer_notification_sound_label,
             self.in_app_shortcut_help_label,
@@ -193,11 +196,6 @@ class SettingsPage(QWidget):
             "Show flashcard probability:",
             self.flashcard_probability_spinbox,
         )
-        self.flashcard_random_order_checkbox = QCheckBox(
-            "Show flashcards in random order"
-        )
-        flashcard_form.addRow("", self.flashcard_random_order_checkbox)
-
         self.question_duration_spinbox = QSpinBox()
         self.question_duration_spinbox.setRange(1, 3600)
         self.question_duration_spinbox.setSuffix(" s")
@@ -215,7 +213,28 @@ class SettingsPage(QWidget):
         )
         content_layout.addWidget(flashcard_group)
 
-        retry_group = QGroupBox("Wrong-Answer Retry Rules")
+        study_order_group = QGroupBox("Study Order")
+        study_order_form = QFormLayout(study_order_group)
+        self._configure_form_layout(study_order_form)
+
+        self.flashcard_study_order_combo = QComboBox()
+        self.flashcard_study_order_combo.addItem("Queue", StudyOrderMode.QUEUE.value)
+        self.flashcard_study_order_combo.addItem(
+            "True Random",
+            StudyOrderMode.TRUE_RANDOM.value,
+        )
+        study_order_form.addRow("Mode:", self.flashcard_study_order_combo)
+        self.flashcard_study_order_help_label = QLabel(
+            "Queue: cards move through a queue; shuffle and reinsertion rules apply.\n"
+            "True Random: each new card is drawn randomly from active cards; "
+            "reinsertion rules do not apply."
+        )
+        self.flashcard_study_order_help_label.setWordWrap(True)
+        set_muted_label_color(self.flashcard_study_order_help_label)
+        study_order_form.addRow("", self.flashcard_study_order_help_label)
+        content_layout.addWidget(study_order_group)
+
+        retry_group = QGroupBox("Retry Rules")
         retry_form = QFormLayout(retry_group)
         self._configure_form_layout(retry_form)
 
@@ -232,6 +251,14 @@ class SettingsPage(QWidget):
             "Completion rule:",
             self.wrong_answer_completion_mode_combo,
         )
+        content_layout.addWidget(retry_group)
+
+        self.queue_behavior_group = QGroupBox("Queue Behavior")
+        queue_behavior_form = QFormLayout(self.queue_behavior_group)
+        self._configure_form_layout(queue_behavior_form)
+
+        self.flashcard_queue_start_shuffled_checkbox = QCheckBox("Start queue shuffled")
+        queue_behavior_form.addRow("", self.flashcard_queue_start_shuffled_checkbox)
 
         self.wrong_answer_reinsertion_mode_combo = QComboBox()
         self.wrong_answer_reinsertion_mode_combo.addItem(
@@ -242,18 +269,25 @@ class SettingsPage(QWidget):
             "Push to end of queue",
             WrongAnswerReinsertionMode.PUSH_TO_END.value,
         )
-        retry_form.addRow(
+        queue_behavior_form.addRow(
             "Reinsert wrong cards:",
             self.wrong_answer_reinsertion_mode_combo,
         )
 
         self.wrong_answer_reinsert_after_spinbox = QSpinBox()
         self.wrong_answer_reinsert_after_spinbox.setRange(0, 999)
-        retry_form.addRow(
+        queue_behavior_form.addRow(
             "After X value:",
             self.wrong_answer_reinsert_after_spinbox,
         )
-        content_layout.addWidget(retry_group)
+        self.flashcard_queue_behavior_help_label = QLabel(
+            "Queue mode also lets you shuffle the remaining queue while paused "
+            "during a study session."
+        )
+        self.flashcard_queue_behavior_help_label.setWordWrap(True)
+        set_muted_label_color(self.flashcard_queue_behavior_help_label)
+        queue_behavior_form.addRow("", self.flashcard_queue_behavior_help_label)
+        content_layout.addWidget(self.queue_behavior_group)
         content_layout.addStretch()
         return content
 
@@ -435,6 +469,9 @@ class SettingsPage(QWidget):
         )
         self.cancel_button.clicked.connect(self._handle_cancel_clicked)
         self.save_button.clicked.connect(self._handle_save_clicked)
+        self.flashcard_study_order_combo.currentIndexChanged.connect(
+            self._update_study_order_dependent_state
+        )
         self.wrong_answer_reinsertion_mode_combo.currentIndexChanged.connect(
             self._update_wrong_answer_reinsert_after_enabled_state
         )
@@ -468,8 +505,12 @@ class SettingsPage(QWidget):
         self.flashcard_probability_spinbox.setValue(
             settings.flashcard_probability_percent
         )
-        self.flashcard_random_order_checkbox.setChecked(
-            settings.flashcard_random_order_enabled
+        self._set_combo_value(
+            self.flashcard_study_order_combo,
+            settings.flashcard_study_order_mode.value,
+        )
+        self.flashcard_queue_start_shuffled_checkbox.setChecked(
+            settings.flashcard_queue_start_shuffled
         )
         self.question_duration_spinbox.setValue(
             settings.question_display_duration_seconds
@@ -530,6 +571,7 @@ class SettingsPage(QWidget):
         self.in_app_copy_question_shortcut_edit.setKeySequence(
             QKeySequence(settings.in_app_copy_question_shortcut)
         )
+        self._update_study_order_dependent_state()
         self._update_wrong_answer_reinsert_after_enabled_state()
         self._update_sound_summary()
 
@@ -548,8 +590,11 @@ class SettingsPage(QWidget):
         return AppSettings(
             timer_duration_seconds=self.timer_duration_spinbox.value(),
             flashcard_probability_percent=self.flashcard_probability_spinbox.value(),
-            flashcard_random_order_enabled=(
-                self.flashcard_random_order_checkbox.isChecked()
+            flashcard_study_order_mode=StudyOrderMode(
+                self.flashcard_study_order_combo.currentData()
+            ),
+            flashcard_queue_start_shuffled=(
+                self.flashcard_queue_start_shuffled_checkbox.isChecked()
             ),
             question_display_duration_seconds=self.question_duration_spinbox.value(),
             answer_display_duration_seconds=self.answer_duration_spinbox.value(),
@@ -855,7 +900,20 @@ class SettingsPage(QWidget):
         """Enable X only when the matching reinsertion mode is selected."""
         reinsertion_mode = self.wrong_answer_reinsertion_mode_combo.currentData()
         self.wrong_answer_reinsert_after_spinbox.setEnabled(
-            reinsertion_mode == WrongAnswerReinsertionMode.AFTER_X_FLASHCARDS.value
+            self._is_queue_mode_selected()
+            and reinsertion_mode == WrongAnswerReinsertionMode.AFTER_X_FLASHCARDS.value
+        )
+
+    def _update_study_order_dependent_state(self) -> None:
+        """Show queue-only controls only when queue mode is selected."""
+        queue_mode_selected = self._is_queue_mode_selected()
+        self.queue_behavior_group.setVisible(queue_mode_selected)
+        self._update_wrong_answer_reinsert_after_enabled_state()
+
+    def _is_queue_mode_selected(self) -> bool:
+        """Return whether queue mode is currently selected in the form."""
+        return (
+            self.flashcard_study_order_combo.currentData() == StudyOrderMode.QUEUE.value
         )
 
     def _validate_settings_form(self) -> str | None:

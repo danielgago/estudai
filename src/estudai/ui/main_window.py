@@ -71,6 +71,7 @@ from estudai.services.hotkeys import (
 from estudai.services.settings import (
     AppSettings,
     InAppShortcutAction,
+    StudyOrderMode,
     get_default_notification_sound_path,
     hotkey_bindings_from_settings,
     in_app_shortcut_bindings_from_settings,
@@ -197,6 +198,9 @@ class MainWindow(QMainWindow):
         self.timer_page.timer_cycle_completed.connect(self.handle_timer_cycle_completed)
         self.timer_page.flashcard_pause_toggled.connect(
             self.handle_flashcard_pause_toggled
+        )
+        self.timer_page.flashcard_queue_shuffle_requested.connect(
+            self.handle_flashcard_queue_shuffle_requested
         )
         self.timer_page.flashcard_marked_correct.connect(
             self.handle_flashcard_marked_correct
@@ -530,6 +534,7 @@ class MainWindow(QMainWindow):
 
     def _handle_settings_saved(self, _settings: AppSettings) -> None:
         """Return to the timer page after a successful settings save."""
+        self._refresh_queue_shuffle_action()
         self.switch_to_timer()
 
     def handle_timer_running_changed(self, is_running: bool) -> None:
@@ -569,6 +574,12 @@ class MainWindow(QMainWindow):
             resume_progress=self.timer_page.resume_flashcard_progress,
             on_timeout=self._handle_flashcard_phase_timeout,
         )
+
+    def handle_flashcard_queue_shuffle_requested(self) -> None:
+        """Shuffle the remaining queue for the active queue-based session."""
+        if not self._study_session.shuffle_remaining_queue():
+            return
+        self._refresh_queue_shuffle_action()
 
     def handle_timer_stop_requested(self) -> None:
         """Abort the current study session when user clicks Stop."""
@@ -775,10 +786,11 @@ class MainWindow(QMainWindow):
         app_settings = load_app_settings()
         if not self._study_session.start(
             self.loaded_flashcards,
+            study_order_mode=app_settings.flashcard_study_order_mode,
+            queue_start_shuffled=app_settings.flashcard_queue_start_shuffled,
             wrong_answer_completion_mode=app_settings.wrong_answer_completion_mode,
             wrong_answer_reinsertion_mode=app_settings.wrong_answer_reinsertion_mode,
             wrong_answer_reinsert_after_count=app_settings.wrong_answer_reinsert_after_count,
-            random_order=app_settings.flashcard_random_order_enabled,
             choice_func=random.choice,
         ):
             return False
@@ -794,6 +806,7 @@ class MainWindow(QMainWindow):
             wrong_pending_count=progress.wrong_pending_count,
             total_count=progress.total_count,
         )
+        self._refresh_queue_shuffle_action()
 
     def _reset_study_session_state(self) -> None:
         """Clear all runtime-only study session state."""
@@ -804,6 +817,7 @@ class MainWindow(QMainWindow):
         self._pending_flashcard_score = None
         self._visible_flashcard = None
         self.timer_page.clear_session_progress()
+        self._refresh_queue_shuffle_action()
 
     def _complete_study_session(self) -> None:
         """Stop the timer UI after the active session is fully completed."""
@@ -1000,6 +1014,7 @@ class MainWindow(QMainWindow):
             flashcard.question,
             app_settings.question_display_duration_seconds,
         )
+        self._refresh_queue_shuffle_action()
         self._play_flashcard_notification_sound(
             question_phase=True,
             phase_duration_ms=app_settings.question_display_duration_seconds * 1000,
@@ -1024,6 +1039,18 @@ class MainWindow(QMainWindow):
             return
         self.timer_page.clear_flashcard_display()
         self.timer_page.restart_timer_cycle()
+
+    def _refresh_queue_shuffle_action(self) -> None:
+        """Reflect queue-shuffle availability in the timer page."""
+        self.timer_page.set_queue_shuffle_available(self._can_shuffle_remaining_queue())
+
+    def _can_shuffle_remaining_queue(self) -> bool:
+        """Return whether the remaining session queue can be shuffled."""
+        return (
+            self._study_session.active
+            and self._study_session.study_order_mode is StudyOrderMode.QUEUE
+            and len(self._study_session.queued_flashcard_indexes()) > 1
+        )
 
     def handle_flashcard_marked_correct(self) -> None:
         """Queue the selected Correct state until answer timeout."""

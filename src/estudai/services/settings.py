@@ -18,6 +18,8 @@ SOUNDS_FOLDER_NAME = "sounds"
 MAX_TIMER_DURATION_SECONDS = (59 * 60) + 59
 SETTINGS_KEY_TIMER_DURATION_SECONDS = "timer/duration_seconds"
 SETTINGS_KEY_FLASHCARD_PROBABILITY_PERCENT = "flashcard/probability_percent"
+SETTINGS_KEY_FLASHCARD_STUDY_ORDER_MODE = "flashcard/study_order_mode"
+SETTINGS_KEY_FLASHCARD_QUEUE_START_SHUFFLED = "flashcard/queue_start_shuffled"
 SETTINGS_KEY_FLASHCARD_RANDOM_ORDER_ENABLED = "flashcard/random_order_enabled"
 SETTINGS_KEY_QUESTION_DURATION_SECONDS = "flashcard/question_duration_seconds"
 SETTINGS_KEY_ANSWER_DURATION_SECONDS = "flashcard/answer_duration_seconds"
@@ -64,6 +66,13 @@ class WrongAnswerReinsertionMode(StrEnum):
     PUSH_TO_END = "push_to_end"
 
 
+class StudyOrderMode(StrEnum):
+    """Selection strategy for choosing the next study flashcard."""
+
+    QUEUE = "queue"
+    TRUE_RANDOM = "true_random"
+
+
 class InAppShortcutAction(StrEnum):
     """Supported app-scoped shortcut actions handled inside the window."""
 
@@ -89,7 +98,8 @@ class AppSettings:
 
     timer_duration_seconds: int = 25 * 60
     flashcard_probability_percent: int = 30
-    flashcard_random_order_enabled: bool = False
+    flashcard_study_order_mode: StudyOrderMode = StudyOrderMode.QUEUE
+    flashcard_queue_start_shuffled: bool = False
     question_display_duration_seconds: int = 8
     answer_display_duration_seconds: int = 8
     question_notification_sound_path: str = ""
@@ -253,6 +263,51 @@ def _normalize_text(
     return default
 
 
+def _load_study_order_settings(qsettings: QSettings) -> tuple[StudyOrderMode, bool]:
+    """Load study-order settings, including migration from the legacy boolean.
+
+    Args:
+        qsettings: QSettings storage handle.
+
+    Returns:
+        tuple[StudyOrderMode, bool]: Study-order mode and queue-start shuffle
+            preference.
+    """
+    has_study_order_mode = qsettings.contains(SETTINGS_KEY_FLASHCARD_STUDY_ORDER_MODE)
+    has_queue_start_shuffled = qsettings.contains(
+        SETTINGS_KEY_FLASHCARD_QUEUE_START_SHUFFLED
+    )
+    if has_study_order_mode or has_queue_start_shuffled:
+        return (
+            _normalize_enum(
+                qsettings.value(
+                    SETTINGS_KEY_FLASHCARD_STUDY_ORDER_MODE,
+                    AppSettings.flashcard_study_order_mode.value,
+                ),
+                enum_type=StudyOrderMode,
+                default=AppSettings.flashcard_study_order_mode,
+            ),
+            _normalize_bool(
+                qsettings.value(
+                    SETTINGS_KEY_FLASHCARD_QUEUE_START_SHUFFLED,
+                    AppSettings.flashcard_queue_start_shuffled,
+                ),
+                default=AppSettings.flashcard_queue_start_shuffled,
+            ),
+        )
+
+    return (
+        StudyOrderMode.QUEUE,
+        _normalize_bool(
+            qsettings.value(
+                SETTINGS_KEY_FLASHCARD_RANDOM_ORDER_ENABLED,
+                AppSettings.flashcard_queue_start_shuffled,
+            ),
+            default=AppSettings.flashcard_queue_start_shuffled,
+        ),
+    )
+
+
 def hotkey_bindings_from_settings(settings: AppSettings) -> dict[HotkeyAction, str]:
     """Return the persisted hotkey bindings keyed by app action."""
     return {
@@ -304,6 +359,9 @@ def load_app_settings() -> AppSettings:
         AppSettings: Persisted settings or default values.
     """
     qsettings = _open_settings()
+    flashcard_study_order_mode, flashcard_queue_start_shuffled = (
+        _load_study_order_settings(qsettings)
+    )
     legacy_notification_sound_path = _normalize_text(
         qsettings.value(
             SETTINGS_KEY_LEGACY_NOTIFICATION_SOUND_PATH,
@@ -387,13 +445,8 @@ def load_app_settings() -> AppSettings:
             minimum=0,
             maximum=100,
         ),
-        flashcard_random_order_enabled=_normalize_bool(
-            qsettings.value(
-                SETTINGS_KEY_FLASHCARD_RANDOM_ORDER_ENABLED,
-                AppSettings.flashcard_random_order_enabled,
-            ),
-            default=AppSettings.flashcard_random_order_enabled,
-        ),
+        flashcard_study_order_mode=flashcard_study_order_mode,
+        flashcard_queue_start_shuffled=flashcard_queue_start_shuffled,
         question_display_duration_seconds=_normalize_int(
             qsettings.value(
                 SETTINGS_KEY_QUESTION_DURATION_SECONDS,
@@ -552,8 +605,16 @@ def save_app_settings(settings: AppSettings) -> None:
         ),
     )
     qsettings.setValue(
-        SETTINGS_KEY_FLASHCARD_RANDOM_ORDER_ENABLED,
-        bool(settings.flashcard_random_order_enabled),
+        SETTINGS_KEY_FLASHCARD_STUDY_ORDER_MODE,
+        _normalize_enum(
+            settings.flashcard_study_order_mode,
+            enum_type=StudyOrderMode,
+            default=AppSettings.flashcard_study_order_mode,
+        ).value,
+    )
+    qsettings.setValue(
+        SETTINGS_KEY_FLASHCARD_QUEUE_START_SHUFFLED,
+        bool(settings.flashcard_queue_start_shuffled),
     )
     qsettings.setValue(
         SETTINGS_KEY_QUESTION_DURATION_SECONDS,
@@ -610,6 +671,7 @@ def save_app_settings(settings: AppSettings) -> None:
         ),
     )
     qsettings.remove(SETTINGS_KEY_LEGACY_NOTIFICATION_SOUND_PATH)
+    qsettings.remove(SETTINGS_KEY_FLASHCARD_RANDOM_ORDER_ENABLED)
     qsettings.setValue(
         SETTINGS_KEY_WRONG_ANSWER_COMPLETION_MODE,
         _normalize_enum(
