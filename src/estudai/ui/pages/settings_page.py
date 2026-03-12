@@ -342,6 +342,7 @@ class SettingsPage(QWidget):
         self._configure_form_layout(in_app_form)
         self.in_app_pause_resume_shortcut_edit = self._create_shortcut_editor()
         self.in_app_start_stop_shortcut_edit = self._create_shortcut_editor()
+        self.in_app_skip_phase_shortcut_edit = self._create_shortcut_editor()
         self.in_app_mark_correct_shortcut_edit = self._create_shortcut_editor()
         self.in_app_mark_wrong_shortcut_edit = self._create_shortcut_editor()
         self.in_app_copy_question_shortcut_edit = self._create_shortcut_editor()
@@ -352,6 +353,10 @@ class SettingsPage(QWidget):
         in_app_form.addRow(
             "Start / Stop:",
             self.in_app_start_stop_shortcut_edit,
+        )
+        in_app_form.addRow(
+            "Skip:",
+            self.in_app_skip_phase_shortcut_edit,
         )
         in_app_form.addRow(
             "Mark correct:",
@@ -379,11 +384,13 @@ class SettingsPage(QWidget):
         self._configure_form_layout(hotkey_form)
         self.pause_resume_hotkey_edit = self._create_shortcut_editor()
         self.start_stop_hotkey_edit = self._create_shortcut_editor()
+        self.skip_phase_hotkey_edit = self._create_shortcut_editor()
         self.mark_correct_hotkey_edit = self._create_shortcut_editor()
         self.mark_wrong_hotkey_edit = self._create_shortcut_editor()
         self.copy_question_hotkey_edit = self._create_shortcut_editor()
         hotkey_form.addRow("Pause / Resume:", self.pause_resume_hotkey_edit)
         hotkey_form.addRow("Start / Stop:", self.start_stop_hotkey_edit)
+        hotkey_form.addRow("Skip:", self.skip_phase_hotkey_edit)
         hotkey_form.addRow("Mark correct:", self.mark_correct_hotkey_edit)
         hotkey_form.addRow("Mark wrong:", self.mark_wrong_hotkey_edit)
         hotkey_form.addRow("Copy question:", self.copy_question_hotkey_edit)
@@ -481,6 +488,7 @@ class SettingsPage(QWidget):
         hotkey_edits = (
             self.pause_resume_hotkey_edit,
             self.start_stop_hotkey_edit,
+            self.skip_phase_hotkey_edit,
             self.mark_correct_hotkey_edit,
             self.mark_wrong_hotkey_edit,
             self.copy_question_hotkey_edit,
@@ -547,6 +555,9 @@ class SettingsPage(QWidget):
         self.start_stop_hotkey_edit.setKeySequence(
             QKeySequence(settings.start_stop_hotkey)
         )
+        self.skip_phase_hotkey_edit.setKeySequence(
+            QKeySequence(settings.skip_phase_hotkey)
+        )
         self.mark_correct_hotkey_edit.setKeySequence(
             QKeySequence(settings.mark_correct_hotkey)
         )
@@ -561,6 +572,9 @@ class SettingsPage(QWidget):
         )
         self.in_app_start_stop_shortcut_edit.setKeySequence(
             QKeySequence(settings.in_app_start_stop_shortcut)
+        )
+        self.in_app_skip_phase_shortcut_edit.setKeySequence(
+            QKeySequence(settings.in_app_skip_phase_shortcut)
         )
         self.in_app_mark_correct_shortcut_edit.setKeySequence(
             QKeySequence(settings.in_app_mark_correct_shortcut)
@@ -617,6 +631,7 @@ class SettingsPage(QWidget):
             ),
             pause_resume_hotkey=self.pause_resume_hotkey_edit.keySequence().toString(),
             start_stop_hotkey=self.start_stop_hotkey_edit.keySequence().toString(),
+            skip_phase_hotkey=self.skip_phase_hotkey_edit.keySequence().toString(),
             mark_correct_hotkey=self.mark_correct_hotkey_edit.keySequence().toString(),
             mark_wrong_hotkey=self.mark_wrong_hotkey_edit.keySequence().toString(),
             copy_question_hotkey=self.copy_question_hotkey_edit.keySequence().toString(),
@@ -625,6 +640,9 @@ class SettingsPage(QWidget):
             ),
             in_app_start_stop_shortcut=(
                 self.in_app_start_stop_shortcut_edit.keySequence().toString()
+            ),
+            in_app_skip_phase_shortcut=(
+                self.in_app_skip_phase_shortcut_edit.keySequence().toString()
             ),
             in_app_mark_correct_shortcut=(
                 self.in_app_mark_correct_shortcut_edit.keySequence().toString()

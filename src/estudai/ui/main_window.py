@@ -202,6 +202,9 @@ class MainWindow(QMainWindow):
         self.timer_page.flashcard_queue_shuffle_requested.connect(
             self.handle_flashcard_queue_shuffle_requested
         )
+        self.timer_page.flashcard_phase_skip_requested.connect(
+            self.handle_flashcard_phase_skip_requested
+        )
         self.timer_page.flashcard_marked_correct.connect(
             self.handle_flashcard_marked_correct
         )
@@ -360,6 +363,9 @@ class MainWindow(QMainWindow):
         self._timer_page_start_stop_shortcut = self._create_application_shortcut(
             self._trigger_timer_page_start_stop
         )
+        self._timer_page_skip_phase_shortcut = self._create_application_shortcut(
+            self._trigger_timer_page_skip_phase
+        )
         self._timer_page_mark_correct_shortcut = self._create_application_shortcut(
             self._trigger_timer_page_mark_correct
         )
@@ -395,6 +401,9 @@ class MainWindow(QMainWindow):
             self._start_stop_shortcut_sequences(
                 bindings[InAppShortcutAction.START_STOP]
             )
+        )
+        self._timer_page_skip_phase_shortcut.setKey(
+            QKeySequence(bindings[InAppShortcutAction.SKIP_PHASE])
         )
         self._timer_page_mark_correct_shortcut.setKey(
             QKeySequence(bindings[InAppShortcutAction.MARK_CORRECT])
@@ -641,6 +650,9 @@ class MainWindow(QMainWindow):
         if action is HotkeyAction.START_STOP:
             self._trigger_timer_page_start_stop()
             return
+        if action is HotkeyAction.SKIP_PHASE:
+            self._trigger_timer_page_skip_phase()
+            return
         if action is HotkeyAction.MARK_CORRECT:
             self._trigger_timer_page_mark_correct()
             return
@@ -676,6 +688,13 @@ class MainWindow(QMainWindow):
             return
         if self.timer_page.correct_button.isEnabled():
             self.timer_page.correct_button.click()
+
+    def _trigger_timer_page_skip_phase(self) -> None:
+        """Mirror the skip-phase action path for local and global shortcuts."""
+        if not self._timer_page_is_active():
+            return
+        if self.timer_page.skip_phase_button.isEnabled():
+            self.timer_page.skip_phase_button.click()
 
     def _trigger_timer_page_mark_wrong(self) -> None:
         """Mirror the wrong button path for local and global shortcuts."""
@@ -724,6 +743,46 @@ class MainWindow(QMainWindow):
         """Stop and clear pending flashcard phase callbacks."""
         self._flashcard_sequence.cancel_phase_timer()
         self._flashcard_sound_controller.stop()
+
+    def handle_flashcard_phase_skip_requested(self) -> None:
+        """Advance the current flashcard phase immediately when one is pending."""
+        if (
+            self.timer_page.flashcard_question_label.isHidden()
+            and self.timer_page.flashcard_answer_label.isHidden()
+        ):
+            return
+        was_paused = self._flashcard_sequence.sequence_paused
+        callback = self._flashcard_sequence.skip_phase()
+        if callback is None:
+            return
+        self._flashcard_sound_controller.stop()
+        callback()
+        if was_paused:
+            self._reapply_paused_state_after_phase_skip()
+
+    def _reapply_paused_state_after_phase_skip(self) -> None:
+        """Keep study flow paused after manually advancing a paused phase."""
+        flashcard_visible = not (
+            self.timer_page.flashcard_question_label.isHidden()
+            and self.timer_page.flashcard_answer_label.isHidden()
+        )
+        if flashcard_visible:
+            if (
+                self.timer_page.pause_button.isEnabled()
+                and self.timer_page.pause_button.text() == "Pause"
+            ):
+                self.timer_page.pause_timer()
+                return
+            self._flashcard_sequence.handle_pause_toggle(
+                True,
+                flashcard_visible=True,
+                pause_progress=self.timer_page.pause_flashcard_progress,
+                resume_progress=self.timer_page.resume_flashcard_progress,
+                on_timeout=self._handle_flashcard_phase_timeout,
+            )
+            return
+        if self.timer_page.is_running and self.timer_page.pause_button.isEnabled():
+            self.timer_page.pause_timer()
 
     def _reset_flashcard_sequence_order(self) -> None:
         """Reset sequential flashcard pointer to the first card."""

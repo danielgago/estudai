@@ -2003,6 +2003,8 @@ def test_in_app_timer_shortcuts_control_timer(
         shortcut.toString()
         for shortcut in window._timer_page_start_stop_shortcut.keys()
     } == {"Return", "Enter"}
+    assert window._timer_page_skip_phase_shortcut.context() == Qt.ApplicationShortcut
+    assert window._timer_page_skip_phase_shortcut.key().toString() == "Right"
     assert window._timer_page_mark_correct_shortcut.context() == Qt.ApplicationShortcut
     assert window._timer_page_mark_correct_shortcut.key().toString() == "Up"
     assert window._timer_page_mark_wrong_shortcut.context() == Qt.ApplicationShortcut
@@ -2141,6 +2143,39 @@ def test_global_hotkeys_score_flashcards_through_existing_controls(
     assert window._pending_flashcard_score == "wrong"
 
 
+def test_global_hotkey_skips_flashcard_phases_through_existing_flow(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify the global skip hotkey reveals and finishes flashcard phases."""
+    save_app_settings(
+        AppSettings(
+            question_display_duration_seconds=8,
+            answer_display_duration_seconds=8,
+        )
+    )
+    backend = _FakeHotkeyBackend()
+    window = MainWindow(hotkey_service=GlobalHotkeyService(backend=backend))
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+    assert window._start_study_session() is True
+
+    flashcard = window._next_flashcard_for_display()
+    assert flashcard is not None
+    window.show_flashcard_popup(flashcard)
+
+    backend.trigger("ctrl+alt+right")
+    assert window.timer_page.flashcard_answer_label.isHidden() is False
+
+    window.timer_page.correct_button.click()
+    backend.trigger("ctrl+alt+right")
+
+    assert window._study_session.active is False
+    assert window.timer_page.flashcard_question_label.isHidden() is True
+    assert window.timer_page.flashcard_answer_label.isHidden() is True
+
+
 def test_global_hotkey_copies_visible_flashcard_question(
     app: QApplication, tmp_path: Path
 ) -> None:
@@ -2195,6 +2230,40 @@ def test_in_app_hotkeys_score_flashcards_through_existing_controls(
     assert window._pending_flashcard_score == "wrong"
 
 
+def test_in_app_skip_shortcut_preserves_unanswered_flow(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify skipping the answer phase without a score keeps unanswered behavior."""
+    save_app_settings(
+        AppSettings(
+            timer_duration_seconds=10,
+            question_display_duration_seconds=8,
+            answer_display_duration_seconds=8,
+        )
+    )
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+    assert window._start_study_session() is True
+
+    flashcard = window._next_flashcard_for_display()
+    assert flashcard is not None
+    window.show_flashcard_popup(flashcard)
+
+    window._timer_page_skip_phase_shortcut.activated.emit()
+    assert window.timer_page.flashcard_answer_label.isHidden() is False
+
+    window._timer_page_skip_phase_shortcut.activated.emit()
+
+    assert window._study_session.active is True
+    assert window._study_session.progress().remaining_count == 1
+    assert window.timer_page.is_running is True
+    assert window.timer_page.flashcard_question_label.isHidden() is True
+    assert window.timer_page.flashcard_answer_label.isHidden() is True
+
+
 def test_in_app_copy_shortcut_copies_visible_flashcard_question(
     app: QApplication, tmp_path: Path
 ) -> None:
@@ -2231,6 +2300,7 @@ def test_saving_settings_rebinds_active_global_hotkeys(
     window.switch_to_settings()
     window.settings_page.start_stop_hotkey_edit.setKeySequence("Ctrl+Alt+S")
     window.settings_page.pause_resume_hotkey_edit.setKeySequence("Ctrl+Alt+P")
+    window.settings_page.skip_phase_hotkey_edit.setKeySequence("Ctrl+Alt+K")
     window.settings_page.mark_correct_hotkey_edit.setKeySequence("Ctrl+Alt+Right")
     window.settings_page.mark_wrong_hotkey_edit.setKeySequence("Ctrl+Alt+Left")
     window.settings_page.copy_question_hotkey_edit.setKeySequence("Ctrl+Alt+C")
@@ -2240,6 +2310,7 @@ def test_saving_settings_rebinds_active_global_hotkeys(
     persisted = load_app_settings()
     assert persisted.start_stop_hotkey == "Ctrl+Alt+S"
     assert persisted.pause_resume_hotkey == "Ctrl+Alt+P"
+    assert persisted.skip_phase_hotkey == "Ctrl+Alt+K"
     assert persisted.mark_correct_hotkey == "Ctrl+Alt+Right"
     assert persisted.mark_wrong_hotkey == "Ctrl+Alt+Left"
     assert persisted.copy_question_hotkey == "Ctrl+Alt+C"
@@ -2297,26 +2368,33 @@ def test_saving_settings_can_disable_hotkeys_and_in_app_shortcuts(
     window.switch_to_settings()
     window.settings_page.start_stop_hotkey_edit.setKeySequence("")
     window.settings_page.pause_resume_hotkey_edit.setKeySequence("")
+    window.settings_page.skip_phase_hotkey_edit.setKeySequence("")
     window.settings_page.in_app_start_stop_shortcut_edit.setKeySequence("")
     window.settings_page.in_app_pause_resume_shortcut_edit.setKeySequence("")
+    window.settings_page.in_app_skip_phase_shortcut_edit.setKeySequence("")
 
     window.settings_page._handle_save_clicked()
 
     persisted = load_app_settings()
     assert persisted.start_stop_hotkey == ""
     assert persisted.pause_resume_hotkey == ""
+    assert persisted.skip_phase_hotkey == ""
     assert persisted.in_app_start_stop_shortcut == ""
     assert persisted.in_app_pause_resume_shortcut == ""
+    assert persisted.in_app_skip_phase_shortcut == ""
     assert {
         shortcut.toString()
         for shortcut in window._timer_page_start_stop_shortcut.keys()
     } == {""}
     assert window._timer_page_pause_resume_shortcut.key().toString() == ""
+    assert window._timer_page_skip_phase_shortcut.key().toString() == ""
 
     with pytest.raises(HotkeyRegistrationError, match="ctrl\\+alt\\+enter"):
         backend.trigger("ctrl+alt+enter")
     with pytest.raises(HotkeyRegistrationError, match="ctrl\\+alt\\+space"):
         backend.trigger("ctrl+alt+space")
+    with pytest.raises(HotkeyRegistrationError, match="ctrl\\+alt\\+right"):
+        backend.trigger("ctrl+alt+right")
 
 
 def test_saving_settings_rebinds_active_in_app_shortcuts(
@@ -2332,6 +2410,7 @@ def test_saving_settings_rebinds_active_in_app_shortcuts(
     window.switch_to_settings()
     window.settings_page.in_app_start_stop_shortcut_edit.setKeySequence("Ctrl+S")
     window.settings_page.in_app_pause_resume_shortcut_edit.setKeySequence("Ctrl+P")
+    window.settings_page.in_app_skip_phase_shortcut_edit.setKeySequence("Ctrl+L")
     window.settings_page.in_app_mark_correct_shortcut_edit.setKeySequence("Ctrl+Right")
     window.settings_page.in_app_mark_wrong_shortcut_edit.setKeySequence("Ctrl+Left")
     window.settings_page.in_app_copy_question_shortcut_edit.setKeySequence("Ctrl+C")
@@ -2341,12 +2420,14 @@ def test_saving_settings_rebinds_active_in_app_shortcuts(
     persisted = load_app_settings()
     assert persisted.in_app_start_stop_shortcut == "Ctrl+S"
     assert persisted.in_app_pause_resume_shortcut == "Ctrl+P"
+    assert persisted.in_app_skip_phase_shortcut == "Ctrl+L"
     assert persisted.in_app_mark_correct_shortcut == "Ctrl+Right"
     assert persisted.in_app_mark_wrong_shortcut == "Ctrl+Left"
     assert persisted.in_app_copy_question_shortcut == "Ctrl+C"
 
     assert window._timer_page_start_stop_shortcut.key().toString() == "Ctrl+S"
     assert window._timer_page_pause_resume_shortcut.key().toString() == "Ctrl+P"
+    assert window._timer_page_skip_phase_shortcut.key().toString() == "Ctrl+L"
     assert window._timer_page_mark_correct_shortcut.key().toString() == "Ctrl+Right"
     assert window._timer_page_mark_wrong_shortcut.key().toString() == "Ctrl+Left"
     assert window._timer_page_copy_question_shortcut.key().toString() == "Ctrl+C"

@@ -213,19 +213,30 @@ def test_flashcard_phase_keeps_pause_and_stop_enabled() -> None:
     assert not page.start_button.isEnabled()
     assert page.pause_button.isEnabled()
     assert page.stop_button.isEnabled()
+    assert page.flashcard_pause_actions_container.isHidden() is False
+    assert page.skip_phase_button.isHidden() is False
+    assert page.skip_phase_button.isEnabled() is True
+    assert page.edit_flashcard_button.isHidden() is True
+    assert page.delete_flashcard_button.isHidden() is True
 
     page.pause_timer()
     assert page.pause_button.text() == "Resume"
     assert pause_events == [True]
     assert not page.flashcard_pause_actions_container.isHidden()
+    assert page.skip_phase_button.isHidden() is False
     assert page.shuffle_queue_button.isHidden()
+    assert page.edit_flashcard_button.isHidden() is False
     assert page.edit_flashcard_button.isEnabled()
+    assert page.delete_flashcard_button.isHidden() is False
     assert page.delete_flashcard_button.isEnabled()
 
     page.pause_timer()
     assert page.pause_button.text() == "Pause"
     assert pause_events == [True, False]
-    assert page.flashcard_pause_actions_container.isHidden()
+    assert page.flashcard_pause_actions_container.isHidden() is False
+    assert page.skip_phase_button.isHidden() is False
+    assert page.edit_flashcard_button.isHidden() is True
+    assert page.delete_flashcard_button.isHidden() is True
 
 
 def test_prepare_next_timer_cycle_paused_keeps_session_resume_available() -> None:
@@ -290,6 +301,19 @@ def test_queue_shuffle_action_only_shows_when_available_and_paused() -> None:
 
     page.set_queue_shuffle_available(False)
     assert page.shuffle_queue_button.isHidden() is True
+
+
+def test_flashcard_skip_phase_button_emits_action() -> None:
+    """Verify the skip button emits the dedicated phase-skip action signal."""
+    _get_app()
+    page = TimerPage()
+    events: list[str] = []
+    page.flashcard_phase_skip_requested.connect(lambda: events.append("skip"))
+
+    page.show_flashcard_question("Question?", display_duration_seconds=5)
+    page.skip_phase_button.click()
+
+    assert events == ["skip"]
 
 
 def test_flashcard_score_buttons_emit_actions() -> None:

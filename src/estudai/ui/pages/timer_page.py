@@ -39,6 +39,7 @@ class TimerPage(QWidget):
     timer_cycle_completed = Signal()
     flashcard_pause_toggled = Signal(bool)
     flashcard_queue_shuffle_requested = Signal()
+    flashcard_phase_skip_requested = Signal()
     flashcard_marked_correct = Signal()
     flashcard_marked_wrong = Signal()
     flashcard_edit_requested = Signal()
@@ -137,6 +138,12 @@ class TimerPage(QWidget):
         flashcard_pause_actions_layout.setContentsMargins(0, 0, 0, 0)
         flashcard_pause_actions_layout.setSpacing(10)
         flashcard_pause_actions_layout.addStretch(1)
+        self.skip_phase_button = QPushButton("Skip")
+        self.skip_phase_button.setToolTip("Advance the current flashcard phase")
+        self.skip_phase_button.clicked.connect(self.flashcard_phase_skip_requested.emit)
+        self.skip_phase_button.setMinimumWidth(130)
+        self.skip_phase_button.setEnabled(False)
+        flashcard_pause_actions_layout.addWidget(self.skip_phase_button)
         self.shuffle_queue_button = QPushButton("Shuffle Queue")
         self.shuffle_queue_button.setToolTip("Shuffle remaining queue")
         self.shuffle_queue_button.clicked.connect(
@@ -671,12 +678,21 @@ class TimerPage(QWidget):
 
     def _update_flashcard_pause_actions(self) -> None:
         """Refresh paused-session actions for the current flashcard visibility state."""
-        visible = self._flashcard_controls_active and self._flashcard_paused
-        self.flashcard_pause_actions_container.setVisible(visible)
-        self.shuffle_queue_button.setVisible(visible and self._queue_shuffle_available)
-        self.shuffle_queue_button.setEnabled(visible and self._queue_shuffle_available)
-        self.edit_flashcard_button.setEnabled(visible)
-        self.delete_flashcard_button.setEnabled(visible)
+        actions_visible = self._flashcard_controls_active
+        paused_actions_visible = actions_visible and self._flashcard_paused
+        self.flashcard_pause_actions_container.setVisible(actions_visible)
+        self.skip_phase_button.setVisible(actions_visible)
+        self.skip_phase_button.setEnabled(actions_visible)
+        self.shuffle_queue_button.setVisible(
+            paused_actions_visible and self._queue_shuffle_available
+        )
+        self.shuffle_queue_button.setEnabled(
+            paused_actions_visible and self._queue_shuffle_available
+        )
+        self.edit_flashcard_button.setVisible(paused_actions_visible)
+        self.edit_flashcard_button.setEnabled(paused_actions_visible)
+        self.delete_flashcard_button.setVisible(paused_actions_visible)
+        self.delete_flashcard_button.setEnabled(paused_actions_visible)
 
     def set_queue_shuffle_available(self, available: bool) -> None:
         """Show the queue-shuffle action only when it is meaningful."""

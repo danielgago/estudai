@@ -185,8 +185,15 @@ def test_settings_default_hotkeys_match_expected_bindings() -> None:
         restored.start_stop_hotkey == DEFAULT_HOTKEY_BINDINGS[HotkeyAction.START_STOP]
     )
     assert (
+        restored.skip_phase_hotkey == DEFAULT_HOTKEY_BINDINGS[HotkeyAction.SKIP_PHASE]
+    )
+    assert (
         restored.mark_correct_hotkey
         == DEFAULT_HOTKEY_BINDINGS[HotkeyAction.MARK_CORRECT]
+    )
+    assert (
+        restored.in_app_skip_phase_shortcut
+        == DEFAULT_IN_APP_SHORTCUT_BINDINGS[InAppShortcutAction.SKIP_PHASE]
     )
     assert (
         restored.mark_wrong_hotkey == DEFAULT_HOTKEY_BINDINGS[HotkeyAction.MARK_WRONG]
@@ -380,11 +387,13 @@ def test_settings_page_only_persists_changes_after_save(app: QApplication) -> No
     page.wrong_answer_reinsert_after_spinbox.setValue(6)
     page.pause_resume_hotkey_edit.setKeySequence("Ctrl+Alt+P")
     page.start_stop_hotkey_edit.setKeySequence("Ctrl+Alt+S")
+    page.skip_phase_hotkey_edit.setKeySequence("Ctrl+Alt+K")
     page.mark_correct_hotkey_edit.setKeySequence("Ctrl+Alt+Right")
     page.mark_wrong_hotkey_edit.setKeySequence("Ctrl+Alt+Left")
     page.copy_question_hotkey_edit.setKeySequence("Ctrl+Alt+C")
     page.in_app_pause_resume_shortcut_edit.setKeySequence("Ctrl+P")
     page.in_app_start_stop_shortcut_edit.setKeySequence("Ctrl+Return")
+    page.in_app_skip_phase_shortcut_edit.setKeySequence("Ctrl+L")
     page.in_app_mark_correct_shortcut_edit.setKeySequence("Ctrl+Up")
     page.in_app_mark_wrong_shortcut_edit.setKeySequence("Ctrl+Down")
     page.in_app_copy_question_shortcut_edit.setKeySequence("C")
@@ -411,11 +420,13 @@ def test_settings_page_only_persists_changes_after_save(app: QApplication) -> No
     assert persisted.wrong_answer_reinsert_after_count == 6
     assert persisted.pause_resume_hotkey == "Ctrl+Alt+P"
     assert persisted.start_stop_hotkey == "Ctrl+Alt+S"
+    assert persisted.skip_phase_hotkey == "Ctrl+Alt+K"
     assert persisted.mark_correct_hotkey == "Ctrl+Alt+Right"
     assert persisted.mark_wrong_hotkey == "Ctrl+Alt+Left"
     assert persisted.copy_question_hotkey == "Ctrl+Alt+C"
     assert persisted.in_app_pause_resume_shortcut == "Ctrl+P"
     assert persisted.in_app_start_stop_shortcut == "Ctrl+Return"
+    assert persisted.in_app_skip_phase_shortcut == "Ctrl+L"
     assert persisted.in_app_mark_correct_shortcut == "Ctrl+Up"
     assert persisted.in_app_mark_wrong_shortcut == "Ctrl+Down"
     assert persisted.in_app_copy_question_shortcut == "C"
@@ -469,6 +480,7 @@ def test_settings_page_disables_global_hotkeys_when_unavailable(
 
     assert not page.pause_resume_hotkey_edit.isEnabled()
     assert not page.start_stop_hotkey_edit.isEnabled()
+    assert not page.skip_phase_hotkey_edit.isEnabled()
     assert "unsupported" in page.hotkey_help_label.text().lower()
 
 

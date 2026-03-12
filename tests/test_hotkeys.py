@@ -62,15 +62,21 @@ def test_global_hotkey_service_applies_bindings_and_dispatches_callbacks() -> No
     assert service.active_bindings() == {
         HotkeyAction.PAUSE_RESUME: "ctrl+alt+space",
         HotkeyAction.START_STOP: "ctrl+alt+enter",
+        HotkeyAction.SKIP_PHASE: "ctrl+alt+right",
         HotkeyAction.MARK_CORRECT: "ctrl+alt+up",
         HotkeyAction.MARK_WRONG: "ctrl+alt+down",
         HotkeyAction.COPY_QUESTION: "ctrl+alt+c",
     }
 
     backend.trigger("ctrl+alt+space")
+    backend.trigger("ctrl+alt+right")
     backend.trigger("ctrl+alt+c")
 
-    assert triggered == [HotkeyAction.PAUSE_RESUME, HotkeyAction.COPY_QUESTION]
+    assert triggered == [
+        HotkeyAction.PAUSE_RESUME,
+        HotkeyAction.SKIP_PHASE,
+        HotkeyAction.COPY_QUESTION,
+    ]
 
 
 def test_global_hotkey_service_rejects_duplicate_bindings_before_registration() -> None:
@@ -83,6 +89,7 @@ def test_global_hotkey_service_rejects_duplicate_bindings_before_registration() 
             {
                 HotkeyAction.PAUSE_RESUME: "Ctrl+Alt+Space",
                 HotkeyAction.START_STOP: "Ctrl+Alt+Space",
+                HotkeyAction.SKIP_PHASE: "Ctrl+Alt+Right",
                 HotkeyAction.MARK_CORRECT: "Ctrl+Alt+Up",
                 HotkeyAction.MARK_WRONG: "Ctrl+Alt+Down",
                 HotkeyAction.COPY_QUESTION: "Ctrl+Alt+C",
@@ -103,6 +110,7 @@ def test_global_hotkey_service_skips_empty_bindings() -> None:
         {
             HotkeyAction.PAUSE_RESUME: "",
             HotkeyAction.START_STOP: "Ctrl+Alt+Enter",
+            HotkeyAction.SKIP_PHASE: "",
             HotkeyAction.MARK_CORRECT: "",
             HotkeyAction.MARK_WRONG: "Ctrl+Alt+Down",
             HotkeyAction.COPY_QUESTION: "",
@@ -142,6 +150,7 @@ def test_global_hotkey_service_restores_previous_bindings_after_failed_update() 
             {
                 HotkeyAction.PAUSE_RESUME: "Ctrl+Alt+F",
                 HotkeyAction.START_STOP: "Ctrl+Alt+Enter",
+                HotkeyAction.SKIP_PHASE: "Ctrl+Alt+Right",
                 HotkeyAction.MARK_CORRECT: "Ctrl+Alt+Up",
                 HotkeyAction.MARK_WRONG: "Ctrl+Alt+Down",
                 HotkeyAction.COPY_QUESTION: "Ctrl+Alt+C",
@@ -152,6 +161,7 @@ def test_global_hotkey_service_restores_previous_bindings_after_failed_update() 
     assert service.active_bindings() == {
         HotkeyAction.PAUSE_RESUME: "ctrl+alt+space",
         HotkeyAction.START_STOP: "ctrl+alt+enter",
+        HotkeyAction.SKIP_PHASE: "ctrl+alt+right",
         HotkeyAction.MARK_CORRECT: "ctrl+alt+up",
         HotkeyAction.MARK_WRONG: "ctrl+alt+down",
         HotkeyAction.COPY_QUESTION: "ctrl+alt+c",
