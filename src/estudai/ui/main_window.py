@@ -106,6 +106,7 @@ class SidebarCheckboxDelegate(NativeCheckboxDelegate):
             text_spacing=8,
         )
 
+
 class MainWindow(QMainWindow):
     """Main application window with page navigation."""
 

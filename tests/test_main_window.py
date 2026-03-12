@@ -890,7 +890,9 @@ def test_scored_session_marks_wrong_then_correct_until_complete(
     assert window._timer_controller.pending_flashcard_score == "wrong"
     assert window._timer_controller.study_session.card_states[0].value == "pending"
     callbacks.pop(0)()
-    assert window._timer_controller.study_session.card_states[0].value == "wrong_pending"
+    assert (
+        window._timer_controller.study_session.card_states[0].value == "wrong_pending"
+    )
     assert "0/2 completed | 2 remaining | 1 pending review" in (
         window.timer_page.folder_context_label.text()
     )
@@ -962,7 +964,9 @@ def test_scored_session_mode_b_requires_more_correct_than_wrong_end_to_end(
     callbacks.pop(0)()
     window.timer_page.wrong_button.click()
     callbacks.pop(0)()
-    assert window._timer_controller.study_session.card_states[0].value == "wrong_pending"
+    assert (
+        window._timer_controller.study_session.card_states[0].value == "wrong_pending"
+    )
     assert window._timer_controller.study_session.card_counters[0].wrong_count == 1
 
     window.timer_page.is_running = False
@@ -970,7 +974,9 @@ def test_scored_session_mode_b_requires_more_correct_than_wrong_end_to_end(
     callbacks.pop(0)()
     window.timer_page.correct_button.click()
     callbacks.pop(0)()
-    assert window._timer_controller.study_session.card_states[0].value == "wrong_pending"
+    assert (
+        window._timer_controller.study_session.card_states[0].value == "wrong_pending"
+    )
     assert window._timer_controller.study_session.card_counters[0].correct_count == 1
     assert window._timer_controller.study_session.active is True
 
@@ -1024,7 +1030,11 @@ def test_wrong_answer_after_x_reinsertion_returns_card_after_requested_gap(
     callbacks.pop(0)()
     window.timer_page.wrong_button.click()
     callbacks.pop(0)()
-    assert window._timer_controller.study_session.queued_flashcard_indexes() == [1, 0, 2]
+    assert window._timer_controller.study_session.queued_flashcard_indexes() == [
+        1,
+        0,
+        2,
+    ]
 
     window.timer_page.is_running = False
     window.handle_timer_cycle_completed()
@@ -1101,9 +1111,17 @@ def test_study_progress_persists_between_windows_and_skips_completed_cards(
     )
     second_window.timer_page.start_timer()
 
-    assert second_window._timer_controller.study_session.card_counters[0].wrong_count == 1
-    assert second_window._timer_controller.study_session.card_counters[0].correct_count == 0
-    assert second_window._timer_controller.study_session.card_states[0].value == "wrong_pending"
+    assert (
+        second_window._timer_controller.study_session.card_counters[0].wrong_count == 1
+    )
+    assert (
+        second_window._timer_controller.study_session.card_counters[0].correct_count
+        == 0
+    )
+    assert (
+        second_window._timer_controller.study_session.card_states[0].value
+        == "wrong_pending"
+    )
 
     second_window.timer_page.is_running = False
     second_window.handle_timer_cycle_completed()
@@ -1122,9 +1140,15 @@ def test_study_progress_persists_between_windows_and_skips_completed_cards(
     )
     third_window.timer_page.start_timer()
 
-    assert third_window._timer_controller.study_session.card_counters[0].wrong_count == 1
-    assert third_window._timer_controller.study_session.card_counters[0].correct_count == 1
-    assert third_window._timer_controller.study_session.card_states[0].value == "completed"
+    assert (
+        third_window._timer_controller.study_session.card_counters[0].wrong_count == 1
+    )
+    assert (
+        third_window._timer_controller.study_session.card_counters[0].correct_count == 1
+    )
+    assert (
+        third_window._timer_controller.study_session.card_states[0].value == "completed"
+    )
     assert third_window._timer_controller.study_session.progress().completed_count == 1
     assert third_window._timer_controller.study_session.progress().remaining_count == 1
 
@@ -1186,8 +1210,14 @@ def test_study_progress_isolated_by_folder_and_survives_folder_rename(
     )
     second_window.timer_page.start_timer()
 
-    assert second_window._timer_controller.study_session.card_counters[0].correct_count == 1
-    assert second_window._timer_controller.study_session.card_counters[1].correct_count == 0
+    assert (
+        second_window._timer_controller.study_session.card_counters[0].correct_count
+        == 1
+    )
+    assert (
+        second_window._timer_controller.study_session.card_counters[1].correct_count
+        == 0
+    )
     assert second_window._timer_controller.study_session.progress().completed_count == 1
     assert second_window._timer_controller.study_session.progress().remaining_count == 1
 
@@ -1309,8 +1339,13 @@ def test_legacy_managed_folder_migrates_and_persists_progress(
     )
     second_window.timer_page.start_timer()
 
-    assert second_window._timer_controller.study_session.card_counters[0].wrong_count == 1
-    assert second_window._timer_controller.study_session.card_states[0].value == "wrong_pending"
+    assert (
+        second_window._timer_controller.study_session.card_counters[0].wrong_count == 1
+    )
+    assert (
+        second_window._timer_controller.study_session.card_states[0].value
+        == "wrong_pending"
+    )
 
 
 def test_timer_completion_uses_queue_shuffle_when_setting_enabled(
@@ -1334,7 +1369,8 @@ def test_timer_completion_uses_queue_shuffle_when_setting_enabled(
         ),
     )
     monkeypatch.setattr(
-        "estudai.ui.controllers.timer_page_controller.random.choice", lambda flashcards: flashcards[-1]
+        "estudai.ui.controllers.timer_page_controller.random.choice",
+        lambda flashcards: flashcards[-1],
     )
     window = MainWindow()
     biology_folder = tmp_path / "biology"
@@ -1373,7 +1409,8 @@ def test_true_random_mode_can_repeat_same_wrong_card_end_to_end(
         ),
     )
     monkeypatch.setattr(
-        "estudai.ui.controllers.timer_page_controller.random.choice", lambda flashcards: flashcards[-1]
+        "estudai.ui.controllers.timer_page_controller.random.choice",
+        lambda flashcards: flashcards[-1],
     )
     window = MainWindow()
     biology_folder = tmp_path / "biology"
@@ -1392,7 +1429,10 @@ def test_true_random_mode_can_repeat_same_wrong_card_end_to_end(
 
     window.timer_page.is_running = False
     window.handle_timer_cycle_completed()
-    assert window._timer_controller.study_session.study_order_mode is StudyOrderMode.TRUE_RANDOM
+    assert (
+        window._timer_controller.study_session.study_order_mode
+        is StudyOrderMode.TRUE_RANDOM
+    )
     assert window.timer_page.flashcard_question_label.text() == "Q3?"
     callbacks.pop(0)()
     window.timer_page.wrong_button.click()
@@ -1923,7 +1963,9 @@ def test_flashcard_pause_handler_stops_and_resumes_phase_timer(
             self.active = True
 
     fake_timer = _FakePhaseTimer()
-    monkeypatch.setattr(window._timer_controller.flashcard_sequence, "phase_timer", fake_timer)
+    monkeypatch.setattr(
+        window._timer_controller.flashcard_sequence, "phase_timer", fake_timer
+    )
 
     window.handle_flashcard_pause_toggled(True)
     assert fake_timer.stopped is True
@@ -2388,20 +2430,50 @@ def test_in_app_timer_shortcuts_control_timer(
     (biology_folder / "cards.csv").write_text("Q1?,A1.\n", encoding="utf-8")
     assert window.add_folder(biology_folder) is True
 
-    assert window._hotkey_controller.timer_page_pause_resume_shortcut.context() == Qt.ApplicationShortcut
-    assert window._hotkey_controller.timer_page_pause_resume_shortcut.key().toString() == "Space"
+    assert (
+        window._hotkey_controller.timer_page_pause_resume_shortcut.context()
+        == Qt.ApplicationShortcut
+    )
+    assert (
+        window._hotkey_controller.timer_page_pause_resume_shortcut.key().toString()
+        == "Space"
+    )
     assert {
         shortcut.toString()
         for shortcut in window._hotkey_controller.timer_page_start_stop_shortcut.keys()
     } == {"Return", "Enter"}
-    assert window._hotkey_controller.timer_page_skip_phase_shortcut.context() == Qt.ApplicationShortcut
-    assert window._hotkey_controller.timer_page_skip_phase_shortcut.key().toString() == "Right"
-    assert window._hotkey_controller.timer_page_mark_correct_shortcut.context() == Qt.ApplicationShortcut
-    assert window._hotkey_controller.timer_page_mark_correct_shortcut.key().toString() == "Up"
-    assert window._hotkey_controller.timer_page_mark_wrong_shortcut.context() == Qt.ApplicationShortcut
-    assert window._hotkey_controller.timer_page_mark_wrong_shortcut.key().toString() == "Down"
-    assert window._hotkey_controller.timer_page_copy_question_shortcut.context() == Qt.ApplicationShortcut
-    assert window._hotkey_controller.timer_page_copy_question_shortcut.key().toString() == "C"
+    assert (
+        window._hotkey_controller.timer_page_skip_phase_shortcut.context()
+        == Qt.ApplicationShortcut
+    )
+    assert (
+        window._hotkey_controller.timer_page_skip_phase_shortcut.key().toString()
+        == "Right"
+    )
+    assert (
+        window._hotkey_controller.timer_page_mark_correct_shortcut.context()
+        == Qt.ApplicationShortcut
+    )
+    assert (
+        window._hotkey_controller.timer_page_mark_correct_shortcut.key().toString()
+        == "Up"
+    )
+    assert (
+        window._hotkey_controller.timer_page_mark_wrong_shortcut.context()
+        == Qt.ApplicationShortcut
+    )
+    assert (
+        window._hotkey_controller.timer_page_mark_wrong_shortcut.key().toString()
+        == "Down"
+    )
+    assert (
+        window._hotkey_controller.timer_page_copy_question_shortcut.context()
+        == Qt.ApplicationShortcut
+    )
+    assert (
+        window._hotkey_controller.timer_page_copy_question_shortcut.key().toString()
+        == "C"
+    )
 
     window._hotkey_controller.timer_page_start_stop_shortcut.activated.emit()
     assert window.timer_page.is_running is True
@@ -2451,9 +2523,17 @@ def test_fullscreen_shortcuts_use_app_scope_and_expected_handlers(
     """Verify F11 toggles fullscreen and Escape exits it through shortcuts."""
     window = _FullscreenSpyWindow()
 
-    assert window._hotkey_controller.toggle_fullscreen_shortcut.context() == Qt.ApplicationShortcut
-    assert window._hotkey_controller.toggle_fullscreen_shortcut.key().toString() == "F11"
-    assert window._hotkey_controller.exit_fullscreen_shortcut.context() == Qt.ApplicationShortcut
+    assert (
+        window._hotkey_controller.toggle_fullscreen_shortcut.context()
+        == Qt.ApplicationShortcut
+    )
+    assert (
+        window._hotkey_controller.toggle_fullscreen_shortcut.key().toString() == "F11"
+    )
+    assert (
+        window._hotkey_controller.exit_fullscreen_shortcut.context()
+        == Qt.ApplicationShortcut
+    )
     assert window._hotkey_controller.exit_fullscreen_shortcut.key().toString() == "Esc"
 
     window._hotkey_controller.toggle_fullscreen_shortcut.activated.emit()
@@ -2523,7 +2603,9 @@ def test_global_hotkeys_score_flashcards_through_existing_controls(
     flashcard = window._timer_controller.next_flashcard_for_display()
     assert flashcard is not None
     window.show_flashcard_popup(flashcard)
-    window._timer_controller.show_current_flashcard_answer(window._timer_controller.flashcard_sequence.active_sequence_id, 8)
+    window._timer_controller.show_current_flashcard_answer(
+        window._timer_controller.flashcard_sequence.active_sequence_id, 8
+    )
 
     backend.trigger("ctrl+alt+up")
     assert window.timer_page.selected_flashcard_score() == "correct"
@@ -2610,7 +2692,9 @@ def test_in_app_hotkeys_score_flashcards_through_existing_controls(
     flashcard = window._timer_controller.next_flashcard_for_display()
     assert flashcard is not None
     window.show_flashcard_popup(flashcard)
-    window._timer_controller.show_current_flashcard_answer(window._timer_controller.flashcard_sequence.active_sequence_id, 8)
+    window._timer_controller.show_current_flashcard_answer(
+        window._timer_controller.flashcard_sequence.active_sequence_id, 8
+    )
 
     window._hotkey_controller.timer_page_mark_correct_shortcut.activated.emit()
     assert window.timer_page.selected_flashcard_score() == "correct"
@@ -2777,8 +2861,13 @@ def test_saving_settings_can_disable_hotkeys_and_in_app_shortcuts(
         shortcut.toString()
         for shortcut in window._hotkey_controller.timer_page_start_stop_shortcut.keys()
     } == {""}
-    assert window._hotkey_controller.timer_page_pause_resume_shortcut.key().toString() == ""
-    assert window._hotkey_controller.timer_page_skip_phase_shortcut.key().toString() == ""
+    assert (
+        window._hotkey_controller.timer_page_pause_resume_shortcut.key().toString()
+        == ""
+    )
+    assert (
+        window._hotkey_controller.timer_page_skip_phase_shortcut.key().toString() == ""
+    )
 
     with pytest.raises(HotkeyRegistrationError, match="ctrl\\+alt\\+enter"):
         backend.trigger("ctrl+alt+enter")
@@ -2816,13 +2905,33 @@ def test_saving_settings_rebinds_active_in_app_shortcuts(
     assert persisted.in_app_mark_wrong_shortcut == "Ctrl+Left"
     assert persisted.in_app_copy_question_shortcut == "Ctrl+C"
 
-    assert window._hotkey_controller.timer_page_start_stop_shortcut.key().toString() == "Ctrl+S"
-    assert window._hotkey_controller.timer_page_pause_resume_shortcut.key().toString() == "Ctrl+P"
-    assert window._hotkey_controller.timer_page_skip_phase_shortcut.key().toString() == "Ctrl+L"
-    assert window._hotkey_controller.timer_page_mark_correct_shortcut.key().toString() == "Ctrl+Right"
-    assert window._hotkey_controller.timer_page_mark_wrong_shortcut.key().toString() == "Ctrl+Left"
-    assert window._hotkey_controller.timer_page_copy_question_shortcut.key().toString() == "Ctrl+C"
-    assert window._hotkey_controller.toggle_fullscreen_shortcut.key().toString() == "F11"
+    assert (
+        window._hotkey_controller.timer_page_start_stop_shortcut.key().toString()
+        == "Ctrl+S"
+    )
+    assert (
+        window._hotkey_controller.timer_page_pause_resume_shortcut.key().toString()
+        == "Ctrl+P"
+    )
+    assert (
+        window._hotkey_controller.timer_page_skip_phase_shortcut.key().toString()
+        == "Ctrl+L"
+    )
+    assert (
+        window._hotkey_controller.timer_page_mark_correct_shortcut.key().toString()
+        == "Ctrl+Right"
+    )
+    assert (
+        window._hotkey_controller.timer_page_mark_wrong_shortcut.key().toString()
+        == "Ctrl+Left"
+    )
+    assert (
+        window._hotkey_controller.timer_page_copy_question_shortcut.key().toString()
+        == "Ctrl+C"
+    )
+    assert (
+        window._hotkey_controller.toggle_fullscreen_shortcut.key().toString() == "F11"
+    )
     assert window._hotkey_controller.exit_fullscreen_shortcut.key().toString() == "Esc"
 
     window.switch_to_timer()

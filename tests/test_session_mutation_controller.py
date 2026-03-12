@@ -89,7 +89,10 @@ class _FakeStudySession:
 
     def replace_current_flashcard(self, flashcard: Flashcard) -> bool:
         """Replace the current flashcard payload."""
-        if not self.replace_current_return_value or self.current_flashcard_index is None:
+        if (
+            not self.replace_current_return_value
+            or self.current_flashcard_index is None
+        ):
             return False
         self.flashcards[self.current_flashcard_index] = flashcard
         return True
@@ -176,8 +179,7 @@ def _build_controller(
         or (lambda _checked_ids, _current_folder_id: None),
         edit_dialog_factory=edit_dialog_factory
         or (lambda _question, _answer: _FakeDialog("Edited Q?", "Edited A.")),
-        show_warning_message=show_warning_message
-        or (lambda _title, _message: None),
+        show_warning_message=show_warning_message or (lambda _title, _message: None),
         confirm_action=confirm_action or (lambda _title, _message: True),
     )
 

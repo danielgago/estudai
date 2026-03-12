@@ -224,8 +224,10 @@ class SessionMutationController:
                 selected_indexes=selected_indexes,
             )
             return
-        if 0 <= location.session_flashcard_index < len(
-            self._runtime.active_study_session_keys
+        if (
+            0
+            <= location.session_flashcard_index
+            < len(self._runtime.active_study_session_keys)
         ):
             updated_keys = list(self._runtime.active_study_session_keys)
             updated_keys.pop(location.session_flashcard_index)
@@ -252,7 +254,10 @@ class SessionMutationController:
         if current_flashcard is None or session_flashcard_index is None:
             return None
 
-        for folder_id, folder_flashcards in self._app_state.flashcards_by_folder.items():
+        for (
+            folder_id,
+            folder_flashcards,
+        ) in self._app_state.flashcards_by_folder.items():
             try:
                 folder_flashcard_index = folder_flashcards.index(current_flashcard)
             except ValueError:

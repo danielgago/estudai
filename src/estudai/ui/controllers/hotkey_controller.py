@@ -156,9 +156,7 @@ class HotkeyController:
             QKeySequence(bindings[InAppShortcutAction.PAUSE_RESUME])
         )
         self.timer_page_start_stop_shortcut.setKeys(
-            self.start_stop_shortcut_sequences(
-                bindings[InAppShortcutAction.START_STOP]
-            )
+            self.start_stop_shortcut_sequences(bindings[InAppShortcutAction.START_STOP])
         )
         self.timer_page_skip_phase_shortcut.setKey(
             QKeySequence(bindings[InAppShortcutAction.SKIP_PHASE])
@@ -208,9 +206,7 @@ class HotkeyController:
         """Return thread-safe callbacks that marshal actions to the UI thread."""
         return {
             action: (
-                lambda action_value=action.value: self._emit_hotkey_action(
-                    action_value
-                )
+                lambda action_value=action.value: self._emit_hotkey_action(action_value)
             )
             for action in HotkeyAction
         }
