@@ -582,6 +582,10 @@ class TimerPage(QWidget):
         """Return whether the timer should run a countdown before flashcards."""
         return self._default_duration_seconds > 0
 
+    def has_countdown_duration(self) -> bool:
+        """Return whether study cycles should return through the timer countdown."""
+        return self._has_countdown_duration()
+
     def _idle_timer_display_text(self) -> str:
         """Return the idle timer label for the current mode."""
         if not self._has_countdown_duration():

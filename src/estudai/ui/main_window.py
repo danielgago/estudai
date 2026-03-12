@@ -1037,6 +1037,9 @@ class MainWindow(QMainWindow):
         if self._study_session.is_complete():
             self._complete_study_session()
             return
+        if not self.timer_page.has_countdown_duration():
+            self.handle_timer_cycle_completed()
+            return
         self.timer_page.clear_flashcard_display()
         self.timer_page.restart_timer_cycle()
 

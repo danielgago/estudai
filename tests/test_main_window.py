@@ -714,6 +714,66 @@ def test_zero_second_timer_starts_flashcards_immediately_and_resets_to_ready(
     assert window.timer_page.timer_display.text() == "Ready?"
 
 
+def test_zero_second_timer_advances_to_next_question_without_clearing_timer_view(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify instant mode keeps chaining flashcards without flashing Ready?."""
+    callbacks: list[object] = []
+    monkeypatch.setattr(
+        "estudai.ui.main_window.load_app_settings",
+        lambda: AppSettings(
+            timer_duration_seconds=0,
+            flashcard_probability_percent=0,
+            flashcard_study_order_mode=StudyOrderMode.QUEUE,
+            question_display_duration_seconds=2,
+            answer_display_duration_seconds=3,
+        ),
+    )
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text("Q1?,A1.\nQ2?,A2.\n", encoding="utf-8")
+    assert window.add_folder(biology_folder) is True
+    monkeypatch.setattr(
+        window,
+        "_start_flashcard_phase_timer",
+        lambda _delay, callback: callbacks.append(callback),
+    )
+    cleared_views: list[int] = []
+    original_clear_flashcard_display = window.timer_page.clear_flashcard_display
+
+    def track_clear_flashcard_display() -> None:
+        """Record any return to the timer view during instant-mode chaining."""
+        cleared_views.append(window.timer_page.content_stack.currentIndex())
+        original_clear_flashcard_display()
+
+    monkeypatch.setattr(
+        window.timer_page,
+        "clear_flashcard_display",
+        track_clear_flashcard_display,
+    )
+
+    window.timer_page.start_timer()
+
+    assert window.timer_page.flashcard_question_label.text() == "Q1?"
+    assert len(callbacks) == 1
+
+    callbacks.pop(0)()
+
+    assert window.timer_page.flashcard_answer_label.text() == "A1."
+    assert len(callbacks) == 1
+
+    window.timer_page.correct_button.click()
+    cleared_views.clear()
+
+    callbacks.pop(0)()
+
+    assert cleared_views == []
+    assert window.timer_page.flashcard_question_label.text() == "Q2?"
+    assert window.timer_page.flashcard_answer_label.isHidden() is True
+    assert len(callbacks) == 1
+
+
 def test_timer_cycle_restarts_countdown_when_probability_roll_fails(
     app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
