@@ -65,8 +65,8 @@ The generated installer is configured to create an `Estudai` desktop shortcut by
 Push a version tag to trigger the same workflow and attach the MSI to a draft prerelease:
 
 ```bash
-git tag v1.2.0
-git push origin v1.2.0
+git tag v1.2.1
+git push origin v1.2.1
 ```
 
 After the run finishes, open **Releases** on GitHub and review the draft prerelease assets before publishing.
