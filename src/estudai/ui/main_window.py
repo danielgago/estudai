@@ -43,6 +43,7 @@ except ImportError:  # pragma: no cover - depends on system multimedia libraries
 
 from estudai.services.csv_flashcards import (
     Flashcard,
+    list_source_csv_files,
 )
 from estudai.services.folder_catalog import PersistedFolderCatalogService
 from estudai.services.folder_storage import (
@@ -1160,9 +1161,14 @@ class MainWindow(QMainWindow):
         )
         if not selected_path:
             return
-        self._sidebar_folder_operations_controller.add_folder(
-            Path(selected_path),
+        folder_path = Path(selected_path)
+        split_csv_into_subfolders = self._prompt_for_split_csv_import(folder_path)
+        if split_csv_into_subfolders is None:
+            return
+        self.add_folder(
+            folder_path,
             show_errors=True,
+            split_csv_into_subfolders=split_csv_into_subfolders,
         )
 
     def prompt_and_create_folder(self) -> None:
@@ -1233,11 +1239,20 @@ class MainWindow(QMainWindow):
         """Persist flashcard table edits and return to timer page."""
         self._management_controller.save_changes()
 
-    def add_folder(self, folder_path: Path, *, show_errors: bool = False) -> bool:
+    def add_folder(
+        self,
+        folder_path: Path,
+        *,
+        show_errors: bool = False,
+        split_csv_into_subfolders: bool = False,
+    ) -> bool:
         """Copy one selected folder, persist it, and load flashcards.
 
         Args:
             folder_path: Selected folder path.
+            show_errors: Whether import failures should show a warning dialog.
+            split_csv_into_subfolders: Whether directories with multiple CSV files
+                should create one child folder per CSV during import.
 
         Returns:
             bool: True when the folder was loaded.
@@ -1245,7 +1260,74 @@ class MainWindow(QMainWindow):
         return self._sidebar_folder_operations_controller.add_folder(
             folder_path,
             show_errors=show_errors,
+            split_csv_into_subfolders=split_csv_into_subfolders,
         )
+
+    def _prompt_for_split_csv_import(self, folder_path: Path) -> bool | None:
+        """Return how a selected import should handle directories with many CSVs.
+
+        Args:
+            folder_path: Folder selected for import.
+
+        Returns:
+            bool | None: `True` to split CSV files into child folders, `False` to
+            keep the current consolidated behavior, or `None` when the user
+            cancels the import.
+        """
+        if not folder_path.exists() or not folder_path.is_dir():
+            return False
+        if not self._folder_tree_contains_multi_csv_directory(folder_path):
+            return False
+
+        message_box = QMessageBox(self)
+        message_box.setIcon(QMessageBox.Question)
+        message_box.setWindowTitle("Import Existing Folder")
+        message_box.setText(
+            "One or more folders in this import contain multiple CSV files."
+        )
+        message_box.setInformativeText(
+            "Would you like Estudai to create a separate folder for each CSV "
+            "file instead of keeping those CSVs together inside the same folder?"
+        )
+        separate_button = message_box.addButton(
+            "Separate Each CSV",
+            QMessageBox.AcceptRole,
+        )
+        keep_together_button = message_box.addButton(
+            "Keep Together",
+            QMessageBox.NoRole,
+        )
+        cancel_button = message_box.addButton(QMessageBox.Cancel)
+        message_box.setDefaultButton(keep_together_button)
+        message_box.exec()
+        clicked_button = message_box.clickedButton()
+        if clicked_button is cancel_button:
+            return None
+        return clicked_button is separate_button
+
+    def _folder_tree_contains_multi_csv_directory(self, folder_path: Path) -> bool:
+        """Return whether any directory in a folder tree contains many CSV files.
+
+        Args:
+            folder_path: Root folder selected for import.
+
+        Returns:
+            bool: True when at least one directory contains multiple source CSV
+            files that could be split into child folders.
+        """
+        pending_directories = [folder_path]
+        while pending_directories:
+            current_directory = pending_directories.pop()
+            if len(list_source_csv_files(current_directory)) > 1:
+                return True
+            pending_directories.extend(
+                sorted(
+                    child_directory
+                    for child_directory in current_directory.iterdir()
+                    if child_directory.is_dir()
+                )
+            )
+        return False
 
     def _create_sidebar_folder_item(
         self,

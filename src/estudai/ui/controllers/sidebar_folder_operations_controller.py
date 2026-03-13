@@ -93,6 +93,7 @@ class SidebarFolderOperationsController:
         *,
         parent_id: str | None = None,
         show_errors: bool = False,
+        split_csv_into_subfolders: bool = False,
     ) -> bool:
         """Import one existing flashcard folder into managed storage.
 
@@ -100,13 +101,19 @@ class SidebarFolderOperationsController:
             folder_path: Selected source folder path.
             parent_id: Optional parent folder id for nested imports.
             show_errors: Whether import failures should show a warning dialog.
+            split_csv_into_subfolders: Whether directories with multiple CSV files
+                should create one child folder per CSV during import.
 
         Returns:
             bool: True when the folder was imported successfully.
         """
         checked_ids = self._checked_folder_ids_getter()
         try:
-            persisted_folder = import_folder(folder_path, parent_id=parent_id)
+            persisted_folder = import_folder(
+                folder_path,
+                parent_id=parent_id,
+                split_csv_into_subfolders=split_csv_into_subfolders,
+            )
         except (FileNotFoundError, NotADirectoryError, OSError, KeyError) as error:
             if show_errors:
                 self._show_warning_message("Import folder", str(error))

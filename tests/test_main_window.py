@@ -862,6 +862,65 @@ def test_prompt_add_folder_surfaces_import_errors(
     assert warnings == [f"Folder not found: {missing_folder.resolve()}"]
 
 
+def test_prompt_add_folder_can_split_multiple_csvs_into_child_folders(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify the import prompt can place each CSV into its own child folder."""
+    source_folder = tmp_path / "science"
+    source_folder.mkdir()
+    (source_folder / "biology.csv").write_text(
+        "DNA?,Genetic material.\n", encoding="utf-8"
+    )
+    (source_folder / "chemistry.csv").write_text("NaCl?,Salt.\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "estudai.ui.main_window.QFileDialog.getExistingDirectory",
+        lambda *_args, **_kwargs: str(source_folder),
+    )
+    window = MainWindow()
+    monkeypatch.setattr(
+        window, "_prompt_for_split_csv_import", lambda _folder_path: True
+    )
+
+    window.prompt_and_add_folder()
+
+    persisted_folders = list_persisted_folders()
+    assert [folder.name for folder in persisted_folders] == [
+        "science",
+        "biology",
+        "chemistry",
+    ]
+    root_item = window.sidebar_folder_list.item(0)
+    assert root_item.text() == "science (0 cards | 0% done)"
+    assert root_item.childCount() == 2
+    assert root_item.child(0).text() == "biology (1 card | 0% done)"
+    assert root_item.child(1).text() == "chemistry (1 card | 0% done)"
+
+
+def test_prompt_add_folder_split_cancel_leaves_sidebar_unchanged(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify cancelling the split-choice prompt aborts the folder import."""
+    source_folder = tmp_path / "science"
+    source_folder.mkdir()
+    (source_folder / "biology.csv").write_text(
+        "DNA?,Genetic material.\n", encoding="utf-8"
+    )
+    (source_folder / "chemistry.csv").write_text("NaCl?,Salt.\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "estudai.ui.main_window.QFileDialog.getExistingDirectory",
+        lambda *_args, **_kwargs: str(source_folder),
+    )
+    window = MainWindow()
+    monkeypatch.setattr(
+        window, "_prompt_for_split_csv_import", lambda _folder_path: None
+    )
+
+    window.prompt_and_add_folder()
+
+    assert list_persisted_folders() == []
+    assert window.sidebar_folder_list.item(0).text() == "No saved folders yet."
+
+
 def test_scored_session_marks_wrong_then_correct_until_complete(
     app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
