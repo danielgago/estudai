@@ -340,6 +340,81 @@ def test_import_folder_preserves_nested_structure() -> None:
     assert child_folder_ids(imported_root.id) == {persisted_folders[1].id}
 
 
+def test_import_folder_keeps_multiple_csvs_together_by_default() -> None:
+    """Verify importing multiple CSV files preserves the current grouped layout."""
+    source_root = Path(os.environ["ESTUDAI_DATA_DIR"]) / "source"
+    source_root.mkdir(parents=True)
+    (source_root / "biology.csv").write_text(
+        "DNA?,Genetic material.\n", encoding="utf-8"
+    )
+    (source_root / "chemistry.csv").write_text("NaCl?,Salt.\n", encoding="utf-8")
+
+    imported_root = import_folder(source_root)
+
+    persisted_folders = list_persisted_folders()
+    assert [folder.name for folder in persisted_folders] == ["source"]
+    assert persisted_folders[0].id == imported_root.id
+    loaded_flashcards = load_flashcards_from_folder(Path(imported_root.stored_path))
+    assert [flashcard.question for flashcard in loaded_flashcards] == ["DNA?", "NaCl?"]
+    assert {flashcard.origin_relative_path for flashcard in loaded_flashcards} == {
+        "biology.csv",
+        "chemistry.csv",
+    }
+
+
+def test_import_folder_can_split_multiple_csvs_into_child_folders() -> None:
+    """Verify importing can place each source CSV into its own child folder."""
+    source_root = Path(os.environ["ESTUDAI_DATA_DIR"]) / "source"
+    source_root.mkdir(parents=True)
+    (source_root / "biology.csv").write_text(
+        "DNA?,Genetic material.\n", encoding="utf-8"
+    )
+    (source_root / "chemistry.csv").write_text("NaCl?,Salt.\n", encoding="utf-8")
+
+    imported_root = import_folder(source_root, split_csv_into_subfolders=True)
+
+    persisted_folders = list_persisted_folders()
+    assert [folder.name for folder in persisted_folders] == [
+        "source",
+        "biology",
+        "chemistry",
+    ]
+    assert persisted_folders[0].id == imported_root.id
+    assert persisted_folders[1].parent_id == imported_root.id
+    assert persisted_folders[2].parent_id == imported_root.id
+    assert load_flashcards_from_folder(Path(imported_root.stored_path)) == []
+    assert [
+        flashcard.question
+        for flashcard in load_flashcards_from_folder(
+            Path(persisted_folders[1].stored_path)
+        )
+    ] == ["DNA?"]
+    assert [
+        flashcard.question
+        for flashcard in load_flashcards_from_folder(
+            Path(persisted_folders[2].stored_path)
+        )
+    ] == ["NaCl?"]
+
+
+def test_reimport_folder_without_split_removes_stale_csv_child_folders() -> None:
+    """Verify changing split mode on re-import removes stale CSV child folders."""
+    source_root = Path(os.environ["ESTUDAI_DATA_DIR"]) / "source"
+    source_root.mkdir(parents=True)
+    (source_root / "biology.csv").write_text(
+        "DNA?,Genetic material.\n", encoding="utf-8"
+    )
+    (source_root / "chemistry.csv").write_text("NaCl?,Salt.\n", encoding="utf-8")
+
+    first_import = import_folder(source_root, split_csv_into_subfolders=True)
+    second_import = import_folder(source_root)
+
+    persisted_folders = list_persisted_folders()
+    assert first_import.id == second_import.id
+    assert [folder.name for folder in persisted_folders] == ["source"]
+    assert child_folder_ids(second_import.id) == set()
+
+
 def test_list_persisted_folders_handles_corrupt_registry_json() -> None:
     """Verify corrupt registry JSON does not crash folder listing."""
     registry_path = get_registry_path()

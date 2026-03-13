@@ -152,6 +152,59 @@ def test_add_folder_missing_path_surfaces_warning(
     assert refresh_calls == []
 
 
+def test_add_folder_can_split_multiple_csvs_into_child_folders(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """Verify split imports refresh checked ids for the new child folders too."""
+    app_state = StudyApplicationState()
+    checked_ids = {"existing-folder"}
+    refresh_calls: list[tuple[set[str] | None, str | None]] = []
+    source_folder = tmp_path / "science"
+    source_folder.mkdir()
+    (source_folder / "biology.csv").write_text(
+        "DNA?,Genetic material.\n", encoding="utf-8"
+    )
+    (source_folder / "chemistry.csv").write_text("NaCl?,Salt.\n", encoding="utf-8")
+    controller = _build_controller(
+        app_state=app_state,
+        checked_folder_ids_getter=lambda: checked_ids,
+        handle_folder_data_changed=lambda selected_ids, current_folder_id: (
+            refresh_calls.append(
+                (
+                    None if selected_ids is None else set(selected_ids),
+                    current_folder_id,
+                )
+            )
+        ),
+    )
+
+    assert (
+        controller.add_folder(
+            source_folder,
+            split_csv_into_subfolders=True,
+        )
+        is True
+    )
+
+    persisted_folders = list_persisted_folders()
+    assert [folder.name for folder in persisted_folders] == [
+        "science",
+        "biology",
+        "chemistry",
+    ]
+    assert refresh_calls == [
+        (
+            {
+                "existing-folder",
+                persisted_folders[0].id,
+                persisted_folders[1].id,
+                persisted_folders[2].id,
+            },
+            None,
+        )
+    ]
+
+
 def test_move_selected_folder_preserves_current_folder(app: QApplication) -> None:
     """Verify reordering keeps the moved folder selected after refresh."""
     first_folder = create_managed_folder("Biology")

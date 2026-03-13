@@ -16,6 +16,7 @@ from .csv_flashcards import (
     ensure_managed_flashcards,
     get_managed_flashcard_media_dir,
     load_flashcards_from_folder,
+    list_source_csv_files,
 )
 from .study_progress import delete_folder_progress
 
@@ -690,6 +691,38 @@ def _copy_imported_folder_contents(
     shutil.copytree(source_folder, destination_folder)
 
 
+def _copy_imported_csv_contents(
+    source_csv: Path,
+    destination_folder: Path,
+) -> None:
+    """Copy one imported CSV file into a managed folder.
+
+    Args:
+        source_csv: Source CSV selected from the imported directory tree.
+        destination_folder: Managed directory that should receive the CSV file.
+    """
+    if destination_folder.exists():
+        shutil.rmtree(destination_folder)
+    destination_folder.mkdir(parents=True, exist_ok=False)
+    shutil.copy2(source_csv, destination_folder / source_csv.name)
+
+
+def _remove_split_source_csv_copies(
+    destination_folder: Path,
+    source_csv_files: list[Path],
+) -> None:
+    """Remove root-level CSV copies when they are being split into child folders.
+
+    Args:
+        destination_folder: Managed directory that already received the folder copy.
+        source_csv_files: Source CSV files that should instead live in child folders.
+    """
+    for source_csv in source_csv_files:
+        copied_csv_path = destination_folder / source_csv.name
+        if copied_csv_path.exists():
+            copied_csv_path.unlink()
+
+
 def _sorted_child_directories(folder_path: Path) -> list[Path]:
     """Return child directories sorted for deterministic imports.
 
@@ -702,25 +735,117 @@ def _sorted_child_directories(folder_path: Path) -> list[Path]:
     return sorted(path for path in folder_path.iterdir() if path.is_dir())
 
 
-def _import_folder_tree(
-    source_folder: Path,
+def _next_import_sort_order(
+    persisted_folders: list[PersistedFolder],
+    *,
+    existing_folder: PersistedFolder | None,
+    parent_id: str | None,
+    next_sort_order_by_parent: dict[str | None, int],
+) -> int:
+    """Return the sort order for one imported folder.
+
+    Args:
+        persisted_folders: Current folder registry entries.
+        existing_folder: Existing imported folder matched by source path, when any.
+        parent_id: Parent folder id for the imported folder.
+        next_sort_order_by_parent: Next available sibling positions by parent.
+
+    Returns:
+        int: Sort order for the imported folder.
+    """
+    if existing_folder is not None and existing_folder.parent_id == parent_id:
+        return existing_folder.sort_order
+
+    sort_order = next_sort_order_by_parent.setdefault(
+        parent_id,
+        sum(1 for folder in persisted_folders if folder.parent_id == parent_id),
+    )
+    next_sort_order_by_parent[parent_id] = sort_order + 1
+    return sort_order
+
+
+def _upsert_imported_folder(
+    persisted_folders: list[PersistedFolder],
+    *,
+    existing_folder: PersistedFolder | None,
+    name: str,
+    source_path: str,
+    stored_path: Path,
+    parent_id: str | None,
+    next_sort_order_by_parent: dict[str | None, int],
+) -> PersistedFolder:
+    """Insert or update one imported folder entry in memory.
+
+    Args:
+        persisted_folders: Current folder registry entries.
+        existing_folder: Existing imported folder matched by source path, when any.
+        name: Display name for the imported folder.
+        source_path: Original source path backing the imported folder.
+        stored_path: Managed directory path used by the application.
+        parent_id: Parent folder id for the imported folder.
+        next_sort_order_by_parent: Next available sibling positions by parent.
+
+    Returns:
+        PersistedFolder: Inserted or updated folder metadata.
+    """
+    folder_id = existing_folder.id if existing_folder is not None else uuid4().hex
+    imported_folder = PersistedFolder(
+        id=folder_id,
+        name=name,
+        source_path=source_path,
+        stored_path=str(stored_path),
+        parent_id=parent_id,
+        sort_order=_next_import_sort_order(
+            persisted_folders,
+            existing_folder=existing_folder,
+            parent_id=parent_id,
+            next_sort_order_by_parent=next_sort_order_by_parent,
+        ),
+    )
+
+    updated_existing = False
+    for folder_index, folder in enumerate(persisted_folders):
+        if folder.id != folder_id:
+            continue
+        persisted_folders[folder_index] = imported_folder
+        updated_existing = True
+        break
+    if not updated_existing:
+        persisted_folders.append(imported_folder)
+    return imported_folder
+
+
+def _csv_import_folder_name(source_csv: Path) -> str:
+    """Return the display name used for one CSV-split imported folder.
+
+    Args:
+        source_csv: Source CSV file path.
+
+    Returns:
+        str: Folder name shown in the UI.
+    """
+    return source_csv.stem or source_csv.name
+
+
+def _import_csv_file(
+    source_csv: Path,
     persisted_folders: list[PersistedFolder],
     *,
     parent_id: str | None,
     next_sort_order_by_parent: dict[str | None, int],
 ) -> ImportedFolderPaths:
-    """Import one source folder and all descendants into managed storage.
+    """Import one source CSV file as its own managed folder.
 
     Args:
-        source_folder: Source folder to import.
+        source_csv: Source CSV file to import.
         persisted_folders: Current folder registry that will be updated in place.
-        parent_id: Parent folder id for the source root.
+        parent_id: Parent folder id for the imported CSV folder.
         next_sort_order_by_parent: Next available sibling positions by parent.
 
     Returns:
-        ImportedFolderPaths: Imported root folder plus all imported descendant ids.
+        ImportedFolderPaths: Imported CSV folder plus its managed id set.
     """
-    source_key = str(source_folder)
+    source_key = str(source_csv)
     existing_folder = next(
         (folder for folder in persisted_folders if folder.source_path == source_key),
         None,
@@ -728,11 +853,12 @@ def _import_folder_tree(
     previous_flashcards, managed_media_backup_dir, preserved_media_dir = (
         _load_previous_flashcards(existing_folder)
     )
-    folder_id = existing_folder.id if existing_folder is not None else uuid4().hex
-    stored_folder_path = get_library_dir() / folder_id
+    stored_folder_path = get_library_dir() / (
+        existing_folder.id if existing_folder is not None else uuid4().hex
+    )
 
     try:
-        _copy_imported_folder_contents(source_folder, stored_folder_path)
+        _copy_imported_csv_contents(source_csv, stored_folder_path)
         if preserved_media_dir is not None and preserved_media_dir.exists():
             shutil.copytree(
                 preserved_media_dir,
@@ -747,43 +873,116 @@ def _import_folder_tree(
         if managed_media_backup_dir is not None:
             managed_media_backup_dir.cleanup()
 
-    if existing_folder is not None and existing_folder.parent_id == parent_id:
-        sort_order = existing_folder.sort_order
-    else:
-        sort_order = next_sort_order_by_parent.setdefault(
-            parent_id,
-            sum(1 for folder in persisted_folders if folder.parent_id == parent_id),
-        )
-        next_sort_order_by_parent[parent_id] = sort_order + 1
-
-    imported_folder = PersistedFolder(
-        id=folder_id,
-        name=source_folder.name or source_key,
+    imported_folder = _upsert_imported_folder(
+        persisted_folders,
+        existing_folder=existing_folder,
+        name=_csv_import_folder_name(source_csv),
         source_path=source_key,
-        stored_path=str(stored_folder_path),
+        stored_path=stored_folder_path,
         parent_id=parent_id,
-        sort_order=sort_order,
+        next_sort_order_by_parent=next_sort_order_by_parent,
+    )
+    return ImportedFolderPaths(
+        root_folder=imported_folder,
+        imported_folder_ids={imported_folder.id},
     )
 
-    updated_existing = False
-    for folder_index, folder in enumerate(persisted_folders):
-        if folder.id != folder_id:
-            continue
-        persisted_folders[folder_index] = imported_folder
-        updated_existing = True
-        break
-    if not updated_existing:
-        persisted_folders.append(imported_folder)
 
-    imported_folder_ids = {folder_id}
-    child_parent_id = folder_id
-    for child_directory in _sorted_child_directories(source_folder):
-        child_import = _import_folder_tree(
-            child_directory,
-            persisted_folders,
-            parent_id=child_parent_id,
-            next_sort_order_by_parent=next_sort_order_by_parent,
+def _import_folder_tree(
+    source_folder: Path,
+    persisted_folders: list[PersistedFolder],
+    *,
+    parent_id: str | None,
+    next_sort_order_by_parent: dict[str | None, int],
+    split_csv_into_subfolders: bool,
+) -> ImportedFolderPaths:
+    """Import one source folder and all descendants into managed storage.
+
+    Args:
+        source_folder: Source folder to import.
+        persisted_folders: Current folder registry that will be updated in place.
+        parent_id: Parent folder id for the source root.
+        next_sort_order_by_parent: Next available sibling positions by parent.
+        split_csv_into_subfolders: Whether directories with multiple CSV files
+            should create one child folder per CSV instead of consolidating them.
+
+    Returns:
+        ImportedFolderPaths: Imported root folder plus all imported descendant ids.
+    """
+    source_key = str(source_folder)
+    existing_folder = next(
+        (folder for folder in persisted_folders if folder.source_path == source_key),
+        None,
+    )
+    previous_flashcards, managed_media_backup_dir, preserved_media_dir = (
+        _load_previous_flashcards(existing_folder)
+    )
+    stored_folder_path = get_library_dir() / (
+        existing_folder.id if existing_folder is not None else uuid4().hex
+    )
+    source_csv_files = list_source_csv_files(source_folder)
+    should_split_source_csvs = split_csv_into_subfolders and len(source_csv_files) > 1
+
+    try:
+        _copy_imported_folder_contents(source_folder, stored_folder_path)
+        if should_split_source_csvs:
+            _remove_split_source_csv_copies(stored_folder_path, source_csv_files)
+        if preserved_media_dir is not None and preserved_media_dir.exists():
+            shutil.copytree(
+                preserved_media_dir,
+                get_managed_flashcard_media_dir(stored_folder_path),
+                dirs_exist_ok=True,
+            )
+        ensure_managed_flashcards(
+            stored_folder_path,
+            previous_flashcards=previous_flashcards,
         )
+    finally:
+        if managed_media_backup_dir is not None:
+            managed_media_backup_dir.cleanup()
+
+    imported_folder = _upsert_imported_folder(
+        persisted_folders,
+        existing_folder=existing_folder,
+        name=source_folder.name or source_key,
+        source_path=source_key,
+        stored_path=stored_folder_path,
+        parent_id=parent_id,
+        next_sort_order_by_parent=next_sort_order_by_parent,
+    )
+
+    imported_folder_ids = {imported_folder.id}
+    child_entries: list[tuple[str, str, Path]] = []
+    if should_split_source_csvs:
+        child_entries.extend(
+            (
+                _csv_import_folder_name(source_csv).casefold(),
+                "csv",
+                source_csv,
+            )
+            for source_csv in source_csv_files
+        )
+    child_entries.extend(
+        (child_directory.name.casefold(), "directory", child_directory)
+        for child_directory in _sorted_child_directories(source_folder)
+    )
+
+    for _, child_entry_type, child_path in sorted(child_entries):
+        if child_entry_type == "csv":
+            child_import = _import_csv_file(
+                child_path,
+                persisted_folders,
+                parent_id=imported_folder.id,
+                next_sort_order_by_parent=next_sort_order_by_parent,
+            )
+        else:
+            child_import = _import_folder_tree(
+                child_path,
+                persisted_folders,
+                parent_id=imported_folder.id,
+                next_sort_order_by_parent=next_sort_order_by_parent,
+                split_csv_into_subfolders=split_csv_into_subfolders,
+            )
         imported_folder_ids.update(child_import.imported_folder_ids)
 
     return ImportedFolderPaths(
@@ -796,12 +995,15 @@ def import_folder(
     source_folder: Path,
     *,
     parent_id: str | None = None,
+    split_csv_into_subfolders: bool = False,
 ) -> PersistedFolder:
     """Copy a selected folder into managed storage and persist metadata.
 
     Args:
         source_folder: Folder selected by the user.
         parent_id: Optional parent folder id when importing as a subfolder.
+        split_csv_into_subfolders: Whether directories with multiple CSV files
+            should create one child folder per CSV instead of consolidating them.
 
     Returns:
         PersistedFolder: Created or updated root folder entry.
@@ -816,12 +1018,40 @@ def import_folder(
 
     persisted_folders = list_persisted_folders()
     _validate_parent_folder(persisted_folders, parent_id)
+    existing_root = next(
+        (
+            folder
+            for folder in persisted_folders
+            if folder.source_path == str(resolved_source)
+        ),
+        None,
+    )
+    existing_subtree_ids = (
+        {existing_root.id, *child_folder_ids(existing_root.id)}
+        if existing_root is not None
+        else set()
+    )
     import_result = _import_folder_tree(
         resolved_source,
         persisted_folders,
         parent_id=parent_id,
         next_sort_order_by_parent={},
+        split_csv_into_subfolders=split_csv_into_subfolders,
     )
+    stale_folder_ids = existing_subtree_ids - import_result.imported_folder_ids
+    if stale_folder_ids:
+        for folder in [
+            candidate
+            for candidate in persisted_folders
+            if candidate.id in stale_folder_ids
+        ]:
+            stored_path = Path(folder.stored_path)
+            if stored_path.exists():
+                shutil.rmtree(stored_path)
+            delete_folder_progress(folder.id)
+        persisted_folders[:] = [
+            folder for folder in persisted_folders if folder.id not in stale_folder_ids
+        ]
     save_persisted_folders(persisted_folders)
     imported_root = _folder_by_id(
         list_persisted_folders(), import_result.root_folder.id
