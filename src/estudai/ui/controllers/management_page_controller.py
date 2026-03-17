@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QDialog, QListWidgetItem, QMessageBox, QWidget
 
 from estudai.services.csv_flashcards import replace_flashcards_in_folder
 from estudai.ui.application_state import StudyApplicationState
+from estudai.ui.message_box import MessageBoxPresenter
 from estudai.ui.pages import ManagementPage
 
 SelectedFolderItemsGetter = Callable[[], list[QListWidgetItem]]
@@ -69,6 +70,7 @@ class ManagementPageController:
         self._switch_to_management = switch_to_management
         self._switch_to_timer = switch_to_timer
         self._edit_dialog_factory = edit_dialog_factory
+        self._message_box = MessageBoxPresenter(parent)
         self._editing_folder_id: str | None = None
 
     @property
@@ -92,8 +94,7 @@ class ManagementPageController:
             self._open_for_sidebar_item(checked_items[0])
             return
 
-        QMessageBox.information(
-            self._parent,
+        self._message_box.show_information(
             "Manage flashcards",
             "Select one folder (or double-click one) to edit its flashcards.",
         )
@@ -108,8 +109,7 @@ class ManagementPageController:
         if not self._app_state.has_folder(folder_id):
             self._refresh_management_data(self._checked_folder_ids_getter())
         if not self._app_state.has_folder(folder_id):
-            QMessageBox.warning(
-                self._parent,
+            self._message_box.show_warning(
                 "Manage flashcards",
                 "This folder is unavailable. Try re-importing it.",
             )
@@ -128,19 +128,16 @@ class ManagementPageController:
         """Delete selected management rows after confirmation."""
         selected_rows = self._management_page.selected_table_rows()
         if not selected_rows:
-            QMessageBox.information(
-                self._parent,
+            self._message_box.show_information(
                 "Delete flashcards",
                 "Select one or more flashcards first.",
             )
             return
 
-        confirmation = QMessageBox.question(
-            self._parent,
+        confirmation = self._message_box.confirm_yes_no(
             "Delete flashcards",
             f"Delete {len(selected_rows)} selected flashcard(s)?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
+            default_button=QMessageBox.No,
         )
         if confirmation != QMessageBox.Yes:
             return
@@ -165,8 +162,7 @@ class ManagementPageController:
         """Edit the currently selected management row through the dialog."""
         selected_row = self._management_page.selected_flashcard_row()
         if selected_row is None:
-            QMessageBox.information(
-                self._parent,
+            self._message_box.show_information(
                 "Edit flashcard",
                 "Select exactly one flashcard first.",
             )
@@ -195,8 +191,7 @@ class ManagementPageController:
     def save_changes(self) -> None:
         """Persist management-page edits and return to the timer page."""
         if self._editing_folder_id is None:
-            QMessageBox.warning(
-                self._parent,
+            self._message_box.show_warning(
                 "Save flashcards",
                 "No folder selected for editing.",
             )
@@ -206,8 +201,7 @@ class ManagementPageController:
             self._editing_folder_id
         )
         if folder_path is None:
-            QMessageBox.warning(
-                self._parent,
+            self._message_box.show_warning(
                 "Save flashcards",
                 "Folder storage is unavailable. Please refresh and try again.",
             )
@@ -219,7 +213,7 @@ class ManagementPageController:
             )
             replace_flashcards_in_folder(folder_path, flashcard_rows)
         except ValueError as error:
-            QMessageBox.warning(self._parent, "Save flashcards", str(error))
+            self._message_box.show_warning("Save flashcards", str(error))
             return
 
         checked_ids = self._checked_folder_ids_getter()
@@ -236,8 +230,7 @@ class ManagementPageController:
     def _editing_folder_path(self) -> Path | None:
         """Return the managed folder path for the open management session."""
         if self._editing_folder_id is None:
-            QMessageBox.warning(
-                self._parent,
+            self._message_box.show_warning(
                 "Edit flashcard",
                 "No folder selected for editing.",
             )
@@ -246,8 +239,7 @@ class ManagementPageController:
             self._editing_folder_id
         )
         if folder_path is None:
-            QMessageBox.warning(
-                self._parent,
+            self._message_box.show_warning(
                 "Edit flashcard",
                 "Folder storage is unavailable. Please refresh and try again.",
             )

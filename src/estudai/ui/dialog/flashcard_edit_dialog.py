@@ -9,7 +9,6 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
-    QMessageBox,
     QPushButton,
     QPlainTextEdit,
     QVBoxLayout,
@@ -19,6 +18,7 @@ from estudai.services.csv_flashcards import (
     FLASHCARD_IMAGE_FILE_DIALOG_FILTER,
     normalize_flashcard_fields,
 )
+from estudai.ui.message_box import MessageBoxPresenter
 
 
 class FlashcardEditDialog(QDialog):
@@ -38,6 +38,7 @@ class FlashcardEditDialog(QDialog):
         self._base_folder_path = base_folder_path
         self._question_image_path = question_image_path
         self._answer_image_path = answer_image_path
+        self._message_box = MessageBoxPresenter(self)
         self._build_ui(question, answer)
 
     def _build_ui(self, question: str, answer: str) -> None:
@@ -118,7 +119,7 @@ class FlashcardEditDialog(QDialog):
                 answer_image_path=self._answer_image_path,
             )
         except ValueError as error:
-            QMessageBox.warning(self, "Edit flashcard", str(error))
+            self._message_box.show_warning("Edit flashcard", str(error))
             return
         self.question_edit.setPlainText(question)
         self.answer_edit.setPlainText(answer)

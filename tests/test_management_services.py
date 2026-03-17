@@ -415,6 +415,80 @@ def test_reimport_folder_without_split_removes_stale_csv_child_folders() -> None
     assert child_folder_ids(second_import.id) == set()
 
 
+def test_reimport_preserves_managed_images_when_source_rows_reorder(
+    tmp_path: Path,
+) -> None:
+    """Verify re-import keeps managed image paths for reordered source rows."""
+    source_folder = tmp_path / "biology"
+    source_folder.mkdir()
+    source_csv = source_folder / "cards.csv"
+    source_csv.write_text("Q1?,A1.\nQ2?,A2.\n", encoding="utf-8")
+    question_image = _write_png(tmp_path / "attached.png")
+
+    persisted_folder = import_folder(source_folder)
+    folder_path = Path(persisted_folder.stored_path)
+    updated_flashcards = update_flashcard_in_folder(
+        folder_path,
+        0,
+        "Q1?",
+        "A1.",
+        question_image_path=str(question_image),
+    )
+    first_flashcard = updated_flashcards[0]
+    managed_image_path = first_flashcard.question_image_path
+    assert managed_image_path is not None
+
+    source_csv.write_text("Q2?,A2.\nQ1?,A1.\n", encoding="utf-8")
+    reimported_folder = import_folder(source_folder)
+    reimported_flashcards = load_flashcards_from_folder(
+        Path(reimported_folder.stored_path)
+    )
+    flashcards_by_question = {
+        flashcard.question: flashcard for flashcard in reimported_flashcards
+    }
+
+    assert reimported_folder.id == persisted_folder.id
+    assert flashcards_by_question["Q1?"].stable_id == first_flashcard.stable_id
+    assert flashcards_by_question["Q1?"].question_image_path == managed_image_path
+    assert (Path(reimported_folder.stored_path) / managed_image_path).exists()
+
+
+def test_reimport_preserves_managed_images_for_same_source_line_edits(
+    tmp_path: Path,
+) -> None:
+    """Verify re-import keeps managed image paths for in-place source edits."""
+    source_folder = tmp_path / "biology"
+    source_folder.mkdir()
+    source_csv = source_folder / "cards.csv"
+    source_csv.write_text("Q1?,A1.\nQ2?,A2.\n", encoding="utf-8")
+    question_image = _write_png(tmp_path / "attached.png")
+
+    persisted_folder = import_folder(source_folder)
+    folder_path = Path(persisted_folder.stored_path)
+    updated_flashcards = update_flashcard_in_folder(
+        folder_path,
+        0,
+        "Q1?",
+        "A1.",
+        question_image_path=str(question_image),
+    )
+    first_flashcard = updated_flashcards[0]
+    managed_image_path = first_flashcard.question_image_path
+    assert managed_image_path is not None
+
+    source_csv.write_text("Q1 updated?,A1 updated.\nQ2?,A2.\n", encoding="utf-8")
+    reimported_folder = import_folder(source_folder)
+    reimported_flashcards = load_flashcards_from_folder(
+        Path(reimported_folder.stored_path)
+    )
+
+    assert reimported_folder.id == persisted_folder.id
+    assert reimported_flashcards[0].question == "Q1 updated?"
+    assert reimported_flashcards[0].stable_id == first_flashcard.stable_id
+    assert reimported_flashcards[0].question_image_path == managed_image_path
+    assert (Path(reimported_folder.stored_path) / managed_image_path).exists()
+
+
 def test_list_persisted_folders_handles_corrupt_registry_json() -> None:
     """Verify corrupt registry JSON does not crash folder listing."""
     registry_path = get_registry_path()

@@ -234,14 +234,7 @@ class MainWindow(QMainWindow):
             refresh_management_data=self._refresh_sidebar_data,
             switch_to_management=self.switch_to_management,
             switch_to_timer=self.switch_to_timer,
-            edit_dialog_factory=lambda question, answer, question_image_path, answer_image_path, folder_path: FlashcardEditDialog(
-                question,
-                answer,
-                question_image_path=question_image_path,
-                answer_image_path=answer_image_path,
-                base_folder_path=folder_path,
-                parent=self,
-            ),
+            edit_dialog_factory=self._create_flashcard_edit_dialog,
         )
         self._timer_controller = TimerPageController(
             parent=self,
@@ -252,23 +245,17 @@ class MainWindow(QMainWindow):
             iter_sidebar_folder_items=self._iter_sidebar_folder_items,
             set_navigation_visible=self.set_navigation_visible,
             switch_to_timer=self.switch_to_timer,
-            emit_show_flashcard=lambda flashcard: self.show_flashcard_requested.emit(
-                flashcard
-            ),
+            emit_show_flashcard=self._emit_show_flashcard_requested,
             refresh_sidebar_folder_progress_labels=(
                 self._refresh_sidebar_folder_progress_labels
             ),
-            start_flashcard_phase_timer=lambda duration_ms, callback: (
-                self._timer_controller.start_flashcard_phase_timer(
-                    duration_ms, callback
-                )
-            ),
+            start_flashcard_phase_timer=self._start_flashcard_phase_timer_from_controller,
             handle_flashcard_phase_timeout=(
-                lambda: self._timer_controller.handle_flashcard_phase_timeout()
+                self._handle_flashcard_phase_timeout_from_controller
             ),
-            handle_timer_cycle_completed=lambda: self.handle_timer_cycle_completed(),
-            load_settings=lambda: load_app_settings(),
-            default_sound_path_getter=lambda: get_default_notification_sound_path(),
+            handle_timer_cycle_completed=self.handle_timer_cycle_completed,
+            load_settings=self._load_current_app_settings,
+            default_sound_path_getter=self._get_default_notification_sound_path,
         )
         flashcard_phase_timer.timeout.connect(
             self._timer_controller.handle_flashcard_phase_timeout
@@ -279,33 +266,10 @@ class MainWindow(QMainWindow):
             app_state=self._app_state,
             runtime=self._timer_controller,
             checked_folder_ids_getter=self._get_checked_folder_ids,
-            handle_folder_data_changed=(
-                lambda preferred_checked_ids, preferred_current_folder_id: (
-                    self.handle_management_data_changed(
-                        preferred_checked_ids=preferred_checked_ids,
-                        preferred_current_folder_id=preferred_current_folder_id,
-                    )
-                )
-            ),
-            edit_dialog_factory=lambda question, answer, question_image_path, answer_image_path, folder_path: FlashcardEditDialog(
-                question,
-                answer,
-                question_image_path=question_image_path,
-                answer_image_path=answer_image_path,
-                base_folder_path=folder_path,
-                parent=self,
-            ),
+            handle_folder_data_changed=self._handle_folder_data_changed_from_controller,
+            edit_dialog_factory=self._create_flashcard_edit_dialog,
             show_warning_message=self._show_warning_message,
-            confirm_action=lambda title, message: (
-                QMessageBox.question(
-                    self,
-                    title,
-                    message,
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No,
-                )
-                == QMessageBox.Yes
-            ),
+            confirm_action=self._confirm_action,
         )
         self._sidebar_folder_operations_controller = SidebarFolderOperationsController(
             parent=self,
@@ -313,14 +277,7 @@ class MainWindow(QMainWindow):
             sidebar_folder_list=self.sidebar_folder_list,
             selected_folder_items_getter=self._selected_folder_items,
             checked_folder_ids_getter=self._get_checked_folder_ids,
-            handle_folder_data_changed=(
-                lambda preferred_checked_ids, preferred_current_folder_id: (
-                    self.handle_management_data_changed(
-                        preferred_checked_ids=preferred_checked_ids,
-                        preferred_current_folder_id=preferred_current_folder_id,
-                    )
-                )
-            ),
+            handle_folder_data_changed=self._handle_folder_data_changed_from_controller,
             refresh_sidebar_folder_progress_labels=(
                 self._refresh_sidebar_folder_progress_labels
             ),
@@ -338,22 +295,20 @@ class MainWindow(QMainWindow):
             sidebar=self.sidebar,
             sidebar_toggle_button=self.sidebar_toggle_button,
             settings_button=self.settings_button,
-            central_widget_getter=lambda: self.centralWidget(),
-            window_width_getter=lambda: self.width(),
-            timer_running_getter=lambda: self.timer_page.is_running,
+            central_widget_getter=self.centralWidget,
+            window_width_getter=self.width,
+            timer_running_getter=self._timer_page_is_running,
             stop_settings_preview=self.settings_page.stop_active_preview,
-            is_fullscreen=lambda: self.isFullScreen(),
+            is_fullscreen=self.isFullScreen,
             show_normal=self.showNormal,
             show_fullscreen=self.showFullScreen,
         )
         self._hotkey_controller = HotkeyController(
             parent=self,
             timer_page=self.timer_page,
-            current_page_getter=lambda: self.stacked_widget.currentWidget(),
+            current_page_getter=self.stacked_widget.currentWidget,
             hotkey_service=self._hotkey_service,
-            emit_hotkey_action=lambda action_value: (
-                self.global_hotkey_action_requested.emit(action_value)
-            ),
+            emit_hotkey_action=self._emit_global_hotkey_action_requested,
             show_warning_message=self._show_warning_message,
             toggle_fullscreen=self.toggle_fullscreen,
             exit_fullscreen=self.exit_fullscreen,
@@ -453,14 +408,10 @@ class MainWindow(QMainWindow):
         self.sidebar_folder_list.setItemDelegate(
             SidebarCheckboxDelegate(self.sidebar_folder_list)
         )
-        self.sidebar_folder_list.itemChanged.connect(
-            lambda item, column: self.handle_sidebar_item_changed(item, column)
-        )
-        self.sidebar_folder_list.itemClicked.connect(
-            lambda item, column: self.handle_sidebar_folder_click(item, column)
-        )
+        self.sidebar_folder_list.itemChanged.connect(self.handle_sidebar_item_changed)
+        self.sidebar_folder_list.itemClicked.connect(self.handle_sidebar_folder_click)
         self.sidebar_folder_list.itemDoubleClicked.connect(
-            lambda item, column: self.handle_sidebar_folder_double_click(item, column)
+            self.handle_sidebar_folder_double_click
         )
         self.sidebar_folder_list.itemSelectionChanged.connect(
             self._update_sidebar_reorder_buttons
@@ -672,9 +623,108 @@ class MainWindow(QMainWindow):
         """Refresh sidebar items while preserving the provided checked ids."""
         self.handle_management_data_changed(preferred_checked_ids=checked_ids)
 
+    def _handle_folder_data_changed_from_controller(
+        self,
+        preferred_checked_ids: set[str] | None,
+        preferred_current_folder_id: str | None,
+    ) -> None:
+        """Reload folder data while preserving controller-provided selections.
+
+        Args:
+            preferred_checked_ids: Checked folder ids to preserve after reload.
+            preferred_current_folder_id: Current folder id to keep selected.
+        """
+        self.handle_management_data_changed(
+            preferred_checked_ids=preferred_checked_ids,
+            preferred_current_folder_id=preferred_current_folder_id,
+        )
+
+    def _create_flashcard_edit_dialog(
+        self,
+        question: str,
+        answer: str,
+        question_image_path: str | None,
+        answer_image_path: str | None,
+        folder_path: Path,
+    ) -> FlashcardEditDialog:
+        """Create the shared flashcard edit dialog used across controllers.
+
+        Args:
+            question: Initial flashcard question text.
+            answer: Initial flashcard answer text.
+            question_image_path: Optional question image path.
+            answer_image_path: Optional answer image path.
+            folder_path: Base folder used to resolve relative image paths.
+
+        Returns:
+            FlashcardEditDialog: Configured edit dialog parented to the window.
+        """
+        return FlashcardEditDialog(
+            question,
+            answer,
+            question_image_path=question_image_path,
+            answer_image_path=answer_image_path,
+            base_folder_path=folder_path,
+            parent=self,
+        )
+
+    def _confirm_action(self, title: str, message: str) -> bool:
+        """Ask the user to confirm a destructive action.
+
+        Args:
+            title: Dialog title.
+            message: Confirmation prompt text.
+
+        Returns:
+            bool: True when the user confirms the action.
+        """
+        return (
+            QMessageBox.question(
+                self,
+                title,
+                message,
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            == QMessageBox.Yes
+        )
+
     def _show_warning_message(self, title: str, message: str) -> None:
         """Show a warning dialog using the main window as parent."""
         QMessageBox.warning(self, title, message)
+
+    def _emit_show_flashcard_requested(self, flashcard: Flashcard) -> None:
+        """Forward a flashcard request through the window signal seam.
+
+        Args:
+            flashcard: Flashcard selected for display.
+        """
+        self.show_flashcard_requested.emit(flashcard)
+
+    def _start_flashcard_phase_timer_from_controller(
+        self,
+        duration_ms: int,
+        callback: object,
+    ) -> None:
+        """Route phase-timer starts back through the timer controller.
+
+        Args:
+            duration_ms: Phase duration in milliseconds.
+            callback: Pending phase callback scheduled for timer completion.
+        """
+        self._timer_controller.start_flashcard_phase_timer(duration_ms, callback)
+
+    def _handle_flashcard_phase_timeout_from_controller(self) -> None:
+        """Route flashcard phase completion back through the timer controller."""
+        self._timer_controller.handle_flashcard_phase_timeout()
+
+    def _load_current_app_settings(self) -> AppSettings:
+        """Load application settings using the latest module-level implementation."""
+        return load_app_settings()
+
+    def _get_default_notification_sound_path(self) -> str:
+        """Resolve the default notification sound using the latest helper."""
+        return get_default_notification_sound_path()
 
     def _handle_settings_saved(self, _settings: AppSettings) -> None:
         """Return to the timer page after a successful settings save."""
@@ -710,9 +760,21 @@ class MainWindow(QMainWindow):
         """Apply live hotkeys before persisting settings to disk."""
         self._hotkey_controller.save_settings_from_page(settings)
 
+    def _emit_global_hotkey_action_requested(self, action_value: str) -> None:
+        """Forward a global hotkey action back onto the main-thread signal.
+
+        Args:
+            action_value: Serialized hotkey action enum value.
+        """
+        self.global_hotkey_action_requested.emit(action_value)
+
     def _handle_global_hotkey_action_requested(self, action_value: str) -> None:
         """Dispatch a hotkey action onto the same UI paths as button clicks."""
         self._hotkey_controller.handle_global_hotkey_action_requested(action_value)
+
+    def _timer_page_is_running(self) -> bool:
+        """Return whether the timer page countdown is currently active."""
+        return self.timer_page.is_running
 
     def _timer_page_is_active(self) -> bool:
         """Return whether timer hotkeys should be active for the current page."""

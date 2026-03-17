@@ -162,28 +162,15 @@ class TimerPageController:
                 self._timer_page.stop_timer()
                 return
         self._set_navigation_visible(not is_running)
-        if (
-            not is_running
-            and self._timer_page.flashcard_question_label.isHidden()
-            and self._timer_page.flashcard_answer_label.isHidden()
-        ):
+        if not is_running and self._is_flashcard_display_hidden():
             self.cancel_flashcard_phase_timer()
             self._flashcard_sequence.sequence_paused = False
 
     def handle_flashcard_pause_toggled(self, paused: bool) -> None:
         """Pause or resume flashcard phase timing."""
-        if (
-            self._timer_page.flashcard_question_label.isHidden()
-            and self._timer_page.flashcard_answer_label.isHidden()
-        ):
+        if self._is_flashcard_display_hidden():
             return
-        self._flashcard_sequence.handle_pause_toggle(
-            paused,
-            flashcard_visible=True,
-            pause_progress=self._timer_page.pause_flashcard_progress,
-            resume_progress=self._timer_page.resume_flashcard_progress,
-            on_timeout=self._handle_flashcard_phase_timeout,
-        )
+        self._apply_flashcard_pause_toggle(paused)
 
     def handle_flashcard_queue_shuffle_requested(self) -> None:
         """Shuffle the remaining queue for the active queue-based session."""
@@ -216,10 +203,7 @@ class TimerPageController:
 
     def handle_flashcard_phase_skip_requested(self) -> None:
         """Advance the current flashcard phase immediately."""
-        if (
-            self._timer_page.flashcard_question_label.isHidden()
-            and self._timer_page.flashcard_answer_label.isHidden()
-        ):
+        if self._is_flashcard_display_hidden():
             return
         was_paused = self._flashcard_sequence.sequence_paused
         callback = self._flashcard_sequence.skip_phase()
@@ -232,27 +216,42 @@ class TimerPageController:
 
     def reapply_paused_state_after_phase_skip(self) -> None:
         """Keep study flow paused after manually advancing a paused phase."""
-        flashcard_visible = not (
-            self._timer_page.flashcard_question_label.isHidden()
-            and self._timer_page.flashcard_answer_label.isHidden()
-        )
-        if flashcard_visible:
-            if (
-                self._timer_page.pause_button.isEnabled()
-                and self._timer_page.pause_button.text() == "Pause"
-            ):
+        if not self._is_flashcard_display_hidden():
+            if self._timer_pause_button_can_pause():
                 self._timer_page.pause_timer()
                 return
-            self._flashcard_sequence.handle_pause_toggle(
-                True,
-                flashcard_visible=True,
-                pause_progress=self._timer_page.pause_flashcard_progress,
-                resume_progress=self._timer_page.resume_flashcard_progress,
-                on_timeout=self._handle_flashcard_phase_timeout,
-            )
+            self._apply_flashcard_pause_toggle(True)
             return
         if self._timer_page.is_running and self._timer_page.pause_button.isEnabled():
             self._timer_page.pause_timer()
+
+    def _is_flashcard_display_hidden(self) -> bool:
+        """Return whether both flashcard labels are currently hidden."""
+        return (
+            self._timer_page.flashcard_question_label.isHidden()
+            and self._timer_page.flashcard_answer_label.isHidden()
+        )
+
+    def _apply_flashcard_pause_toggle(self, paused: bool) -> None:
+        """Apply pause or resume state to the active flashcard sequence.
+
+        Args:
+            paused: Whether the flashcard sequence should be paused.
+        """
+        self._flashcard_sequence.handle_pause_toggle(
+            paused,
+            flashcard_visible=True,
+            pause_progress=self._timer_page.pause_flashcard_progress,
+            resume_progress=self._timer_page.resume_flashcard_progress,
+            on_timeout=self._handle_flashcard_phase_timeout,
+        )
+
+    def _timer_pause_button_can_pause(self) -> bool:
+        """Return whether the timer pause button can enter paused state."""
+        return (
+            self._timer_page.pause_button.isEnabled()
+            and self._timer_page.pause_button.text() == "Pause"
+        )
 
     def reset_flashcard_sequence_order(self) -> None:
         """Reset sequential flashcard pointer to the first card."""
@@ -502,10 +501,7 @@ class TimerPageController:
         if (
             sequence_id != self._flashcard_sequence.active_sequence_id
             or self._timer_page.is_running
-            or (
-                self._timer_page.flashcard_question_label.isHidden()
-                and self._timer_page.flashcard_answer_label.isHidden()
-            )
+            or self._is_flashcard_display_hidden()
         ):
             return
         selected_score = self._pending_flashcard_score
@@ -587,12 +583,14 @@ class TimerPageController:
 
     def handle_flashcard_marked_correct(self) -> None:
         """Queue the selected Correct state until answer timeout."""
-        if self._study_session.current_flashcard() is None:
-            return
-        self._pending_flashcard_score = self._timer_page.selected_flashcard_score()
+        self._queue_selected_flashcard_score()
 
     def handle_flashcard_marked_wrong(self) -> None:
         """Queue the selected Wrong state until answer timeout."""
+        self._queue_selected_flashcard_score()
+
+    def _queue_selected_flashcard_score(self) -> None:
+        """Store the currently selected flashcard score for delayed apply."""
         if self._study_session.current_flashcard() is None:
             return
         self._pending_flashcard_score = self._timer_page.selected_flashcard_score()

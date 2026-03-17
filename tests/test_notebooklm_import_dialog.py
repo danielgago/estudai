@@ -94,7 +94,7 @@ def test_choose_csv_file_error_and_cancel_paths(
         ),
     )
     monkeypatch.setattr(
-        "estudai.ui.dialog.notebooklm_import_dialog.QMessageBox.warning",
+        "estudai.ui.message_box.MessageBoxPresenter.show_warning",
         lambda *_args, **_kwargs: warnings.append("warning"),
     )
     dialog._choose_csv_file()
@@ -113,7 +113,7 @@ def test_create_target_folder_paths(
     dialog = NotebookLMCsvImportDialog()
     warnings: list[str] = []
     monkeypatch.setattr(
-        "estudai.ui.dialog.notebooklm_import_dialog.QMessageBox.warning",
+        "estudai.ui.message_box.MessageBoxPresenter.show_warning",
         lambda *_args, **_kwargs: warnings.append("warning"),
     )
 

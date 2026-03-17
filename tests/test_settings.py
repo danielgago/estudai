@@ -523,7 +523,7 @@ def test_settings_page_blocks_save_when_spinbox_text_is_out_of_range(
     warnings: list[str] = []
     page.flashcard_probability_spinbox.lineEdit().setText("101")
     monkeypatch.setattr(
-        "estudai.ui.pages.settings_page.QMessageBox.warning",
+        "estudai.ui.message_box.MessageBoxPresenter.show_warning",
         lambda _parent, _title, message: warnings.append(message),
     )
 
@@ -545,7 +545,7 @@ def test_settings_page_blocks_duplicate_hotkeys(
     page.pause_resume_hotkey_edit.setKeySequence("Ctrl+Alt+Space")
     page.start_stop_hotkey_edit.setKeySequence("Ctrl+Alt+Space")
     monkeypatch.setattr(
-        "estudai.ui.pages.settings_page.QMessageBox.warning",
+        "estudai.ui.message_box.MessageBoxPresenter.show_warning",
         lambda _parent, _title, message: warnings.append(message),
     )
 
@@ -569,7 +569,7 @@ def test_settings_page_allows_empty_shortcuts(
     page.in_app_pause_resume_shortcut_edit.setKeySequence("")
     page.in_app_start_stop_shortcut_edit.setKeySequence("")
     monkeypatch.setattr(
-        "estudai.ui.pages.settings_page.QMessageBox.warning",
+        "estudai.ui.message_box.MessageBoxPresenter.show_warning",
         lambda _parent, _title, message: warnings.append(message),
     )
 
@@ -593,7 +593,7 @@ def test_settings_page_blocks_duplicate_in_app_shortcuts(
     page.in_app_pause_resume_shortcut_edit.setKeySequence("Ctrl+Space")
     page.in_app_start_stop_shortcut_edit.setKeySequence("Ctrl+Space")
     monkeypatch.setattr(
-        "estudai.ui.pages.settings_page.QMessageBox.warning",
+        "estudai.ui.message_box.MessageBoxPresenter.show_warning",
         lambda _parent, _title, message: warnings.append(message),
     )
 

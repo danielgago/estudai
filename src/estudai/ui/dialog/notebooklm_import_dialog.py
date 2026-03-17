@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QInputDialog,
     QLabel,
-    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -29,6 +28,7 @@ from estudai.services.notebooklm_import import (
     NotebookLMPreviewRow,
     parse_notebooklm_csv,
 )
+from estudai.ui.message_box import MessageBoxPresenter
 
 
 class NotebookLMCsvImportDialog(QDialog):
@@ -43,6 +43,7 @@ class NotebookLMCsvImportDialog(QDialog):
         super().__init__(parent)
         self._parsed_rows: list[NotebookLMPreviewRow] = []
         self._valid_rows: list[tuple[str, str]] = []
+        self._message_box = MessageBoxPresenter(self)
         self._build_ui()
         self._reload_folders()
         self._update_import_button_state()
@@ -170,7 +171,7 @@ class NotebookLMCsvImportDialog(QDialog):
             self._valid_rows = []
             self._render_preview_rows()
             self._update_import_button_state()
-            QMessageBox.warning(self, "Import NotebookLM CSV", str(error))
+            self._message_box.show_warning("Import NotebookLM CSV", str(error))
             return
         self._parsed_rows = parsed.rows
         self._valid_rows = parsed.valid_rows
@@ -189,7 +190,7 @@ class NotebookLMCsvImportDialog(QDialog):
         try:
             created_folder = create_managed_folder(folder_name)
         except ValueError as error:
-            QMessageBox.warning(self, "Create folder", str(error))
+            self._message_box.show_warning("Create folder", str(error))
             return
         self._reload_folders(preferred_folder_id=created_folder.id)
 

@@ -25,6 +25,7 @@ from estudai.services.folder_storage import (
 from estudai.services.study_progress import delete_folder_progress
 from estudai.ui.application_state import StudyApplicationState
 from estudai.ui.folder_context import merge_imported_flashcard_indexes
+from estudai.ui.message_box import MessageBoxPresenter
 from estudai.ui.sidebar_folders import SidebarFolderItem, SidebarFolderTreeWidget
 
 SelectedFolderItemsGetter = Callable[[], list[SidebarFolderItem]]
@@ -86,6 +87,7 @@ class SidebarFolderOperationsController:
         )
         self._load_folder_flashcards = load_folder_flashcards
         self._show_warning_message = show_warning_message
+        self._message_box = MessageBoxPresenter(parent)
 
     def add_folder(
         self,
@@ -223,16 +225,14 @@ class SidebarFolderOperationsController:
         if not folder_ids:
             return
         deleting_nested = any(child_folder_ids(folder_id) for folder_id in folder_ids)
-        confirmation = QMessageBox.question(
-            self._parent,
+        confirmation = self._message_box.confirm_yes_no(
             "Delete folder",
             (
                 f"Delete {len(folder_ids)} selected folder(s) and any nested subfolders?"
                 if deleting_nested
                 else f"Delete {len(folder_ids)} selected folder(s)?"
             ),
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
+            default_button=QMessageBox.No,
         )
         if confirmation != QMessageBox.Yes:
             return
@@ -432,12 +432,10 @@ class SidebarFolderOperationsController:
         """
         if not folder_ids:
             return
-        confirmation = QMessageBox.question(
-            self._parent,
+        confirmation = self._message_box.confirm_yes_no(
             title,
             message,
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
+            default_button=QMessageBox.No,
         )
         if confirmation != QMessageBox.Yes:
             return

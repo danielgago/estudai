@@ -431,56 +431,111 @@ def _reconcile_managed_rows(
         records,
         previous_flashcards=previous_flashcards,
     )
-    managed_rows: list[_ManagedFlashcardRow] = []
-
-    for record, matched_previous_index in zip(
-        records, matched_previous_indexes, strict=True
-    ):
-        previous_flashcard = (
-            previous_flashcards[matched_previous_index]
-            if matched_previous_index is not None
-            else None
+    return [
+        _managed_row_from_reconciled_record(
+            record,
+            previous_flashcard=(
+                previous_flashcards[matched_previous_index]
+                if matched_previous_index is not None
+                else None
+            ),
         )
-        stable_id = (
+        for record, matched_previous_index in zip(
+            records, matched_previous_indexes, strict=True
+        )
+    ]
+
+
+def _managed_row_from_reconciled_record(
+    record: _FlashcardRecord,
+    *,
+    previous_flashcard: Flashcard | None,
+) -> _ManagedFlashcardRow:
+    """Build one managed row after matching it to a previous flashcard.
+
+    Args:
+        record: New flashcard record being persisted.
+        previous_flashcard: Previously persisted flashcard matched for ID reuse.
+
+    Returns:
+        _ManagedFlashcardRow: Managed row with reconciled metadata.
+    """
+    origin_relative_path, origin_line = _resolved_origin_metadata(
+        record,
+        previous_flashcard=previous_flashcard,
+    )
+    return _ManagedFlashcardRow(
+        question=record.question,
+        answer=record.answer,
+        stable_id=(
             previous_flashcard.stable_id
             if previous_flashcard is not None and previous_flashcard.stable_id
             else uuid4().hex
-        )
-        origin_relative_path = record.origin_relative_path
-        if origin_relative_path is None and previous_flashcard is not None:
-            origin_relative_path = previous_flashcard.origin_relative_path
-        origin_line = record.origin_line
-        if origin_line is None and previous_flashcard is not None:
-            origin_line = previous_flashcard.origin_line
-        question_image_path = record.question_image_path
-        if (
-            question_image_path is _IMAGE_PATH_UNSPECIFIED
-            and previous_flashcard is not None
-        ):
-            question_image_path = previous_flashcard.question_image_path
-        elif question_image_path is _IMAGE_PATH_UNSPECIFIED:
-            question_image_path = None
-        answer_image_path = record.answer_image_path
-        if (
-            answer_image_path is _IMAGE_PATH_UNSPECIFIED
-            and previous_flashcard is not None
-        ):
-            answer_image_path = previous_flashcard.answer_image_path
-        elif answer_image_path is _IMAGE_PATH_UNSPECIFIED:
-            answer_image_path = None
-        managed_rows.append(
-            _ManagedFlashcardRow(
-                question=record.question,
-                answer=record.answer,
-                stable_id=stable_id,
-                origin_relative_path=origin_relative_path,
-                origin_line=origin_line,
-                question_image_path=question_image_path,
-                answer_image_path=answer_image_path,
-            )
-        )
+        ),
+        origin_relative_path=origin_relative_path,
+        origin_line=origin_line,
+        question_image_path=_resolved_image_path(
+            record.question_image_path,
+            previous_image_path=(
+                previous_flashcard.question_image_path
+                if previous_flashcard is not None
+                else None
+            ),
+        ),
+        answer_image_path=_resolved_image_path(
+            record.answer_image_path,
+            previous_image_path=(
+                previous_flashcard.answer_image_path
+                if previous_flashcard is not None
+                else None
+            ),
+        ),
+    )
 
-    return managed_rows
+
+def _resolved_origin_metadata(
+    record: _FlashcardRecord,
+    *,
+    previous_flashcard: Flashcard | None,
+) -> tuple[str | None, int | None]:
+    """Return reconciled origin metadata for one managed row.
+
+    Args:
+        record: New flashcard record being persisted.
+        previous_flashcard: Previously persisted flashcard matched for ID reuse.
+
+    Returns:
+        tuple[str | None, int | None]: Origin-relative path and line number to
+            persist for the row.
+    """
+    origin_relative_path = record.origin_relative_path
+    if origin_relative_path is None and previous_flashcard is not None:
+        origin_relative_path = previous_flashcard.origin_relative_path
+
+    origin_line = record.origin_line
+    if origin_line is None and previous_flashcard is not None:
+        origin_line = previous_flashcard.origin_line
+
+    return origin_relative_path, origin_line
+
+
+def _resolved_image_path(
+    image_path: str | None | object,
+    *,
+    previous_image_path: str | None,
+) -> str | None:
+    """Return the image path that should be persisted for one flashcard side.
+
+    Args:
+        image_path: Newly provided image path or the unspecified sentinel.
+        previous_image_path: Previously persisted managed image path, when any.
+
+    Returns:
+        str | None: The image path that should be stored for the row.
+    """
+    if image_path is _IMAGE_PATH_UNSPECIFIED:
+        return previous_image_path
+    return image_path
 
 
 def _match_previous_flashcards(
@@ -494,12 +549,47 @@ def _match_previous_flashcards(
     previous_records = [
         _record_from_flashcard(flashcard) for flashcard in previous_flashcards
     ]
-
-    key_builders = (
-        _content_in_source_key,
-        _content_key,
-        _origin_line_key,
+    _apply_flashcard_matching_passes(
+        records,
+        previous_records=previous_records,
+        previous_flashcards=previous_flashcards,
+        matched_previous_indexes=matched_previous_indexes,
+        used_previous_indexes=used_previous_indexes,
+        key_builders=(
+            _content_in_source_key,
+            _content_key,
+            _origin_line_key,
+        ),
     )
+    _match_flashcard_records_by_index(
+        records,
+        previous_flashcards=previous_flashcards,
+        matched_previous_indexes=matched_previous_indexes,
+        used_previous_indexes=used_previous_indexes,
+    )
+
+    return matched_previous_indexes
+
+
+def _apply_flashcard_matching_passes(
+    records: list[_FlashcardRecord],
+    *,
+    previous_records: list[_FlashcardRecord],
+    previous_flashcards: list[Flashcard],
+    matched_previous_indexes: list[int | None],
+    used_previous_indexes: set[int],
+    key_builders: tuple,
+) -> None:
+    """Apply the ordered key-based matching passes used for ID reconciliation.
+
+    Args:
+        records: New flashcard records that need stable-ID matches.
+        previous_records: Normalized previous flashcard records.
+        previous_flashcards: Previous flashcards available for ID reuse.
+        matched_previous_indexes: Mutable output list of matched indexes.
+        used_previous_indexes: Mutable set of already-consumed previous indexes.
+        key_builders: Ordered key builders defining the reconciliation passes.
+    """
     for key_builder in key_builders:
         _match_flashcard_records(
             records,
@@ -510,6 +600,22 @@ def _match_previous_flashcards(
             key_builder=key_builder,
         )
 
+
+def _match_flashcard_records_by_index(
+    records: list[_FlashcardRecord],
+    *,
+    previous_flashcards: list[Flashcard],
+    matched_previous_indexes: list[int | None],
+    used_previous_indexes: set[int],
+) -> None:
+    """Apply the final index-based fallback matching pass.
+
+    Args:
+        records: New flashcard records that need stable-ID matches.
+        previous_flashcards: Previous flashcards available for ID reuse.
+        matched_previous_indexes: Mutable output list of matched indexes.
+        used_previous_indexes: Mutable set of already-consumed previous indexes.
+    """
     for record_index, _record in enumerate(records):
         if matched_previous_indexes[record_index] is not None:
             continue
@@ -520,8 +626,6 @@ def _match_previous_flashcards(
             continue
         matched_previous_indexes[record_index] = record_index
         used_previous_indexes.add(record_index)
-
-    return matched_previous_indexes
 
 
 def _match_flashcard_records(
