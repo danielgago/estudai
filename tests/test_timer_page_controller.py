@@ -164,7 +164,7 @@ def test_show_flashcard_popup_uses_host_timer_callback(app: QApplication) -> Non
                 flashcards=[flashcard],
                 parent_id="science",
                 selected_indexes={0},
-            )
+            ),
         ]
     )
     app_state.refresh_selection({"bio"})
