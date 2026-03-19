@@ -62,14 +62,17 @@ def _flashcard(
     line_number: int,
     *,
     stable_id: str,
+    source_file: Path | None = None,
+    origin_relative_path: str | None = None,
 ) -> Flashcard:
     """Create a flashcard fixture payload."""
     return Flashcard(
         question=question,
         answer=answer,
-        source_file=Path("cards.csv"),
+        source_file=source_file or Path("cards.csv"),
         source_line=line_number,
         stable_id=stable_id,
+        origin_relative_path=origin_relative_path,
     )
 
 
@@ -136,13 +139,42 @@ def test_show_flashcard_popup_uses_host_timer_callback(app: QApplication) -> Non
     start_phase_calls: list[int] = []
     navigation_values: list[bool] = []
     switch_calls: list[str] = []
+    app_state = StudyApplicationState()
+    flashcard = _flashcard(
+        "Question?",
+        "Answer.",
+        1,
+        stable_id="bio-1",
+        source_file=Path("/tmp/bio/_estudai_flashcards.csv"),
+        origin_relative_path="cards.csv",
+    )
+    app_state.replace_folders(
+        [
+            FolderLibraryState(
+                folder_id="science",
+                folder_name="Science",
+                folder_path=Path("/tmp/science"),
+                flashcards=[],
+                is_flashcard_set=False,
+            ),
+            FolderLibraryState(
+                folder_id="bio",
+                folder_name="Biology",
+                folder_path=Path("/tmp/bio"),
+                flashcards=[flashcard],
+                parent_id="science",
+                selected_indexes={0},
+            )
+        ]
+    )
+    app_state.refresh_selection({"bio"})
     controller = TimerPageController(
         parent=QWidget(),
         timer_page=timer_page,
-        app_state=StudyApplicationState(),
+        app_state=app_state,
         flashcard_phase_timer=QTimer(),
         flashcard_sound_player=None,
-        iter_sidebar_folder_items=lambda: [],
+        iter_sidebar_folder_items=lambda: [_FakeSidebarItem("bio", checked=True)],
         set_navigation_visible=lambda visible: navigation_values.append(visible),
         switch_to_timer=lambda: switch_calls.append("timer"),
         emit_show_flashcard=lambda _flashcard: None,
@@ -155,12 +187,16 @@ def test_show_flashcard_popup_uses_host_timer_callback(app: QApplication) -> Non
         load_settings=_settings,
         default_sound_path_getter=lambda: "",
     )
-    flashcard = _flashcard("Question?", "Answer.", 1, stable_id="bio-1")
+
+    assert controller.start_study_session() is True
 
     controller.show_flashcard_popup(flashcard)
 
     assert controller.visible_flashcard == flashcard
+    assert controller.visible_flashcard_folder_id == "bio"
     assert timer_page.flashcard_question_label.text() == "Question?"
+    assert timer_page.current_flashcard_origin_path() == "Science / Biology"
+    assert timer_page.flashcard_origin_label.text() == "Science / Biology"
     assert start_phase_calls == [2000]
     assert switch_calls == ["timer"]
     assert navigation_values == [False]

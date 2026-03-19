@@ -12,7 +12,7 @@ from PySide6.QtCore import (
     QTimer,
     Signal,
 )
-from PySide6.QtGui import QColor, QFont, QPalette, QPixmap, QTextDocument
+from PySide6.QtGui import QColor, QFont, QMouseEvent, QPalette, QPixmap, QTextDocument
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -35,6 +35,22 @@ from estudai.ui.utils import (
 )
 
 
+class _ClickableLabel(QLabel):
+    """QLabel variant that emits a signal when the user clicks it."""
+
+    clicked = Signal()
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        """Emit ``clicked`` on left-button release, then continue default handling.
+
+        Args:
+            event: Mouse event delivered by Qt.
+        """
+        if event.button() == Qt.LeftButton and self.isEnabled():
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
+
+
 class TimerPage(QWidget):
     """Timer page for study sessions."""
 
@@ -45,6 +61,7 @@ class TimerPage(QWidget):
     flashcard_phase_skip_requested = Signal()
     flashcard_marked_correct = Signal()
     flashcard_marked_wrong = Signal()
+    flashcard_origin_requested = Signal()
     flashcard_edit_requested = Signal()
     flashcard_delete_requested = Signal()
     stop_requested = Signal()
@@ -75,6 +92,8 @@ class TimerPage(QWidget):
         self._current_flashcard_answer: str = ""
         self._current_question_image_path: str | None = None
         self._current_answer_image_path: str | None = None
+        self._current_flashcard_origin_path: str | None = None
+        self._flashcard_origin_clickable = False
         self._folder_name: str = "No folders selected"
         self._card_count: int = 0
         self._session_progress_text: str = ""
@@ -115,6 +134,28 @@ class TimerPage(QWidget):
         flashcard_layout = QVBoxLayout(flashcard_view)
         flashcard_layout.setContentsMargins(0, 0, 0, 0)
         flashcard_layout.setSpacing(10)
+        self.flashcard_header_container = QWidget()
+        flashcard_header_layout = QHBoxLayout(self.flashcard_header_container)
+        flashcard_header_layout.setContentsMargins(0, 0, 0, 0)
+        flashcard_header_layout.setSpacing(10)
+        self.flashcard_origin_label = _ClickableLabel("")
+        self.flashcard_origin_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self.flashcard_origin_label.setWordWrap(True)
+        self.flashcard_origin_label.setTextFormat(Qt.PlainText)
+        self.flashcard_origin_label.setTextInteractionFlags(Qt.NoTextInteraction)
+        self.flashcard_origin_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Minimum,
+        )
+        self.flashcard_origin_label.setVisible(False)
+        self.flashcard_origin_label.clicked.connect(
+            self._handle_flashcard_origin_clicked
+        )
+        origin_label_font = QFont(self.flashcard_origin_label.font())
+        origin_label_font.setPointSize(11)
+        self.flashcard_origin_label.setFont(origin_label_font)
+        flashcard_header_layout.addWidget(self.flashcard_origin_label, 1)
+        flashcard_header_layout.addStretch(1)
         self.flashcard_actions_container = QWidget()
         self._retain_size_when_hidden(self.flashcard_actions_container)
         flashcard_actions_layout = QHBoxLayout(self.flashcard_actions_container)
@@ -181,12 +222,8 @@ class TimerPage(QWidget):
         flashcard_pause_actions_layout.addWidget(self.delete_flashcard_button)
         flashcard_pause_actions_layout.addStretch(1)
         self.flashcard_pause_actions_container.setVisible(False)
-        flashcard_layout.addWidget(self.flashcard_pause_actions_container)
-
-        flashcard_layout.setAlignment(
-            self.flashcard_pause_actions_container,
-            Qt.AlignTop | Qt.AlignRight,
-        )
+        flashcard_header_layout.addWidget(self.flashcard_pause_actions_container)
+        flashcard_layout.addWidget(self.flashcard_header_container)
         self.flashcard_content_widget = QWidget()
         self.flashcard_content_widget.setSizePolicy(
             QSizePolicy.Policy.Expanding,
@@ -741,12 +778,45 @@ class TimerPage(QWidget):
         self._update_flashcard_content_presentation()
         self._start_flashcard_progress(display_duration_seconds)
 
+    def set_flashcard_origin(
+        self,
+        origin_path: str | None,
+        *,
+        clickable: bool,
+    ) -> None:
+        """Show or hide the active flashcard origin path in the header.
+
+        Args:
+            origin_path: Full origin path for the visible flashcard, if known.
+            clickable: Whether clicking the path should trigger in-app navigation.
+        """
+        self._current_flashcard_origin_path = origin_path
+        self._flashcard_origin_clickable = clickable and bool(origin_path)
+        if not origin_path:
+            self.flashcard_origin_label.clear()
+            self.flashcard_origin_label.setToolTip("")
+            self.flashcard_origin_label.setCursor(Qt.ArrowCursor)
+            self.flashcard_origin_label.setVisible(False)
+            return
+        self.flashcard_origin_label.setText(origin_path)
+        self.flashcard_origin_label.setToolTip(origin_path)
+        self.flashcard_origin_label.setCursor(
+            Qt.PointingHandCursor if clickable else Qt.ArrowCursor
+        )
+        self.flashcard_origin_label.setVisible(True)
+
+    def current_flashcard_origin_path(self) -> str | None:
+        """Return the origin path shown for the current flashcard."""
+        return self._current_flashcard_origin_path
+
     def clear_flashcard_display(self) -> None:
         """Hide flashcard question/answer and show timer display."""
         self._current_flashcard_question = ""
         self._current_flashcard_answer = ""
         self._current_question_image_path = None
         self._current_answer_image_path = None
+        self._current_flashcard_origin_path = None
+        self._flashcard_origin_clickable = False
         self.flashcard_question_label.setText("")
         self.flashcard_question_label.setVisible(False)
         self.flashcard_question_image_label.clear()
@@ -755,6 +825,10 @@ class TimerPage(QWidget):
         self.flashcard_answer_label.setVisible(False)
         self.flashcard_answer_image_label.clear()
         self.flashcard_answer_image_label.setVisible(False)
+        self.flashcard_origin_label.clear()
+        self.flashcard_origin_label.setToolTip("")
+        self.flashcard_origin_label.setCursor(Qt.ArrowCursor)
+        self.flashcard_origin_label.setVisible(False)
         self._hide_copy_feedback()
         self.content_stack.setCurrentIndex(0)
         self.set_flashcard_controls_active(False)
@@ -1264,6 +1338,11 @@ class TimerPage(QWidget):
         if self.wrong_button.isChecked():
             self.correct_button.setChecked(False)
         self.flashcard_marked_wrong.emit()
+
+    def _handle_flashcard_origin_clicked(self) -> None:
+        """Emit the flashcard-origin navigation request."""
+        if self._flashcard_origin_clickable:
+            self.flashcard_origin_requested.emit()
 
     def _start_flashcard_progress(self, duration_seconds: int) -> None:
         """Animate progress bar for flashcard phase durations.

@@ -214,3 +214,30 @@ class StudyApplicationState:
             for child_id, parent_id in self.parent_folder_ids_by_id.items()
             if parent_id == folder_id
         ]
+
+    def folder_display_path(self, folder_id: str) -> str | None:
+        """Return one folder path using the sidebar hierarchy labels.
+
+        Args:
+            folder_id: Folder identifier to resolve.
+
+        Returns:
+            str | None: Slash-delimited folder path as shown in the sidebar, or
+            None when the folder is unavailable.
+        """
+        if folder_id not in self.folder_names_by_id:
+            return None
+        path_parts: list[str] = []
+        current_folder_id: str | None = folder_id
+        visited_folder_ids: set[str] = set()
+        while current_folder_id is not None:
+            if current_folder_id in visited_folder_ids:
+                break
+            visited_folder_ids.add(current_folder_id)
+            folder_name = self.folder_names_by_id.get(current_folder_id)
+            if folder_name is None:
+                break
+            path_parts.append(folder_name)
+            current_folder_id = self.parent_folder_ids_by_id.get(current_folder_id)
+        path_parts.reverse()
+        return " / ".join(path_parts)

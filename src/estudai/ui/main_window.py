@@ -335,6 +335,9 @@ class MainWindow(QMainWindow):
         self.timer_page.flashcard_marked_wrong.connect(
             self.handle_flashcard_marked_wrong
         )
+        self.timer_page.flashcard_origin_requested.connect(
+            self.handle_flashcard_origin_requested
+        )
         self.timer_page.flashcard_edit_requested.connect(
             self.handle_flashcard_edit_requested
         )
@@ -856,6 +859,18 @@ class MainWindow(QMainWindow):
     def handle_flashcard_delete_requested(self) -> None:
         """Delete the paused flashcard and remove it from the active session."""
         self._session_mutation_controller.handle_flashcard_delete_requested()
+
+    def handle_flashcard_origin_requested(self) -> None:
+        """Open management for the set that owns the visible flashcard."""
+        folder_id = self._timer_controller.visible_flashcard_folder_id
+        if folder_id is None:
+            return
+        folder_name = self._app_state.folder_names_by_id.get(folder_id)
+        if folder_name is None:
+            return
+        self.handle_timer_stop_requested()
+        self.timer_page.stop_timer()
+        self.open_management_for_folder(folder_id, folder_name)
 
     def toggle_sidebar(self) -> None:
         """Show or hide the left sidebar."""

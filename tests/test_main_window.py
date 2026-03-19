@@ -1656,6 +1656,43 @@ def test_flashcard_sequence_uses_default_sound_for_both_phases_when_unset(
     assert player.source_values == [str(default_sound_path), str(default_sound_path)]
 
 
+def test_flashcard_origin_click_opens_management_for_visible_card(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify clicking the visible flashcard origin opens that set in management."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text(
+        "DNA?,Genetic material.\n", encoding="utf-8"
+    )
+    assert window.add_folder(biology_folder) is True
+    folder_item = window.sidebar_folder_list.item(0)
+    folder_id = folder_item.data(Qt.UserRole)
+    assert isinstance(folder_id, str)
+    monkeypatch.setattr(
+        window._timer_controller,
+        "start_flashcard_phase_timer",
+        lambda _delay, _callback: None,
+    )
+
+    assert window._timer_controller.start_study_session() is True
+    flashcard = window._timer_controller.next_flashcard_for_display()
+    assert flashcard is not None
+
+    window.show_flashcard_popup(flashcard)
+
+    assert window.timer_page.current_flashcard_origin_path() == "biology"
+    assert window._timer_controller.visible_flashcard_folder_id == folder_id
+
+    window.timer_page.flashcard_origin_label.clicked.emit()
+
+    assert window.stacked_widget.currentWidget() is window.management_page
+    assert window._management_controller.editing_folder_id == folder_id
+    assert window._timer_controller.study_session.active is False
+    assert window.timer_page.flashcard_question_label.isHidden() is True
+
+
 def test_flashcard_sequence_stops_sound_when_question_phase_ends(
     app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
