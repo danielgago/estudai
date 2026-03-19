@@ -28,3 +28,19 @@ def test_render_inline_latex_html_decodes_html_entities_without_math() -> None:
     rendered = render_inline_latex_html("A &gt; B and it&#x27;s correct.")
 
     assert rendered == "A > B and it's correct."
+
+
+def test_render_inline_latex_html_keeps_unbraced_ionic_charges_compact() -> None:
+    """Verify unbraced ionic charges do not absorb following punctuation or words."""
+    rendered = render_inline_latex_html(r"Transportador $Na^+, K^+ - ATPase$.")
+
+    assert "Na<sup>+</sup>, K<sup>+</sup> - ATPase" in rendered
+
+
+def test_render_inline_latex_html_limits_unbraced_scripts_to_one_character() -> None:
+    """Verify unbraced script markers consume only a single operand character."""
+    rendered = render_inline_latex_html(r"Moléculas $X^-test$, $H_2O$ e $10^-3$.")
+
+    assert "X<sup>-</sup>test" in rendered
+    assert "H<sub>2</sub>O" in rendered
+    assert "10<sup>-3</sup>" in rendered
