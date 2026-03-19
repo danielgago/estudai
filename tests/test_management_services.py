@@ -358,7 +358,9 @@ def test_import_folder_preserves_nested_structure() -> None:
     }
 
 
-def test_list_persisted_folders_migrates_legacy_mixed_folder_without_losing_cards() -> None:
+def test_list_persisted_folders_migrates_legacy_mixed_folder_without_losing_cards() -> (
+    None
+):
     """Verify mixed legacy folders migrate direct cards into an auto-created child set."""
     library_dir = get_library_dir()
     root_folder_id = "root-folder"
@@ -418,13 +420,19 @@ def test_list_persisted_folders_migrates_legacy_mixed_folder_without_losing_card
     assert migrated_child.parent_id == migrated_root.id
     assert migrated_child.is_flashcard_set is True
     assert load_flashcards_from_folder(root_folder_path) == []
-    assert [flashcard.question for flashcard in load_flashcards_from_folder(root_folder_path)] == []
     assert [
         flashcard.question
-        for flashcard in load_flashcards_from_folder(Path(migrated_root_cards.stored_path))
+        for flashcard in load_flashcards_from_folder(root_folder_path)
+    ] == []
+    assert [
+        flashcard.question
+        for flashcard in load_flashcards_from_folder(
+            Path(migrated_root_cards.stored_path)
+        )
     ] == ["Root?"]
     assert [
-        flashcard.question for flashcard in load_flashcards_from_folder(child_folder_path)
+        flashcard.question
+        for flashcard in load_flashcards_from_folder(child_folder_path)
     ] == ["Child?"]
     assert load_folder_progress(root_folder_id) == {}
     assert load_folder_progress(migrated_root_cards.id) == {
