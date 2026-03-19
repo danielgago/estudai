@@ -25,38 +25,15 @@ class SidebarFolderItem(QTreeWidgetItem):
     """Tree item that preserves the sidebar's previous list-style API."""
 
     def text(self, column: int = 0) -> str:  # type: ignore[override]
-        """Return item text for the provided column.
-
-        Args:
-            column: Tree column index.
-
-        Returns:
-            str: Item text.
-        """
         return super().text(column)
 
     def setText(self, column_or_text: int | str, text: str | None = None) -> None:  # type: ignore[override]
-        """Set item text using either tree-style or list-style calling.
-
-        Args:
-            column_or_text: Column index or text when using the default column.
-            text: Optional text used with the explicit column overload.
-        """
         if text is None:
             super().setText(0, str(column_or_text))
             return
         super().setText(int(column_or_text), text)
 
     def data(self, column_or_role: int, role: int | None = None):  # type: ignore[override]
-        """Return item data using either tree-style or list-style calling.
-
-        Args:
-            column_or_role: Column index or item-data role.
-            role: Optional explicit item-data role.
-
-        Returns:
-            object: Stored item data.
-        """
         if role is None:
             return super().data(0, column_or_role)
         return super().data(column_or_role, role)
@@ -67,50 +44,21 @@ class SidebarFolderItem(QTreeWidgetItem):
         role_or_value: int | object,
         value: object | None = None,
     ) -> None:
-        """Set item data using either tree-style or list-style calling.
-
-        Args:
-            column_or_role: Column index or item-data role.
-            role_or_value: Explicit role or the value for the default column.
-            value: Optional explicit value for the explicit-column overload.
-        """
         if value is None:
             super().setData(0, column_or_role, role_or_value)
             return
         super().setData(column_or_role, int(role_or_value), value)
 
     def font(self, column: int = 0) -> QFont:  # type: ignore[override]
-        """Return item font for the provided column.
-
-        Args:
-            column: Tree column index.
-
-        Returns:
-            QFont: Item font.
-        """
         return super().font(column)
 
     def setFont(self, column_or_font: int | QFont, font: QFont | None = None) -> None:  # type: ignore[override]
-        """Set item font using either tree-style or list-style calling.
-
-        Args:
-            column_or_font: Column index or font for the default column.
-            font: Optional explicit font when a column index is provided.
-        """
         if font is None:
             super().setFont(0, column_or_font)
             return
         super().setFont(int(column_or_font), font)
 
     def checkState(self, column: int = 0) -> Qt.CheckState:  # type: ignore[override]
-        """Return item check state for the provided column.
-
-        Args:
-            column: Tree column index.
-
-        Returns:
-            Qt.CheckState: Item check state.
-        """
         return super().checkState(column)
 
     def setCheckState(
@@ -118,12 +66,6 @@ class SidebarFolderItem(QTreeWidgetItem):
         column_or_state: int | Qt.CheckState,
         state: Qt.CheckState | None = None,
     ) -> None:  # type: ignore[override]
-        """Set check state using either tree-style or list-style calling.
-
-        Args:
-            column_or_state: Column index or check state for the default column.
-            state: Optional explicit state when a column index is provided.
-        """
         if state is None:
             super().setCheckState(0, Qt.CheckState(column_or_state))
             return
@@ -144,19 +86,11 @@ class SidebarFolderTreeWidget(QTreeWidget):
         self._dragged_folder_id: str | None = None
 
     def setSpacing(self, spacing: int) -> None:
-        """Store list-style spacing requests for compatibility.
-
-        Args:
-            spacing: Requested row spacing.
-        """
+        """Store list-style spacing requests for compatibility."""
         self._spacing = spacing
 
     def iter_items(self) -> Iterator[SidebarFolderItem]:
-        """Yield tree items in pre-order traversal.
-
-        Yields:
-            SidebarFolderItem: Sidebar items in visible tree order.
-        """
+        """Yield tree items in pre-order traversal."""
         for top_level_index in range(self.topLevelItemCount()):
             top_level_item = self.topLevelItem(top_level_index)
             if isinstance(top_level_item, SidebarFolderItem):
@@ -166,14 +100,7 @@ class SidebarFolderTreeWidget(QTreeWidget):
         self,
         item: SidebarFolderItem,
     ) -> Iterator[SidebarFolderItem]:
-        """Yield one item followed by all descendants.
-
-        Args:
-            item: Root item of the subtree.
-
-        Yields:
-            SidebarFolderItem: Items in subtree pre-order.
-        """
+        """Yield one item followed by all descendants in pre-order."""
         yield item
         for child_index in range(item.childCount()):
             child_item = item.child(child_index)
@@ -181,22 +108,11 @@ class SidebarFolderTreeWidget(QTreeWidget):
                 yield from self._iter_subtree_items(child_item)
 
     def count(self) -> int:
-        """Return the total number of items in the tree.
-
-        Returns:
-            int: Pre-order item count.
-        """
+        """Return the total number of items in the tree."""
         return sum(1 for _ in self.iter_items())
 
     def item(self, index: int) -> SidebarFolderItem | None:
-        """Return one item by its pre-order index.
-
-        Args:
-            index: Zero-based pre-order position.
-
-        Returns:
-            SidebarFolderItem | None: Matching item when present.
-        """
+        """Return one item by its pre-order index."""
         if index < 0:
             return None
         for current_index, item in enumerate(self.iter_items()):
@@ -205,46 +121,23 @@ class SidebarFolderTreeWidget(QTreeWidget):
         return None
 
     def row(self, item: SidebarFolderItem) -> int:
-        """Return the pre-order row for one item.
-
-        Args:
-            item: Item to locate.
-
-        Returns:
-            int: Pre-order row, or -1 when not present.
-        """
+        """Return the pre-order row for one item, or -1 when not present."""
         for current_index, current_item in enumerate(self.iter_items()):
             if current_item is item:
                 return current_index
         return -1
 
     def addItem(self, item: SidebarFolderItem) -> None:
-        """Add one item as a top-level entry.
-
-        Args:
-            item: Item to add.
-        """
         self.addTopLevelItem(item)
 
     def setCurrentRow(self, row: int) -> None:
-        """Select the item at the provided pre-order row.
-
-        Args:
-            row: Zero-based pre-order row.
-        """
+        """Select the item at the provided pre-order row."""
         item = self.item(row)
         if item is not None:
             self.setCurrentItem(item)
 
     def folder_item_by_id(self, folder_id: str) -> SidebarFolderItem | None:
-        """Return one folder item by id.
-
-        Args:
-            folder_id: Folder identifier to locate.
-
-        Returns:
-            SidebarFolderItem | None: Matching folder item when present.
-        """
+        """Return one folder item by id."""
         for item in self.iter_items():
             if item.data(Qt.UserRole) == folder_id:
                 return item
@@ -364,38 +257,32 @@ class SidebarFolderController:
         Yields:
             SidebarFolderItem: Descendant folder items.
         """
-        for child_index in range(folder_item.childCount()):
-            child_item = folder_item.child(child_index)
-            if not isinstance(child_item, SidebarFolderItem):
-                continue
-            if self.is_folder_item(child_item):
-                yield child_item
-            yield from self.iter_descendant_folder_items(child_item)
+        for item in self._folder_list._iter_subtree_items(folder_item):
+            if item is not folder_item and self.is_folder_item(item):
+                yield item
 
     def clear_rename_tracking(self) -> None:
         """Clear inline-rename tracking state."""
         self._renaming_folder_id = None
         self._renaming_original_name = None
 
-    def checked_folder_ids(self) -> set[str]:
-        """Return ids for currently checked folders."""
+    def _folder_ids_where(self, predicate: Callable[[SidebarFolderItem], bool]) -> set[str]:
+        """Return folder ids matching a predicate."""
         return {
             folder_id
             for item in self.iter_folder_items()
-            if item.checkState() == Qt.Checked
+            if predicate(item)
             for folder_id in [item.data(Qt.UserRole)]
             if folder_id is not None
         }
 
+    def checked_folder_ids(self) -> set[str]:
+        """Return ids for currently checked folders."""
+        return self._folder_ids_where(lambda item: item.checkState() == Qt.Checked)
+
     def expanded_folder_ids(self) -> set[str]:
         """Return ids for folders that are currently expanded."""
-        return {
-            folder_id
-            for item in self.iter_folder_items()
-            if item.isExpanded()
-            for folder_id in [item.data(Qt.UserRole)]
-            if folder_id is not None
-        }
+        return self._folder_ids_where(lambda item: item.isExpanded())
 
     def folder_item_name(self, item: SidebarFolderItem) -> str:
         """Return folder name without flashcard count suffix."""

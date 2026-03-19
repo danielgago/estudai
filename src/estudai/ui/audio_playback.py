@@ -104,7 +104,7 @@ class TimedAudioPlaybackController(QObject):
         if callable(disconnect):
             try:
                 disconnect(self._handle_playback_state_changed)
-            except RuntimeError, TypeError:
+            except (RuntimeError, TypeError):
                 return
 
     def _handle_playback_state_changed(self, state: object) -> None:

@@ -63,63 +63,35 @@ class ImportedFolderPaths:
 
 
 def _validate_folder_name(name: str) -> str:
-    """Validate and normalize a folder display name.
-
-    Args:
-        name: Folder name provided by the user.
-
-    Returns:
-        str: Stripped folder name.
-
-    Raises:
-        ValueError: If the folder name is empty.
-    """
+    """Validate folder name is non-empty after stripping."""
     normalized_name = name.strip()
     if not normalized_name:
-        msg = "Folder name cannot be empty."
-        raise ValueError(msg)
+        raise ValueError("Folder name cannot be empty.")
     return normalized_name
 
 
 def get_app_data_dir() -> Path:
-    """Return the app data directory using OS-specific defaults.
-
-    Returns:
-        Path: Directory used for persistent app state.
-    """
+    """Return the app data directory using OS-specific defaults."""
     configured_path = os.getenv(ENV_DATA_DIR)
     if configured_path:
         data_dir = Path(configured_path)
     elif os.name == "nt":
-        appdata = os.getenv("APPDATA")
-        base_dir = Path(appdata) if appdata else Path.home() / "AppData" / "Roaming"
-        data_dir = base_dir / APP_NAME
+        base = Path(os.getenv("APPDATA") or Path.home() / "AppData" / "Roaming")
+        data_dir = base / APP_NAME
     else:
-        xdg_data_home = os.getenv("XDG_DATA_HOME")
-        base_dir = (
-            Path(xdg_data_home) if xdg_data_home else Path.home() / ".local" / "share"
-        )
-        data_dir = base_dir / APP_NAME
-
+        base = Path(os.getenv("XDG_DATA_HOME") or Path.home() / ".local" / "share")
+        data_dir = base / APP_NAME
     data_dir.mkdir(parents=True, exist_ok=True)
     return data_dir
 
 
 def get_registry_path() -> Path:
-    """Return the persisted folder registry file path.
-
-    Returns:
-        Path: JSON file containing persisted folder metadata.
-    """
+    """Return the persisted folder registry file path."""
     return get_app_data_dir() / REGISTRY_FILENAME
 
 
 def get_library_dir() -> Path:
-    """Return the managed folder library root.
-
-    Returns:
-        Path: Directory where copied user folders are stored.
-    """
+    """Return the managed folder library root."""
     library_dir = get_app_data_dir() / LIBRARY_FOLDER_NAME
     library_dir.mkdir(parents=True, exist_ok=True)
     return library_dir
@@ -148,7 +120,7 @@ def _deserialize_persisted_folder(
         folder_name = str(entry["name"])
         source_path = str(entry["source_path"])
         stored_path = str(entry["stored_path"])
-    except KeyError, TypeError:
+    except (KeyError, TypeError):
         return None
 
     parent_id = entry.get("parent_id")
@@ -664,7 +636,7 @@ def _load_previous_flashcards(
     if previous_stored_path.exists():
         try:
             previous_flashcards = load_flashcards_from_folder(previous_stored_path)
-        except csv.Error, OSError, UnicodeDecodeError, ValueError:
+        except (csv.Error, OSError, UnicodeDecodeError, ValueError):
             previous_flashcards = []
         previous_media_dir = get_managed_flashcard_media_dir(previous_stored_path)
         if previous_media_dir.exists():

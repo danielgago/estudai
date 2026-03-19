@@ -188,23 +188,6 @@ def load_flashcards_from_folder(folder_path: Path) -> list[Flashcard]:
     return flashcards
 
 
-def _load_flashcards_from_source_folder(folder_path: Path) -> list[Flashcard]:
-    """Load flashcards only from source CSV files in a folder.
-
-    Args:
-        folder_path: Folder containing source CSV files.
-
-    Returns:
-        list[Flashcard]: Combined source flashcards.
-    """
-    flashcards: list[Flashcard] = []
-    for csv_file in list_source_csv_files(folder_path):
-        flashcards.extend(
-            _load_flashcards_from_source_csv(csv_file, folder_path=folder_path)
-        )
-    return flashcards
-
-
 def ensure_managed_flashcards(
     folder_path: Path,
     *,
@@ -230,7 +213,11 @@ def ensure_managed_flashcards(
         if previous_flashcards is None:
             previous_flashcards = existing_managed_flashcards
 
-    source_flashcards = _load_flashcards_from_source_folder(folder_path)
+    source_flashcards: list[Flashcard] = []
+    for csv_file in list_source_csv_files(folder_path):
+        source_flashcards.extend(
+            _load_flashcards_from_source_csv(csv_file, folder_path=folder_path)
+        )
     if not source_flashcards and existing_managed_flashcards:
         source_flashcards = existing_managed_flashcards
 
@@ -1013,18 +1000,6 @@ def _persist_managed_rows(
     return load_flashcards_from_csv(managed_csv)
 
 
-def _load_or_bootstrap_managed_flashcards(folder_path: Path) -> list[Flashcard]:
-    """Load editable flashcards and create managed storage when needed.
-
-    Args:
-        folder_path: Folder containing flashcards.
-
-    Returns:
-        list[Flashcard]: Editable flashcards from managed CSV.
-    """
-    return ensure_managed_flashcards(folder_path)
-
-
 def add_flashcard_to_folder(
     folder_path: Path,
     question: str,
@@ -1049,7 +1024,7 @@ def add_flashcard_to_folder(
         question_image_path=question_image_path,
         answer_image_path=answer_image_path,
     )
-    flashcards = _load_or_bootstrap_managed_flashcards(folder_path)
+    flashcards = ensure_managed_flashcards(folder_path)
     managed_rows = [_managed_row_from_flashcard(flashcard) for flashcard in flashcards]
     managed_rows.append(
         _ManagedFlashcardRow(
@@ -1100,7 +1075,7 @@ def update_flashcard_in_folder(
         question_image_path=question_image_path,
         answer_image_path=answer_image_path,
     )
-    flashcards = _load_or_bootstrap_managed_flashcards(folder_path)
+    flashcards = ensure_managed_flashcards(folder_path)
     if flashcard_index < 0 or flashcard_index >= len(flashcards):
         msg = f"Flashcard index out of range: {flashcard_index}"
         raise IndexError(msg)
@@ -1139,7 +1114,7 @@ def delete_flashcards_from_folder(
     Raises:
         IndexError: If any index is out of bounds.
     """
-    flashcards = _load_or_bootstrap_managed_flashcards(folder_path)
+    flashcards = ensure_managed_flashcards(folder_path)
     if not flashcard_indexes:
         return flashcards
 
@@ -1171,7 +1146,7 @@ def replace_flashcards_in_folder(
         list[Flashcard]: Updated flashcards from managed CSV.
     """
     normalized_rows = [_normalize_flashcard_row_input(row) for row in flashcard_rows]
-    existing_flashcards = _load_or_bootstrap_managed_flashcards(folder_path)
+    existing_flashcards = ensure_managed_flashcards(folder_path)
     managed_rows = _reconcile_managed_rows(
         [
             _record_from_row(

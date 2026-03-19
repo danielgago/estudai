@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence, QShortcut
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication, QPushButton, QWidget
 
 from estudai.services.hotkeys import (
     DEFAULT_HOTKEY_BINDINGS,
@@ -115,42 +115,34 @@ class HotkeyController:
 
     @property
     def timer_page_pause_resume_shortcut(self) -> QShortcut:
-        """Return the application-scoped pause/resume shortcut."""
         return self._require_shortcut(self._timer_page_pause_resume_shortcut)
 
     @property
     def timer_page_start_stop_shortcut(self) -> QShortcut:
-        """Return the application-scoped start/stop shortcut."""
         return self._require_shortcut(self._timer_page_start_stop_shortcut)
 
     @property
     def timer_page_skip_phase_shortcut(self) -> QShortcut:
-        """Return the application-scoped skip-phase shortcut."""
         return self._require_shortcut(self._timer_page_skip_phase_shortcut)
 
     @property
     def timer_page_mark_correct_shortcut(self) -> QShortcut:
-        """Return the application-scoped mark-correct shortcut."""
         return self._require_shortcut(self._timer_page_mark_correct_shortcut)
 
     @property
     def timer_page_mark_wrong_shortcut(self) -> QShortcut:
-        """Return the application-scoped mark-wrong shortcut."""
         return self._require_shortcut(self._timer_page_mark_wrong_shortcut)
 
     @property
     def timer_page_copy_question_shortcut(self) -> QShortcut:
-        """Return the application-scoped copy-question shortcut."""
         return self._require_shortcut(self._timer_page_copy_question_shortcut)
 
     @property
     def toggle_fullscreen_shortcut(self) -> QShortcut:
-        """Return the application-scoped fullscreen-toggle shortcut."""
         return self._require_shortcut(self._toggle_fullscreen_shortcut)
 
     @property
     def exit_fullscreen_shortcut(self) -> QShortcut:
-        """Return the application-scoped fullscreen-exit shortcut."""
         return self._require_shortcut(self._exit_fullscreen_shortcut)
 
     def configure_window_shortcuts(self) -> None:
@@ -223,27 +215,29 @@ class HotkeyController:
         return self._current_page_getter() is self._timer_page
 
     def trigger_timer_page_pause_resume(self) -> None:
-        """Mirror the pause/resume button path for external callers."""
-        self._trigger_timer_page_pause_resume()
+        """Mirror the pause/resume button path for shortcuts."""
+        self._click_timer_button(self._timer_page.pause_button)
 
     def trigger_timer_page_start_stop(self) -> None:
-        """Mirror the start/stop button path for external callers."""
-        self._trigger_timer_page_start_stop()
+        """Mirror the start/stop button path for shortcuts."""
+        self._click_timer_button(
+            self._timer_page.start_button, self._timer_page.stop_button,
+        )
 
     def trigger_timer_page_mark_correct(self) -> None:
-        """Mirror the mark-correct button path for external callers."""
-        self._trigger_timer_page_mark_correct()
+        """Mirror the mark-correct button path for shortcuts."""
+        self._click_timer_button(self._timer_page.correct_button)
 
     def trigger_timer_page_skip_phase(self) -> None:
-        """Mirror the skip-phase button path for external callers."""
-        self._trigger_timer_page_skip_phase()
+        """Mirror the skip-phase button path for shortcuts."""
+        self._click_timer_button(self._timer_page.skip_phase_button)
 
     def trigger_timer_page_mark_wrong(self) -> None:
-        """Mirror the mark-wrong button path for external callers."""
-        self._trigger_timer_page_mark_wrong()
+        """Mirror the mark-wrong button path for shortcuts."""
+        self._click_timer_button(self._timer_page.wrong_button)
 
     def trigger_timer_page_copy_question(self) -> None:
-        """Mirror the copy-question action path for external callers."""
+        """Copy the current flashcard question and show transient feedback."""
         self._trigger_timer_page_copy_question()
 
     @staticmethod
@@ -282,27 +276,27 @@ class HotkeyController:
         return (
             _WindowShortcutSpec(
                 "_timer_page_pause_resume_shortcut",
-                self._trigger_timer_page_pause_resume,
+                self.trigger_timer_page_pause_resume,
             ),
             _WindowShortcutSpec(
                 "_timer_page_start_stop_shortcut",
-                self._trigger_timer_page_start_stop,
+                self.trigger_timer_page_start_stop,
             ),
             _WindowShortcutSpec(
                 "_timer_page_skip_phase_shortcut",
-                self._trigger_timer_page_skip_phase,
+                self.trigger_timer_page_skip_phase,
             ),
             _WindowShortcutSpec(
                 "_timer_page_mark_correct_shortcut",
-                self._trigger_timer_page_mark_correct,
+                self.trigger_timer_page_mark_correct,
             ),
             _WindowShortcutSpec(
                 "_timer_page_mark_wrong_shortcut",
-                self._trigger_timer_page_mark_wrong,
+                self.trigger_timer_page_mark_wrong,
             ),
             _WindowShortcutSpec(
                 "_timer_page_copy_question_shortcut",
-                self._trigger_timer_page_copy_question,
+                self.trigger_timer_page_copy_question,
             ),
             _WindowShortcutSpec(
                 "_toggle_fullscreen_shortcut",
@@ -378,57 +372,24 @@ class HotkeyController:
         shortcut.setKeys(self.start_stop_shortcut_sequences(binding))
 
     def _global_hotkey_action_handlers(self) -> dict[HotkeyAction, WindowAction]:
-        """Return UI-thread handlers for each supported global hotkey action.
-
-        Returns:
-            dict[HotkeyAction, WindowAction]: Dispatch table keyed by hotkey
-                action.
-        """
+        """Return UI-thread handlers for each supported global hotkey action."""
         return {
-            HotkeyAction.PAUSE_RESUME: self._trigger_timer_page_pause_resume,
-            HotkeyAction.START_STOP: self._trigger_timer_page_start_stop,
-            HotkeyAction.SKIP_PHASE: self._trigger_timer_page_skip_phase,
-            HotkeyAction.MARK_CORRECT: self._trigger_timer_page_mark_correct,
-            HotkeyAction.MARK_WRONG: self._trigger_timer_page_mark_wrong,
-            HotkeyAction.COPY_QUESTION: self._trigger_timer_page_copy_question,
+            HotkeyAction.PAUSE_RESUME: self.trigger_timer_page_pause_resume,
+            HotkeyAction.START_STOP: self.trigger_timer_page_start_stop,
+            HotkeyAction.SKIP_PHASE: self.trigger_timer_page_skip_phase,
+            HotkeyAction.MARK_CORRECT: self.trigger_timer_page_mark_correct,
+            HotkeyAction.MARK_WRONG: self.trigger_timer_page_mark_wrong,
+            HotkeyAction.COPY_QUESTION: self.trigger_timer_page_copy_question,
         }
 
-    def _trigger_timer_page_pause_resume(self) -> None:
-        """Mirror the pause/resume button path for local and global shortcuts."""
+    def _click_timer_button(self, *buttons: QPushButton) -> None:
+        """Click the first enabled button if the timer page is active."""
         if not self.timer_page_is_active():
             return
-        if self._timer_page.pause_button.isEnabled():
-            self._timer_page.pause_button.click()
-
-    def _trigger_timer_page_start_stop(self) -> None:
-        """Mirror the start/stop button path for local and global shortcuts."""
-        if not self.timer_page_is_active():
-            return
-        if self._timer_page.start_button.isEnabled():
-            self._timer_page.start_button.click()
-        elif self._timer_page.stop_button.isEnabled():
-            self._timer_page.stop_button.click()
-
-    def _trigger_timer_page_mark_correct(self) -> None:
-        """Mirror the correct button path for local and global shortcuts."""
-        if not self.timer_page_is_active():
-            return
-        if self._timer_page.correct_button.isEnabled():
-            self._timer_page.correct_button.click()
-
-    def _trigger_timer_page_skip_phase(self) -> None:
-        """Mirror the skip-phase action path for local and global shortcuts."""
-        if not self.timer_page_is_active():
-            return
-        if self._timer_page.skip_phase_button.isEnabled():
-            self._timer_page.skip_phase_button.click()
-
-    def _trigger_timer_page_mark_wrong(self) -> None:
-        """Mirror the wrong button path for local and global shortcuts."""
-        if not self.timer_page_is_active():
-            return
-        if self._timer_page.wrong_button.isEnabled():
-            self._timer_page.wrong_button.click()
+        for button in buttons:
+            if button.isEnabled():
+                button.click()
+                return
 
     def _trigger_timer_page_copy_question(self) -> None:
         """Copy the current flashcard question and show transient feedback."""
