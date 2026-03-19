@@ -118,11 +118,11 @@ def test_sidebar_click_ignores_non_folder_item(app: QApplication) -> None:
 
 
 def test_open_sidebar_menu_rename_action_uses_expected_labels(
-    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    app: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify context menu labels and rename dispatch are correct."""
+    create_managed_folder("Biology")
     window = MainWindow()
-    _add_sample_folder(window, tmp_path)
     folder_item = window.sidebar_folder_list.item(0)
     called: list[str] = []
 
@@ -172,15 +172,81 @@ def test_open_sidebar_menu_rename_action_uses_expected_labels(
     assert called == ["rename"]
     assert [action.text for action in _FakeMenu.last_instance.actions] == [
         "Rename",
+        "Forget progress",
+        "Delete",
         "Create Subfolder",
         "Create Set",
+    ]
+    assert [action.tooltip for action in _FakeMenu.last_instance.actions] == [
+        "Rename",
+        "Reset folder progress",
+        "Delete",
+        "Create a child folder",
+        "Create a child flashcard set",
+    ]
+
+
+def test_open_sidebar_menu_for_set_hides_create_actions(
+    app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify sets do not expose create-folder or create-set actions."""
+    set_folder = create_managed_set("Biology")
+    window = MainWindow()
+    set_item = window.sidebar_folder_list.item(0)
+    called: list[str] = []
+
+    class _FakeAction:
+        def __init__(self, text: str) -> None:
+            self.text = text
+            self.tooltip = ""
+            self.enabled = True
+
+        def setToolTip(self, value: str) -> None:  # noqa: N802
+            self.tooltip = value
+
+        def setEnabled(self, enabled: bool) -> None:  # noqa: N802
+            self.enabled = enabled
+
+    class _FakeMenu:
+        last_instance = None
+
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.actions: list[_FakeAction] = []
+            _FakeMenu.last_instance = self
+
+        def addAction(self, text: str) -> _FakeAction:  # noqa: N802
+            action = _FakeAction(text)
+            self.actions.append(action)
+            return action
+
+        def exec(self, *_args, **_kwargs):  # noqa: A003
+            return self.actions[0]
+
+    monkeypatch.setattr("estudai.ui.main_window.QMenu", _FakeMenu)
+    monkeypatch.setattr(window.sidebar_folder_list, "itemAt", lambda _pos: set_item)
+    monkeypatch.setattr(
+        window, "rename_sidebar_folder", lambda _item: called.append("rename")
+    )
+    monkeypatch.setattr(
+        window,
+        "forget_sidebar_folder_progress",
+        lambda _items: called.append("forget"),
+    )
+    monkeypatch.setattr(
+        window, "delete_sidebar_folders", lambda _items: called.append("delete")
+    )
+
+    window.open_sidebar_folder_menu(QPoint(0, 0))
+
+    assert set_item.data(Qt.UserRole) == set_folder.id
+    assert called == ["rename"]
+    assert [action.text for action in _FakeMenu.last_instance.actions] == [
+        "Rename",
         "Forget progress",
         "Delete",
     ]
     assert [action.tooltip for action in _FakeMenu.last_instance.actions] == [
         "Rename",
-        "Create a child folder",
-        "Create a child flashcard set",
         "Reset folder progress",
         "Delete",
     ]

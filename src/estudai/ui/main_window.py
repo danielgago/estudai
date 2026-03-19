@@ -12,7 +12,6 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QColor,
-    QFont,
     QKeySequence,
     QPalette,
     QShortcut,
@@ -24,7 +23,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QInputDialog,
-    QLabel,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -384,14 +382,6 @@ class MainWindow(QMainWindow):
         sidebar_layout = QVBoxLayout(self.sidebar)
         sidebar_layout.setContentsMargins(8, 8, 8, 8)
         sidebar_layout.setSpacing(8)
-
-        sidebar_title = QLabel("Folders & Sets")
-        sidebar_title_font = QFont(sidebar_title.font())
-        sidebar_title_font.setPointSize(16)
-        sidebar_title_font.setBold(True)
-        sidebar_title.setFont(sidebar_title_font)
-        sidebar_title.setStyleSheet("border: none;")
-        sidebar_layout.addWidget(sidebar_title)
 
         self.sidebar_folder_list = SidebarFolderTreeWidget()
         self.sidebar_folder_list.setSpacing(0)
@@ -1129,10 +1119,6 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         rename_action = menu.addAction("Rename")
         rename_action.setToolTip("Rename")
-        create_subfolder_action = menu.addAction("Create Subfolder")
-        create_subfolder_action.setToolTip("Create a child folder")
-        create_set_action = menu.addAction("Create Set")
-        create_set_action.setToolTip("Create a child flashcard set")
         forget_progress_action = menu.addAction("Forget progress")
         forget_progress_action.setToolTip("Reset folder progress")
         delete_action = menu.addAction("Delete")
@@ -1143,20 +1129,29 @@ class MainWindow(QMainWindow):
             str,
         ) and self._app_state.is_flashcard_set(selected_folder_id)
         rename_action.setEnabled(len(selected_folder_items) == 1)
-        create_subfolder_action.setEnabled(
-            len(selected_folder_items) == 1 and not selected_is_set
-        )
-        create_set_action.setEnabled(
-            len(selected_folder_items) == 1 and not selected_is_set
-        )
+        create_subfolder_action = None
+        create_set_action = None
+        if len(selected_folder_items) == 1 and not selected_is_set:
+            create_subfolder_action = menu.addAction("Create Subfolder")
+            create_subfolder_action.setToolTip("Create a child folder")
+            create_set_action = menu.addAction("Create Set")
+            create_set_action.setToolTip("Create a child flashcard set")
         chosen_action = menu.exec(
             self.sidebar_folder_list.viewport().mapToGlobal(position)
         )
         if chosen_action is rename_action and len(selected_folder_items) == 1:
             self.rename_sidebar_folder(selected_folder_items[0])
-        if chosen_action is create_subfolder_action and len(selected_folder_items) == 1:
+        if (
+            create_subfolder_action is not None
+            and chosen_action is create_subfolder_action
+            and len(selected_folder_items) == 1
+        ):
             self.prompt_and_create_subfolder(selected_folder_items[0])
-        if chosen_action is create_set_action and len(selected_folder_items) == 1:
+        if (
+            create_set_action is not None
+            and chosen_action is create_set_action
+            and len(selected_folder_items) == 1
+        ):
             self.prompt_and_create_child_set(selected_folder_items[0])
         if chosen_action is forget_progress_action:
             self.forget_sidebar_folder_progress(selected_folder_items)
