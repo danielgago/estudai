@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from estudai.services.folder_storage import (
-    create_managed_folder,
+    create_managed_set,
     list_persisted_folders,
 )
 from estudai.services.notebooklm_import import (
@@ -70,13 +70,13 @@ class NotebookLMCsvImportDialog(QDialog):
         layout.addLayout(file_row)
 
         target_row = QHBoxLayout()
-        target_row.addWidget(QLabel("Target folder:"))
+        target_row.addWidget(QLabel("Target set:"))
         self.target_folder_combo = QComboBox()
         self.target_folder_combo.currentIndexChanged.connect(
             self._update_import_button_state
         )
         target_row.addWidget(self.target_folder_combo)
-        self.create_folder_button = QPushButton("Create Folder")
+        self.create_folder_button = QPushButton("Create Set")
         self.create_folder_button.clicked.connect(self._create_target_folder)
         target_row.addWidget(self.create_folder_button)
         layout.addLayout(target_row)
@@ -125,8 +125,11 @@ class NotebookLMCsvImportDialog(QDialog):
         Args:
             preferred_folder_id: Folder id selected after reload when available.
         """
-        persisted_folders = list_persisted_folders()
-        folders_by_id = {folder.id: folder for folder in persisted_folders}
+        all_persisted_folders = list_persisted_folders()
+        persisted_folders = [
+            folder for folder in all_persisted_folders if folder.is_flashcard_set
+        ]
+        folders_by_id = {folder.id: folder for folder in all_persisted_folders}
         folder_labels_by_id: dict[str, str] = {}
 
         def build_folder_label(folder_id: str) -> str:
@@ -179,18 +182,18 @@ class NotebookLMCsvImportDialog(QDialog):
         self._update_import_button_state()
 
     def _create_target_folder(self) -> None:
-        """Create one managed folder from dialog prompt."""
+        """Create one managed flashcard set from dialog prompt."""
         folder_name, accepted = QInputDialog.getText(
             self,
-            "Create folder",
-            "Folder name:",
+            "Create set",
+            "Set name:",
         )
         if not accepted:
             return
         try:
-            created_folder = create_managed_folder(folder_name)
+            created_folder = create_managed_set(folder_name)
         except ValueError as error:
-            self._message_box.show_warning("Create folder", str(error))
+            self._message_box.show_warning("Create set", str(error))
             return
         self._reload_folders(preferred_folder_id=created_folder.id)
 

@@ -79,16 +79,16 @@ class ManagementPageController:
         return self._editing_folder_id
 
     def open_from_selection(self) -> None:
-        """Open management for one selected or checked sidebar folder."""
+        """Open management for one selected or checked flashcard set."""
         selected_items = self._selected_folder_items_getter()
-        if len(selected_items) == 1:
+        if len(selected_items) == 1 and self._is_flashcard_set_item(selected_items[0]):
             self._open_for_sidebar_item(selected_items[0])
             return
 
         checked_items = [
             item
             for item in self._sidebar_folder_items_iter()
-            if item.checkState() == Qt.Checked
+            if item.checkState() == Qt.Checked and self._is_flashcard_set_item(item)
         ]
         if len(checked_items) == 1:
             self._open_for_sidebar_item(checked_items[0])
@@ -96,7 +96,7 @@ class ManagementPageController:
 
         self._message_box.show_information(
             "Manage flashcards",
-            "Select one folder (or double-click one) to edit its flashcards.",
+            "Select one flashcard set (or double-click one) to edit its flashcards.",
         )
 
     def open_for_folder(self, folder_id: str, folder_name: str) -> None:
@@ -256,3 +256,10 @@ class ManagementPageController:
         if folder_id is None:
             return
         self.open_for_folder(folder_id, self._folder_name_resolver(folder_item))
+
+    def _is_flashcard_set_item(self, folder_item: QListWidgetItem) -> bool:
+        """Return whether one sidebar item maps to a flashcard set."""
+        folder_id = folder_item.data(Qt.UserRole)
+        return isinstance(folder_id, str) and self._app_state.is_flashcard_set(
+            folder_id
+        )

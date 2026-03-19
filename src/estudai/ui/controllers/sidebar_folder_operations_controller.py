@@ -16,6 +16,7 @@ from estudai.services.csv_flashcards import (
 from estudai.services.folder_storage import (
     child_folder_ids,
     create_managed_folder,
+    create_managed_set,
     delete_persisted_folder,
     import_folder,
     list_persisted_folders,
@@ -150,6 +151,23 @@ class SidebarFolderOperationsController:
         self._handle_folder_data_changed(checked_ids, None)
         return True
 
+    def create_set(
+        self,
+        set_name: str,
+        *,
+        parent_id: str | None = None,
+    ) -> bool:
+        """Create one managed empty flashcard set and refresh sidebar state."""
+        checked_ids = self._checked_folder_ids_getter()
+        try:
+            persisted_folder = create_managed_set(set_name, parent_id=parent_id)
+        except (KeyError, ValueError) as error:
+            self._show_warning_message("Create set", str(error))
+            return False
+        checked_ids.add(persisted_folder.id)
+        self._handle_folder_data_changed(checked_ids, None)
+        return True
+
     def import_notebooklm_rows(
         self,
         target_folder_id: str,
@@ -176,6 +194,12 @@ class SidebarFolderOperationsController:
             self._show_warning_message(
                 "Import NotebookLM CSV",
                 "Selected folder is unavailable. Refresh and try again.",
+            )
+            return False
+        if not persisted_folder.is_flashcard_set:
+            self._show_warning_message(
+                "Import NotebookLM CSV",
+                "Select a flashcard set instead of a folder.",
             )
             return False
 
@@ -254,6 +278,7 @@ class SidebarFolderOperationsController:
         folder_ids = self._folder_ids_from_items(folder_items)
         if not folder_ids:
             return
+        folder_ids = self._folder_ids_with_descendants(folder_ids)
         self._reset_persisted_study_progress(
             folder_ids,
             title="Forget progress",
@@ -450,3 +475,11 @@ class SidebarFolderOperationsController:
         return {
             fid for item in folder_items if (fid := item.data(Qt.UserRole)) is not None
         }
+
+    @staticmethod
+    def _folder_ids_with_descendants(folder_ids: set[str]) -> set[str]:
+        """Return one folder-id set plus all descendant folder ids."""
+        expanded_folder_ids = set(folder_ids)
+        for folder_id in list(folder_ids):
+            expanded_folder_ids.update(child_folder_ids(folder_id))
+        return expanded_folder_ids

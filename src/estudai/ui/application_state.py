@@ -29,6 +29,8 @@ class FolderLibraryState:
         folder_id: Persistent folder identifier.
         folder_name: Display name shown in the sidebar.
         folder_path: Managed folder storage path.
+        parent_id: Optional parent folder identifier for hierarchy metadata.
+        is_flashcard_set: Whether the node is an editable flashcard set.
         flashcards: Flashcards currently loaded for the folder.
         selected_indexes: Optional selected flashcard indexes for timer scope.
     """
@@ -37,6 +39,8 @@ class FolderLibraryState:
     folder_name: str
     folder_path: Path
     flashcards: list[Flashcard]
+    parent_id: str | None = None
+    is_flashcard_set: bool = True
     selected_indexes: set[int] | None = None
 
 
@@ -48,6 +52,8 @@ class StudyApplicationState:
         self.flashcards_by_folder: dict[str, list[Flashcard]] = {}
         self.persisted_folder_paths: dict[str, Path] = {}
         self.folder_names_by_id: dict[str, str] = {}
+        self.parent_folder_ids_by_id: dict[str, str | None] = {}
+        self.flashcard_set_flags_by_id: dict[str, bool] = {}
         self.selected_flashcard_indexes_by_folder: dict[str, set[int]] = {}
         self.selected_folder_ids: set[str] = set()
         self.current_folder_id: str | None = None
@@ -68,6 +74,12 @@ class StudyApplicationState:
         }
         self.folder_names_by_id = {
             folder.folder_id: folder.folder_name for folder in folders
+        }
+        self.parent_folder_ids_by_id = {
+            folder.folder_id: folder.parent_id for folder in folders
+        }
+        self.flashcard_set_flags_by_id = {
+            folder.folder_id: folder.is_flashcard_set for folder in folders
         }
         self.selected_flashcard_indexes_by_folder = {
             folder.folder_id: normalize_selected_indexes(
@@ -172,7 +184,7 @@ class StudyApplicationState:
                 selected_indexes=self.selected_indexes_for_folder(folder_id),
             )
             for folder_id in self.flashcards_by_folder
-            if folder_id in checked_folder_ids
+            if folder_id in checked_folder_ids and self.is_flashcard_set(folder_id)
         ]
         selection_context = build_folder_selection_context(checked_folders)
         self.selected_folder_ids = selection_context.selected_folder_ids
@@ -190,3 +202,15 @@ class StudyApplicationState:
             bool: True when the folder exists in current state.
         """
         return folder_id in self.flashcards_by_folder
+
+    def is_flashcard_set(self, folder_id: str) -> bool:
+        """Return whether one loaded folder id maps to a flashcard set."""
+        return self.flashcard_set_flags_by_id.get(folder_id, True)
+
+    def child_folder_ids(self, folder_id: str) -> list[str]:
+        """Return direct child folder ids for one loaded folder."""
+        return [
+            child_id
+            for child_id, parent_id in self.parent_folder_ids_by_id.items()
+            if parent_id == folder_id
+        ]

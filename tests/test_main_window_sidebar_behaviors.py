@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QAbstractItemView, QApplication, QMessageBox
 from estudai.services.folder_storage import (
     PersistedFolder,
     create_managed_folder,
+    create_managed_set,
     list_persisted_folders,
 )
 from estudai.services.study_progress import (
@@ -172,12 +173,14 @@ def test_open_sidebar_menu_rename_action_uses_expected_labels(
     assert [action.text for action in _FakeMenu.last_instance.actions] == [
         "Rename",
         "Create Subfolder",
+        "Create Set",
         "Forget progress",
         "Delete",
     ]
     assert [action.tooltip for action in _FakeMenu.last_instance.actions] == [
         "Rename",
         "Create a child folder",
+        "Create a child flashcard set",
         "Reset folder progress",
         "Delete",
     ]
@@ -396,6 +399,26 @@ def test_handle_management_data_changed_builds_nested_sidebar_tree(
     assert child_item.checkState() == Qt.Unchecked
 
 
+def test_sidebar_items_show_distinct_folder_and_set_affordances(
+    app: QApplication,
+) -> None:
+    """Verify sidebar items expose visible folder/set distinctions."""
+    root_folder = create_managed_folder("Biology")
+    child_set = create_managed_set("Genetics", parent_id=root_folder.id)
+    window = MainWindow()
+
+    root_item = window.sidebar_folder_list.item(0)
+    child_item = window.sidebar_folder_list.item(1)
+
+    assert root_item.data(Qt.UserRole) == root_folder.id
+    assert child_item.data(Qt.UserRole) == child_set.id
+    assert root_item.toolTip(0) == "Folder"
+    assert child_item.toolTip(0) == "Flashcard set"
+    assert root_item.icon(0).isNull() is False
+    assert child_item.icon(0).isNull() is False
+    assert root_item.icon(0).cacheKey() != child_item.icon(0).cacheKey()
+
+
 def test_sidebar_enables_internal_drag_drop(app: QApplication) -> None:
     """Verify the sidebar tree uses internal drag-and-drop reordering."""
     window = MainWindow()
@@ -408,9 +431,10 @@ def test_sidebar_enables_internal_drag_drop(app: QApplication) -> None:
 def test_handle_sidebar_folder_drop_persists_reparenting(
     app: QApplication, tmp_path: Path
 ) -> None:
-    """Verify a completed drop persists the folder under its new parent."""
+    """Verify a completed drop persists a set under a folder container."""
     window = MainWindow()
-    _add_sample_folder(window, tmp_path, "biology")
+    create_managed_folder("biology")
+    window.handle_management_data_changed()
     _add_sample_folder(window, tmp_path, "chemistry")
     biology_item = window.sidebar_folder_list.item(0)
     chemistry_item = window.sidebar_folder_list.item(1)

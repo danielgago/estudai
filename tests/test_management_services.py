@@ -1,6 +1,7 @@
 """Folder and flashcard management service tests."""
 
 import base64
+import json
 import os
 from pathlib import Path
 
@@ -20,12 +21,19 @@ from estudai.services.folder_storage import (
     child_folder_ids,
     create_managed_folder,
     delete_persisted_folder,
+    get_library_dir,
     get_registry_path,
     import_folder,
     list_persisted_folders,
     move_persisted_folder,
     reparent_persisted_folder,
     rename_persisted_folder,
+)
+from estudai.services.study_progress import (
+    FlashcardProgress,
+    FlashcardProgressEntry,
+    load_folder_progress,
+    save_progress_entries,
 )
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -323,7 +331,7 @@ def test_create_nested_folder_and_promote_back_to_root() -> None:
 
 
 def test_import_folder_preserves_nested_structure() -> None:
-    """Verify importing a directory tree creates nested persisted folders."""
+    """Verify importing a mixed directory tree creates a folder plus child sets."""
     source_root = Path(os.environ["ESTUDAI_DATA_DIR"]) / "source"
     child_source = source_root / "subfolder"
     child_source.mkdir(parents=True)
@@ -333,11 +341,95 @@ def test_import_folder_preserves_nested_structure() -> None:
     imported_root = import_folder(source_root)
 
     persisted_folders = list_persisted_folders()
-    assert [folder.name for folder in persisted_folders] == ["source", "subfolder"]
+    assert [folder.name for folder in persisted_folders] == [
+        "source",
+        "source Flashcards",
+        "subfolder",
+    ]
     assert persisted_folders[0].id == imported_root.id
     assert persisted_folders[0].parent_id is None
+    assert persisted_folders[0].is_folder is True
     assert persisted_folders[1].parent_id == imported_root.id
-    assert child_folder_ids(imported_root.id) == {persisted_folders[1].id}
+    assert persisted_folders[1].is_flashcard_set is True
+    assert persisted_folders[2].parent_id == imported_root.id
+    assert child_folder_ids(imported_root.id) == {
+        persisted_folders[1].id,
+        persisted_folders[2].id,
+    }
+
+
+def test_list_persisted_folders_migrates_legacy_mixed_folder_without_losing_cards() -> None:
+    """Verify mixed legacy folders migrate direct cards into an auto-created child set."""
+    library_dir = get_library_dir()
+    root_folder_id = "root-folder"
+    child_folder_id = "child-folder"
+    root_folder_path = library_dir / root_folder_id
+    child_folder_path = library_dir / child_folder_id
+    root_folder_path.mkdir(parents=True)
+    child_folder_path.mkdir(parents=True)
+    (root_folder_path / "cards.csv").write_text("Root?,Answer.\n", encoding="utf-8")
+    (child_folder_path / "cards.csv").write_text("Child?,Answer.\n", encoding="utf-8")
+    save_progress_entries(
+        [
+            FlashcardProgressEntry(
+                folder_id=root_folder_id,
+                flashcard_id="root-card",
+                progress=FlashcardProgress(correct_count=2, wrong_count=1),
+            )
+        ]
+    )
+    get_registry_path().write_text(
+        json.dumps(
+            [
+                {
+                    "id": root_folder_id,
+                    "name": "Biology",
+                    "source_path": "",
+                    "stored_path": str(root_folder_path),
+                    "sort_order": 0,
+                },
+                {
+                    "id": child_folder_id,
+                    "name": "Genetics",
+                    "source_path": "",
+                    "stored_path": str(child_folder_path),
+                    "parent_id": root_folder_id,
+                    "sort_order": 0,
+                },
+            ],
+            ensure_ascii=True,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    persisted_folders = list_persisted_folders()
+    migrated_root, migrated_root_cards, migrated_child = persisted_folders
+
+    assert [folder.name for folder in persisted_folders] == [
+        "Biology",
+        "Biology Flashcards",
+        "Genetics",
+    ]
+    assert migrated_root.is_folder is True
+    assert migrated_root.parent_id is None
+    assert migrated_root_cards.parent_id == migrated_root.id
+    assert migrated_root_cards.is_flashcard_set is True
+    assert migrated_child.parent_id == migrated_root.id
+    assert migrated_child.is_flashcard_set is True
+    assert load_flashcards_from_folder(root_folder_path) == []
+    assert [flashcard.question for flashcard in load_flashcards_from_folder(root_folder_path)] == []
+    assert [
+        flashcard.question
+        for flashcard in load_flashcards_from_folder(Path(migrated_root_cards.stored_path))
+    ] == ["Root?"]
+    assert [
+        flashcard.question for flashcard in load_flashcards_from_folder(child_folder_path)
+    ] == ["Child?"]
+    assert load_folder_progress(root_folder_id) == {}
+    assert load_folder_progress(migrated_root_cards.id) == {
+        "root-card": FlashcardProgress(correct_count=2, wrong_count=1)
+    }
 
 
 def test_import_folder_keeps_multiple_csvs_together_by_default() -> None:

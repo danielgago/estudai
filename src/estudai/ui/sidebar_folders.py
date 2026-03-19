@@ -5,8 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator
 
 from PySide6.QtCore import QTimer, Qt, Signal
-from PySide6.QtGui import QFont
-from PySide6.QtWidgets import QTreeWidget, QTreeWidgetItem
+from PySide6.QtGui import QFont, QIcon
+from PySide6.QtWidgets import QApplication, QStyle, QTreeWidget, QTreeWidgetItem
 
 from estudai.ui.utils import format_card_count
 
@@ -303,6 +303,36 @@ class SidebarFolderController:
             f"({format_card_count(flashcard_count)} | {progress_percent}% done)"
         )
 
+    def folder_kind_label(self, *, is_flashcard_set: bool) -> str:
+        """Return the user-facing label for one sidebar item kind.
+
+        Args:
+            is_flashcard_set: Whether the item represents an editable flashcard set.
+
+        Returns:
+            str: Sidebar item kind label.
+        """
+        return "Flashcard set" if is_flashcard_set else "Folder"
+
+    def folder_kind_icon(self, *, is_flashcard_set: bool) -> QIcon:
+        """Return the icon used to distinguish folders from flashcard sets.
+
+        Args:
+            is_flashcard_set: Whether the item represents an editable flashcard set.
+
+        Returns:
+            QIcon: Standard icon for the sidebar item kind.
+        """
+        style = QApplication.style()
+        if style is None:
+            return QIcon()
+        standard_pixmap = (
+            QStyle.StandardPixmap.SP_FileIcon
+            if is_flashcard_set
+            else QStyle.StandardPixmap.SP_DirClosedIcon
+        )
+        return style.standardIcon(standard_pixmap)
+
     def create_folder_item(
         self,
         folder_id: str,
@@ -310,6 +340,8 @@ class SidebarFolderController:
         flashcard_count: int,
         progress_percent: int,
         checked: bool,
+        *,
+        is_flashcard_set: bool,
     ) -> SidebarFolderItem:
         """Create one folder item for the sidebar tree.
 
@@ -319,6 +351,7 @@ class SidebarFolderController:
             flashcard_count: Number of flashcards in folder.
             progress_percent: Percent of flashcards completed for the folder.
             checked: Whether the item starts checked.
+            is_flashcard_set: Whether the item is an editable flashcard set.
 
         Returns:
             SidebarFolderItem: Configured tree item.
@@ -334,15 +367,27 @@ class SidebarFolderController:
         )
         folder_item.setData(Qt.UserRole, folder_id)
         folder_item.setData(self._folder_name_role, folder_name)
-        folder_item.setFlags(
+        folder_item.setIcon(
+            0,
+            self.folder_kind_icon(is_flashcard_set=is_flashcard_set),
+        )
+        folder_item.setToolTip(
+            0,
+            self.folder_kind_label(is_flashcard_set=is_flashcard_set),
+        )
+        item_flags = (
             folder_item.flags()
             | Qt.ItemIsUserCheckable
             | Qt.ItemIsEnabled
             | Qt.ItemIsSelectable
             | Qt.ItemIsEditable
             | Qt.ItemIsDragEnabled
-            | Qt.ItemIsDropEnabled
         )
+        if is_flashcard_set:
+            item_flags &= ~Qt.ItemIsDropEnabled
+        else:
+            item_flags |= Qt.ItemIsDropEnabled
+        folder_item.setFlags(item_flags)
         folder_item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
         self.apply_item_visual_state(folder_item)
         return folder_item

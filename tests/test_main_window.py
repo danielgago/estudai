@@ -22,7 +22,7 @@ from estudai.services.csv_flashcards import Flashcard
 from estudai.services.csv_flashcards import get_managed_csv_path
 from estudai.services.csv_flashcards import update_flashcard_in_folder
 from estudai.services.folder_storage import (
-    create_managed_folder,
+    create_managed_set,
     list_persisted_folders,
     rename_persisted_folder,
 )
@@ -305,6 +305,7 @@ def test_sidebar_button_order_is_welcoming(app: QApplication) -> None:
     assert action_button_texts == [
         "Reset Progress",
         "Create Folder",
+        "Create Set",
         "Import NotebookLM CSV",
         "Import Existing Folder",
     ]
@@ -825,7 +826,7 @@ def test_invalid_csv_folder_warns_and_loads_as_empty(
     app: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify one unreadable folder does not prevent the window from loading."""
-    persisted_folder = create_managed_folder("Broken")
+    persisted_folder = create_managed_set("Broken")
     broken_csv = Path(persisted_folder.stored_path) / "cards.csv"
     broken_csv.write_bytes(b"\xff\xfe\x00bad")
     warnings: list[str] = []
@@ -865,7 +866,7 @@ def test_prompt_add_folder_surfaces_import_errors(
 def test_prompt_add_folder_can_split_multiple_csvs_into_child_folders(
     app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Verify the import prompt can place each CSV into its own child folder."""
+    """Verify the import prompt can place each CSV into its own child set."""
     source_folder = tmp_path / "science"
     source_folder.mkdir()
     (source_folder / "biology.csv").write_text(
@@ -890,7 +891,7 @@ def test_prompt_add_folder_can_split_multiple_csvs_into_child_folders(
         "chemistry",
     ]
     root_item = window.sidebar_folder_list.item(0)
-    assert root_item.text() == "science (0 cards | 0% done)"
+    assert root_item.text() == "science (2 cards | 0% done)"
     assert root_item.childCount() == 2
     assert root_item.child(0).text() == "biology (1 card | 0% done)"
     assert root_item.child(1).text() == "chemistry (1 card | 0% done)"
@@ -1372,7 +1373,7 @@ def test_legacy_managed_folder_migrates_and_persists_progress(
             answer_display_duration_seconds=3,
         ),
     )
-    persisted_folder = create_managed_folder("Biology")
+    persisted_folder = create_managed_set("Biology")
     managed_csv = get_managed_csv_path(Path(persisted_folder.stored_path))
     managed_csv.write_text("Q1?,A1.\nQ2?,A2.\n", encoding="utf-8")
 

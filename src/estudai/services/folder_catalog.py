@@ -77,27 +77,30 @@ class PersistedFolderCatalogService:
             if not stored_path.exists():
                 continue
 
-            flashcards, load_error = self.load_folder_flashcards(
-                persisted_folder.name,
-                stored_path,
-            )
-            if load_error is not None:
-                load_errors.append(load_error)
-            else:
-                prune_folder_progress(
-                    persisted_folder.id,
-                    {
-                        flashcard.stable_id
-                        for flashcard in flashcards
-                        if flashcard.stable_id
-                    },
+            flashcards: list[Flashcard] = []
+            progress_percent = 0
+            if persisted_folder.is_flashcard_set:
+                flashcards, load_error = self.load_folder_flashcards(
+                    persisted_folder.name,
+                    stored_path,
                 )
+                if load_error is not None:
+                    load_errors.append(load_error)
+                else:
+                    prune_folder_progress(
+                        persisted_folder.id,
+                        {
+                            flashcard.stable_id
+                            for flashcard in flashcards
+                            if flashcard.stable_id
+                        },
+                    )
 
-            progress_percent = summarize_folder_progress(
-                (flashcard.stable_id for flashcard in flashcards),
-                load_folder_progress(persisted_folder.id),
-                completion_mode,
-            ).percent_done
+                progress_percent = summarize_folder_progress(
+                    (flashcard.stable_id for flashcard in flashcards),
+                    load_folder_progress(persisted_folder.id),
+                    completion_mode,
+                ).percent_done
             loaded_folders.append(
                 LoadedPersistedFolder(
                     persisted_folder=persisted_folder,

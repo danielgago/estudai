@@ -60,6 +60,7 @@ from estudai.services.settings import (
     load_app_settings,
 )
 from estudai.services.study_progress import (
+    FolderProgressSummary,
     load_folder_progress,
     summarize_folder_progress,
 )
@@ -384,7 +385,7 @@ class MainWindow(QMainWindow):
         sidebar_layout.setContentsMargins(8, 8, 8, 8)
         sidebar_layout.setSpacing(8)
 
-        sidebar_title = QLabel("Folders")
+        sidebar_title = QLabel("Folders & Sets")
         sidebar_title_font = QFont(sidebar_title.font())
         sidebar_title_font.setPointSize(16)
         sidebar_title_font.setBold(True)
@@ -451,6 +452,10 @@ class MainWindow(QMainWindow):
         create_folder_button = QPushButton("Create Folder")
         create_folder_button.clicked.connect(self.prompt_and_create_folder)
         sidebar_layout.addWidget(create_folder_button)
+
+        create_set_button = QPushButton("Create Set")
+        create_set_button.clicked.connect(self.prompt_and_create_set)
+        sidebar_layout.addWidget(create_set_button)
 
         import_notebooklm_csv_button = QPushButton("Import NotebookLM CSV")
         import_notebooklm_csv_button.clicked.connect(
@@ -940,14 +945,40 @@ class MainWindow(QMainWindow):
 
     def _sidebar_progress_percent(self, folder_id: str) -> int:
         """Return the current completion percentage for one folder."""
-        completion_mode = load_app_settings().wrong_answer_completion_mode
-        folder_flashcards = self.flashcards_by_folder.get(folder_id, [])
-        summary = summarize_folder_progress(
-            (flashcard.stable_id for flashcard in folder_flashcards),
-            load_folder_progress(folder_id),
-            completion_mode,
-        )
-        return summary.percent_done
+        return self._sidebar_progress_summary(folder_id).percent_done
+
+    def _sidebar_progress_summary(
+        self,
+        folder_id: str,
+        cache: dict[str, FolderProgressSummary] | None = None,
+    ) -> FolderProgressSummary:
+        """Return direct or aggregated progress for one sidebar node."""
+        if cache is not None and folder_id in cache:
+            return cache[folder_id]
+
+        if self._app_state.is_flashcard_set(folder_id):
+            completion_mode = load_app_settings().wrong_answer_completion_mode
+            folder_flashcards = self.flashcards_by_folder.get(folder_id, [])
+            summary = summarize_folder_progress(
+                (flashcard.stable_id for flashcard in folder_flashcards),
+                load_folder_progress(folder_id),
+                completion_mode,
+            )
+        else:
+            total_flashcards = 0
+            completed_flashcards = 0
+            for child_folder_id in self._app_state.child_folder_ids(folder_id):
+                child_summary = self._sidebar_progress_summary(child_folder_id, cache)
+                total_flashcards += child_summary.total_flashcards
+                completed_flashcards += child_summary.completed_flashcards
+            summary = FolderProgressSummary(
+                total_flashcards=total_flashcards,
+                completed_flashcards=completed_flashcards,
+            )
+
+        if cache is not None:
+            cache[folder_id] = summary
+        return summary
 
     def _refresh_sidebar_folder_progress_labels(
         self,
@@ -959,6 +990,7 @@ class MainWindow(QMainWindow):
             folder_ids: Optional subset of folder ids to refresh.
         """
         were_signals_blocked = self.sidebar_folder_list.blockSignals(True)
+        progress_summary_cache: dict[str, FolderProgressSummary] = {}
         try:
             for item in self._iter_sidebar_folder_items():
                 folder_id = item.data(Qt.UserRole)
@@ -968,12 +1000,15 @@ class MainWindow(QMainWindow):
                     continue
                 if folder_id == self._sidebar_folders.renaming_folder_id:
                     continue
-                folder_flashcards = self.flashcards_by_folder.get(folder_id, [])
+                summary = self._sidebar_progress_summary(
+                    folder_id,
+                    progress_summary_cache,
+                )
                 item.setText(
                     self._format_sidebar_folder_label(
                         self._folder_item_name(item),
-                        len(folder_flashcards),
-                        self._sidebar_progress_percent(folder_id),
+                        summary.total_flashcards,
+                        summary.percent_done,
                     )
                 )
         finally:
@@ -1063,7 +1098,7 @@ class MainWindow(QMainWindow):
         clicked_item: SidebarFolderItem,
         _column: int = 0,
     ) -> None:
-        """Open folder management when a folder is double-clicked.
+        """Open management only when a flashcard set is double-clicked.
 
         Args:
             clicked_item: The double-clicked folder list item.
@@ -1072,6 +1107,9 @@ class MainWindow(QMainWindow):
             return
         folder_id = clicked_item.data(Qt.UserRole)
         if folder_id is None:
+            return
+        if not self._app_state.is_flashcard_set(folder_id):
+            clicked_item.setExpanded(not clicked_item.isExpanded())
             return
         self.open_management_for_folder(folder_id, self._folder_item_name(clicked_item))
 
@@ -1093,12 +1131,24 @@ class MainWindow(QMainWindow):
         rename_action.setToolTip("Rename")
         create_subfolder_action = menu.addAction("Create Subfolder")
         create_subfolder_action.setToolTip("Create a child folder")
+        create_set_action = menu.addAction("Create Set")
+        create_set_action.setToolTip("Create a child flashcard set")
         forget_progress_action = menu.addAction("Forget progress")
         forget_progress_action.setToolTip("Reset folder progress")
         delete_action = menu.addAction("Delete")
         delete_action.setToolTip("Delete")
+        selected_folder_id = selected_folder_items[0].data(Qt.UserRole)
+        selected_is_set = isinstance(
+            selected_folder_id,
+            str,
+        ) and self._app_state.is_flashcard_set(selected_folder_id)
         rename_action.setEnabled(len(selected_folder_items) == 1)
-        create_subfolder_action.setEnabled(len(selected_folder_items) == 1)
+        create_subfolder_action.setEnabled(
+            len(selected_folder_items) == 1 and not selected_is_set
+        )
+        create_set_action.setEnabled(
+            len(selected_folder_items) == 1 and not selected_is_set
+        )
         chosen_action = menu.exec(
             self.sidebar_folder_list.viewport().mapToGlobal(position)
         )
@@ -1106,6 +1156,8 @@ class MainWindow(QMainWindow):
             self.rename_sidebar_folder(selected_folder_items[0])
         if chosen_action is create_subfolder_action and len(selected_folder_items) == 1:
             self.prompt_and_create_subfolder(selected_folder_items[0])
+        if chosen_action is create_set_action and len(selected_folder_items) == 1:
+            self.prompt_and_create_child_set(selected_folder_items[0])
         if chosen_action is forget_progress_action:
             self.forget_sidebar_folder_progress(selected_folder_items)
         if chosen_action is delete_action:
@@ -1237,6 +1289,10 @@ class MainWindow(QMainWindow):
         """Prompt for a folder name and create a managed empty folder."""
         self._prompt_and_create_folder()
 
+    def prompt_and_create_set(self) -> None:
+        """Prompt for a set name and create a managed empty flashcard set."""
+        self._prompt_and_create_set()
+
     def prompt_and_create_subfolder(self, folder_item: SidebarFolderItem) -> None:
         """Prompt for a subfolder name and create it under the selected folder.
 
@@ -1244,9 +1300,20 @@ class MainWindow(QMainWindow):
             folder_item: Parent folder item.
         """
         parent_folder_id = folder_item.data(Qt.UserRole)
-        if not isinstance(parent_folder_id, str):
+        if not isinstance(parent_folder_id, str) or self._app_state.is_flashcard_set(
+            parent_folder_id
+        ):
             return
         self._prompt_and_create_folder(parent_id=parent_folder_id)
+
+    def prompt_and_create_child_set(self, folder_item: SidebarFolderItem) -> None:
+        """Prompt for a set name and create it under the selected folder."""
+        parent_folder_id = folder_item.data(Qt.UserRole)
+        if not isinstance(parent_folder_id, str) or self._app_state.is_flashcard_set(
+            parent_folder_id
+        ):
+            return
+        self._prompt_and_create_set(parent_id=parent_folder_id)
 
     def _prompt_and_create_folder(self, parent_id: str | None = None) -> None:
         """Prompt for a folder name and create it at the requested level.
@@ -1263,6 +1330,20 @@ class MainWindow(QMainWindow):
             return
         self._sidebar_folder_operations_controller.create_folder(
             folder_name,
+            parent_id=parent_id,
+        )
+
+    def _prompt_and_create_set(self, parent_id: str | None = None) -> None:
+        """Prompt for a set name and create it at the requested level."""
+        set_name, accepted = QInputDialog.getText(
+            self,
+            "Create child set" if parent_id is not None else "Create set",
+            "Child set name:" if parent_id is not None else "Set name:",
+        )
+        if not accepted:
+            return
+        self._sidebar_folder_operations_controller.create_set(
+            set_name,
             parent_id=parent_id,
         )
 
@@ -1398,6 +1479,8 @@ class MainWindow(QMainWindow):
         flashcard_count: int,
         progress_percent: int,
         checked: bool,
+        *,
+        is_flashcard_set: bool,
     ) -> SidebarFolderItem:
         """Create one folder item for the sidebar list.
 
@@ -1407,6 +1490,7 @@ class MainWindow(QMainWindow):
             flashcard_count: Number of flashcards in folder.
             progress_percent: Percent of flashcards completed for the folder.
             checked: Whether the item starts checked.
+            is_flashcard_set: Whether the item is an editable flashcard set.
 
         Returns:
             SidebarFolderItem: Configured tree item.
@@ -1417,6 +1501,7 @@ class MainWindow(QMainWindow):
             flashcard_count,
             progress_percent,
             checked,
+            is_flashcard_set=is_flashcard_set,
         )
 
     def _apply_sidebar_item_visual_state(self, item: SidebarFolderItem) -> None:
@@ -1488,6 +1573,8 @@ class MainWindow(QMainWindow):
                     folder_id=loaded_folder.persisted_folder.id,
                     folder_name=loaded_folder.persisted_folder.name,
                     folder_path=loaded_folder.stored_path,
+                    parent_id=loaded_folder.persisted_folder.parent_id,
+                    is_flashcard_set=loaded_folder.persisted_folder.is_flashcard_set,
                     flashcards=loaded_folder.flashcards,
                     selected_indexes=self._app_state.normalized_selected_indexes(
                         loaded_folder.persisted_folder.id,
@@ -1500,6 +1587,7 @@ class MainWindow(QMainWindow):
         self.sidebar_folder_list.blockSignals(True)
         self.sidebar_folder_list.clear()
         folder_items_by_id: dict[str, SidebarFolderItem] = {}
+        progress_summary_cache: dict[str, FolderProgressSummary] = {}
 
         for loaded_folder in catalog_result.folders:
             persisted_folder = loaded_folder.persisted_folder
@@ -1510,12 +1598,17 @@ class MainWindow(QMainWindow):
                 else persisted_folder.id in preferred_checked_ids
                 or (parent_item is not None and parent_item.checkState() == Qt.Checked)
             )
+            summary = self._sidebar_progress_summary(
+                persisted_folder.id,
+                progress_summary_cache,
+            )
             folder_item = self._create_sidebar_folder_item(
                 persisted_folder.id,
                 persisted_folder.name,
-                flashcard_count=len(loaded_folder.flashcards),
-                progress_percent=loaded_folder.progress_percent,
+                flashcard_count=summary.total_flashcards,
+                progress_percent=summary.percent_done,
                 checked=is_checked,
+                is_flashcard_set=persisted_folder.is_flashcard_set,
             )
             if parent_item is None:
                 self.sidebar_folder_list.addItem(folder_item)
@@ -1548,8 +1641,10 @@ class MainWindow(QMainWindow):
         self._refresh_loaded_flashcards()
         if self.stacked_widget.currentWidget() is self.management_page:
             editing_folder_id = self._management_controller.editing_folder_id
-            if editing_folder_id is not None and self._app_state.has_folder(
-                editing_folder_id
+            if (
+                editing_folder_id is not None
+                and self._app_state.has_folder(editing_folder_id)
+                and self._app_state.is_flashcard_set(editing_folder_id)
             ):
                 self.management_page.set_folder_flashcards(
                     editing_folder_id,

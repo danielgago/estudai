@@ -27,16 +27,65 @@ def test_sidebar_folder_controller_creates_items_and_tracks_checked_ids(
     folder_list = SidebarFolderTreeWidget()
     controller = SidebarFolderController(folder_list, Qt.UserRole + 1)
 
-    first_item = controller.create_folder_item("bio", "Biology", 2, 50, True)
-    second_item = controller.create_folder_item("chem", "Chemistry", 1, 0, False)
+    first_item = controller.create_folder_item(
+        "bio",
+        "Biology",
+        2,
+        50,
+        True,
+        is_flashcard_set=True,
+    )
+    second_item = controller.create_folder_item(
+        "chem",
+        "Chemistry",
+        1,
+        0,
+        False,
+        is_flashcard_set=True,
+    )
     folder_list.addItem(first_item)
     folder_list.addItem(second_item)
 
     assert first_item.text() == "Biology (2 cards | 50% done)"
     assert second_item.text() == "Chemistry (1 card | 0% done)"
+    assert first_item.toolTip(0) == "Flashcard set"
+    assert second_item.toolTip(0) == "Flashcard set"
     assert first_item.font().bold() is True
     assert second_item.font().bold() is False
     assert controller.checked_folder_ids() == {"bio"}
+
+
+def test_sidebar_folder_controller_distinguishes_folders_from_sets(
+    app: QApplication,
+) -> None:
+    """Verify folders and sets expose distinct sidebar visuals."""
+    folder_list = SidebarFolderTreeWidget()
+    controller = SidebarFolderController(folder_list, Qt.UserRole + 1)
+
+    folder_item = controller.create_folder_item(
+        "bio-folder",
+        "Biology",
+        3,
+        25,
+        False,
+        is_flashcard_set=False,
+    )
+    set_item = controller.create_folder_item(
+        "bio-set",
+        "Genetics",
+        3,
+        25,
+        False,
+        is_flashcard_set=True,
+    )
+
+    assert folder_item.toolTip(0) == "Folder"
+    assert set_item.toolTip(0) == "Flashcard set"
+    assert folder_item.icon(0).isNull() is False
+    assert set_item.icon(0).isNull() is False
+    assert folder_item.icon(0).cacheKey() != set_item.icon(0).cacheKey()
+    assert bool(folder_item.flags() & Qt.ItemIsDropEnabled) is True
+    assert bool(set_item.flags() & Qt.ItemIsDropEnabled) is False
 
 
 def test_sidebar_folder_controller_normalizes_context_menu_selection(
@@ -45,8 +94,22 @@ def test_sidebar_folder_controller_normalizes_context_menu_selection(
     """Verify context-menu selection is narrowed to the clicked folder item."""
     folder_list = SidebarFolderTreeWidget()
     controller = SidebarFolderController(folder_list, Qt.UserRole + 1)
-    first_item = controller.create_folder_item("bio", "Biology", 1, 0, True)
-    second_item = controller.create_folder_item("chem", "Chemistry", 1, 0, True)
+    first_item = controller.create_folder_item(
+        "bio",
+        "Biology",
+        1,
+        0,
+        True,
+        is_flashcard_set=True,
+    )
+    second_item = controller.create_folder_item(
+        "chem",
+        "Chemistry",
+        1,
+        0,
+        True,
+        is_flashcard_set=True,
+    )
     folder_list.addItem(first_item)
     folder_list.addItem(second_item)
     first_item.setSelected(True)
