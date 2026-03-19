@@ -4,7 +4,7 @@ import os
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QTreeWidgetItem
 
 from estudai.ui.sidebar_folders import SidebarFolderController, SidebarFolderTreeWidget
 
@@ -46,10 +46,14 @@ def test_sidebar_folder_controller_creates_items_and_tracks_checked_ids(
     folder_list.addItem(first_item)
     folder_list.addItem(second_item)
 
-    assert first_item.text() == "Biology (2 cards | 50% done)"
-    assert second_item.text() == "Chemistry (1 card | 0% done)"
-    assert first_item.toolTip(0) == "Flashcard set"
-    assert second_item.toolTip(0) == "Flashcard set"
+    assert first_item.text() == "Biology"
+    assert first_item.text(1) == "2 cards | 50% done"
+    assert second_item.text() == "Chemistry"
+    assert second_item.text(1) == "1 card | 0% done"
+    assert first_item.toolTip(0) == "Biology"
+    assert first_item.toolTip(1) == "Biology"
+    assert second_item.toolTip(0) == "Chemistry"
+    assert second_item.toolTip(1) == "Chemistry"
     assert first_item.font().bold() is True
     assert second_item.font().bold() is False
     assert controller.checked_folder_ids() == {"bio"}
@@ -79,13 +83,21 @@ def test_sidebar_folder_controller_distinguishes_folders_from_sets(
         is_flashcard_set=True,
     )
 
-    assert folder_item.toolTip(0) == "Folder"
-    assert set_item.toolTip(0) == "Flashcard set"
+    assert folder_item.toolTip(0) == "Biology"
+    assert set_item.toolTip(0) == "Genetics"
     assert folder_item.icon(0).isNull() is False
     assert set_item.icon(0).isNull() is False
     assert folder_item.icon(0).cacheKey() != set_item.icon(0).cacheKey()
     assert bool(folder_item.flags() & Qt.ItemIsDropEnabled) is True
     assert bool(set_item.flags() & Qt.ItemIsDropEnabled) is False
+    assert (
+        folder_item.childIndicatorPolicy()
+        == QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator
+    )
+    assert (
+        set_item.childIndicatorPolicy()
+        == QTreeWidgetItem.ChildIndicatorPolicy.DontShowIndicatorWhenChildless
+    )
 
 
 def test_sidebar_folder_controller_normalizes_context_menu_selection(

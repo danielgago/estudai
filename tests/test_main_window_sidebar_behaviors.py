@@ -5,7 +5,12 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtWidgets import QAbstractItemView, QApplication, QMessageBox
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
+    QMessageBox,
+    QTreeWidgetItem,
+)
 
 from estudai.services.folder_storage import (
     PersistedFolder,
@@ -91,7 +96,8 @@ def test_inline_rename_invalid_name_shows_warning(
     folder_item.setText("   ")
 
     assert warnings
-    assert window.sidebar_folder_list.item(0).text() == "biology (1 card | 0% done)"
+    assert window.sidebar_folder_list.item(0).text() == "biology"
+    assert window.sidebar_folder_list.item(0).text(1) == "1 card | 0% done"
 
 
 def test_sidebar_editor_closed_clears_tracking(app: QApplication) -> None:
@@ -478,11 +484,17 @@ def test_sidebar_items_show_distinct_folder_and_set_affordances(
 
     assert root_item.data(Qt.UserRole) == root_folder.id
     assert child_item.data(Qt.UserRole) == child_set.id
-    assert root_item.toolTip(0) == "Folder"
-    assert child_item.toolTip(0) == "Flashcard set"
+    assert root_item.toolTip(0) == "Biology"
+    assert root_item.toolTip(1) == "Biology"
+    assert child_item.toolTip(0) == "Genetics"
+    assert child_item.toolTip(1) == "Genetics"
     assert root_item.icon(0).isNull() is False
     assert child_item.icon(0).isNull() is False
     assert root_item.icon(0).cacheKey() != child_item.icon(0).cacheKey()
+    assert (
+        root_item.childIndicatorPolicy()
+        == QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator
+    )
 
 
 def test_sidebar_enables_internal_drag_drop(app: QApplication) -> None:

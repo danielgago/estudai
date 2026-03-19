@@ -83,6 +83,7 @@ from .navigation_icons import (
     load_navigation_icon,
 )
 from .pages import ManagementPage, SettingsPage, TimerPage
+from .sidebar_overlay import SidebarOverlayFrame
 from .sidebar_folders import (
     SidebarFolderController,
     SidebarFolderItem,
@@ -376,9 +377,10 @@ class MainWindow(QMainWindow):
 
     def _build_sidebar(self, root_layout: QHBoxLayout) -> None:
         """Build the sidebar area."""
-        self.sidebar = QFrame(self.centralWidget())
+        self.sidebar = SidebarOverlayFrame(self.centralWidget())
         self.sidebar.setFrameShape(QFrame.StyledPanel)
         self.sidebar.setVisible(False)
+        self.sidebar.width_resize_requested.connect(self._handle_sidebar_width_resize)
         sidebar_layout = QVBoxLayout(self.sidebar)
         sidebar_layout.setContentsMargins(8, 8, 8, 8)
         sidebar_layout.setSpacing(8)
@@ -513,7 +515,7 @@ class MainWindow(QMainWindow):
         return self._hotkey_controller.start_stop_shortcut_sequences(binding)
 
     def resizeEvent(self, event) -> None:  # noqa: N802
-        """Resize sidebar width proportionally with window size."""
+        """Clamp sidebar width and reposition the overlay after window resize."""
         super().resizeEvent(event)
         self._update_sidebar_width()
 
@@ -559,10 +561,27 @@ class MainWindow(QMainWindow):
             palette.color(QPalette.WindowText),
             overlay_ratio=0.28,
         ).name(QColor.HexRgb)
+        resize_handle_color = blend_colors(
+            palette.color(QPalette.Window),
+            palette.color(QPalette.WindowText),
+            overlay_ratio=0.18,
+        ).name(QColor.HexRgb)
+        resize_handle_hover_color = blend_colors(
+            palette.color(QPalette.Window),
+            palette.color(QPalette.WindowText),
+            overlay_ratio=0.32,
+        ).name(QColor.HexRgb)
         self.sidebar.setStyleSheet(
-            "QFrame {"
+            "#sidebarOverlay {"
             " background-color: palette(window);"
             f" border: 1px solid {border_color};"
+            "}"
+            "#sidebarResizeHandle {"
+            f" border-left: 1px solid {resize_handle_color};"
+            " background-color: transparent;"
+            "}"
+            "#sidebarResizeHandle:hover {"
+            f" background-color: {resize_handle_hover_color};"
             "}"
         )
         self.sidebar_folder_list.setStyleSheet(
@@ -575,6 +594,13 @@ class MainWindow(QMainWindow):
         if controller is None:
             return
         controller.update_sidebar_width()
+
+    def _handle_sidebar_width_resize(self, width: int) -> None:
+        """Apply one sidebar width selected via the drag handle."""
+        controller = getattr(self, "_app_shell_controller", None)
+        if controller is None:
+            return
+        controller.set_sidebar_width(width)
 
     def _position_sidebar(self) -> None:
         """Place sidebar as an overlay anchored below the sidebar toggle button."""
@@ -994,12 +1020,11 @@ class MainWindow(QMainWindow):
                     folder_id,
                     progress_summary_cache,
                 )
-                item.setText(
-                    self._format_sidebar_folder_label(
-                        self._folder_item_name(item),
-                        summary.total_flashcards,
-                        summary.percent_done,
-                    )
+                self._sidebar_folders.update_folder_item_label(
+                    item,
+                    self._folder_item_name(item),
+                    summary.total_flashcards,
+                    summary.percent_done,
                 )
         finally:
             self.sidebar_folder_list.blockSignals(were_signals_blocked)
@@ -1532,19 +1557,6 @@ class MainWindow(QMainWindow):
             "Load flashcards",
             "Some folders could not be read and were loaded with 0 flashcards:\n"
             f"{details}",
-        )
-
-    def _format_sidebar_folder_label(
-        self,
-        folder_name: str,
-        flashcard_count: int,
-        progress_percent: int,
-    ) -> str:
-        """Build sidebar folder label with card count."""
-        return self._sidebar_folders.format_folder_label(
-            folder_name,
-            flashcard_count,
-            progress_percent,
         )
 
     def handle_management_data_changed(

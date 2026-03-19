@@ -18,6 +18,10 @@ WindowModeCallback = Callable[[], None]
 class AppShellController:
     """Coordinate page switching and shell-level sidebar behavior."""
 
+    _MINIMUM_SIDEBAR_WIDTH = 220
+    _RESPONSIVE_MAXIMUM_SIDEBAR_WIDTH = 300
+    _MANUAL_MAXIMUM_SIDEBAR_WIDTH = 520
+
     def __init__(
         self,
         *,
@@ -70,22 +74,28 @@ class AppShellController:
         self._is_fullscreen = is_fullscreen
         self._show_normal = show_normal
         self._show_fullscreen = show_fullscreen
+        self._sidebar_width_override: int | None = None
 
     def update_sidebar_width(self) -> None:
-        """Keep the sidebar width responsive within a readable range."""
-        responsive_width = max(220, min(300, int(self._window_width_getter() * 0.18)))
-        self._sidebar.setFixedWidth(responsive_width)
-        self.position_sidebar()
+        """Apply either the responsive width or the current user override."""
+        preferred_width = (
+            self._responsive_sidebar_width()
+            if self._sidebar_width_override is None
+            else self._sidebar_width_override
+        )
+        self._apply_sidebar_width(preferred_width)
+
+    def set_sidebar_width(self, width: int) -> None:
+        """Persist a user-selected sidebar width and apply it immediately."""
+        self._sidebar_width_override = max(self._MINIMUM_SIDEBAR_WIDTH, width)
+        self._apply_sidebar_width(self._sidebar_width_override)
 
     def position_sidebar(self) -> None:
         """Place the sidebar as an overlay below the toggle button."""
         central_widget = self._central_widget_getter()
         if central_widget is None:
             return
-        anchor_point = self._sidebar_toggle_button.mapTo(
-            central_widget,
-            QPoint(0, self._sidebar_toggle_button.height() + 8),
-        )
+        anchor_point = self._sidebar_anchor_point(central_widget)
         bottom_margin = 12
         available_height = max(
             120,
@@ -141,6 +151,47 @@ class AppShellController:
         """Leave fullscreen mode when currently active."""
         if self._is_fullscreen():
             self._show_normal()
+
+    def _apply_sidebar_width(self, width: int) -> None:
+        """Clamp and apply one sidebar width, then reposition the overlay."""
+        self._sidebar.setFixedWidth(self._clamped_sidebar_width(width))
+        self.position_sidebar()
+
+    def _responsive_sidebar_width(self) -> int:
+        """Return the default responsive width for the current window size."""
+        return max(
+            self._MINIMUM_SIDEBAR_WIDTH,
+            min(
+                self._RESPONSIVE_MAXIMUM_SIDEBAR_WIDTH,
+                int(self._window_width_getter() * 0.18),
+            ),
+        )
+
+    def _clamped_sidebar_width(self, width: int) -> int:
+        """Clamp one sidebar width to the available overlay space."""
+        return max(
+            self._MINIMUM_SIDEBAR_WIDTH,
+            min(self._maximum_sidebar_width(), width),
+        )
+
+    def _maximum_sidebar_width(self) -> int:
+        """Return the maximum sidebar width allowed in the current window."""
+        central_widget = self._central_widget_getter()
+        if central_widget is None:
+            return self._MANUAL_MAXIMUM_SIDEBAR_WIDTH
+        anchor_point = self._sidebar_anchor_point(central_widget)
+        available_width = max(
+            self._MINIMUM_SIDEBAR_WIDTH,
+            central_widget.width() - anchor_point.x() - 12,
+        )
+        return min(self._MANUAL_MAXIMUM_SIDEBAR_WIDTH, available_width)
+
+    def _sidebar_anchor_point(self, central_widget: QWidget) -> QPoint:
+        """Return the sidebar overlay anchor point within the central widget."""
+        return self._sidebar_toggle_button.mapTo(
+            central_widget,
+            QPoint(0, self._sidebar_toggle_button.height() + 8),
+        )
 
     def widget_contains_global_position(
         self,

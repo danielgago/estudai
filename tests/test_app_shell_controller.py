@@ -300,6 +300,38 @@ def test_update_sidebar_width_caps_large_windows_and_repositions(
     assert position_calls == ["position"]
 
 
+def test_set_sidebar_width_preserves_user_override_on_window_updates(
+    app: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify manual sidebar width overrides survive later width refreshes."""
+    (
+        controller,
+        _central_widget,
+        sidebar,
+        _toggle_button,
+        _settings_button,
+        _stacked_widget,
+        _timer_page,
+        _management_page,
+        _settings_page,
+        _preview_calls,
+        _fullscreen_state,
+    ) = _build_controller(window_width=3000)
+    position_calls: list[str] = []
+    monkeypatch.setattr(
+        controller,
+        "position_sidebar",
+        lambda: position_calls.append("position"),
+    )
+
+    controller.set_sidebar_width(420)
+    controller.update_sidebar_width()
+
+    assert sidebar.width() == 420
+    assert position_calls == ["position", "position"]
+
+
 def test_fullscreen_helpers_toggle_and_exit_deterministically(
     app: QApplication,
 ) -> None:

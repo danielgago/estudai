@@ -6,7 +6,13 @@ from collections.abc import Callable, Iterator
 
 from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QFont, QIcon
-from PySide6.QtWidgets import QApplication, QStyle, QTreeWidget, QTreeWidgetItem
+from PySide6.QtWidgets import (
+    QApplication,
+    QHeaderView,
+    QStyle,
+    QTreeWidget,
+    QTreeWidgetItem,
+)
 
 from estudai.ui.utils import format_card_count
 
@@ -78,10 +84,14 @@ class SidebarFolderTreeWidget(QTreeWidget):
     folder_drop_completed = Signal(str, object, int)
 
     def __init__(self) -> None:
-        """Initialize a one-column tree widget for the sidebar."""
+        """Initialize a two-column tree widget for the sidebar."""
         super().__init__()
-        self.setColumnCount(1)
+        self.setColumnCount(2)
         self.setHeaderHidden(True)
+        header = self.header()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self._spacing = 0
         self._dragged_folder_id: str | None = None
 
@@ -297,11 +307,17 @@ class SidebarFolderController:
         flashcard_count: int,
         progress_percent: int,
     ) -> str:
-        """Build sidebar folder label with card count and completion progress."""
-        return (
-            f"{folder_name} "
-            f"({format_card_count(flashcard_count)} | {progress_percent}% done)"
-        )
+        """Build the primary sidebar label text for one folder item."""
+        del flashcard_count, progress_percent
+        return folder_name
+
+    def format_folder_summary(
+        self,
+        flashcard_count: int,
+        progress_percent: int,
+    ) -> str:
+        """Build the compact sidebar progress summary for one folder item."""
+        return f"{format_card_count(flashcard_count)} | {progress_percent}% done"
 
     def folder_kind_label(self, *, is_flashcard_set: bool) -> str:
         """Return the user-facing label for one sidebar item kind.
@@ -362,19 +378,26 @@ class SidebarFolderController:
                     folder_name,
                     flashcard_count,
                     progress_percent,
-                )
+                ),
+                self.format_folder_summary(
+                    flashcard_count,
+                    progress_percent,
+                ),
             ]
         )
         folder_item.setData(Qt.UserRole, folder_id)
         folder_item.setData(self._folder_name_role, folder_name)
+        folder_item.setData(
+            1,
+            Qt.TextAlignmentRole,
+            int(Qt.AlignRight | Qt.AlignVCenter),
+        )
         folder_item.setIcon(
             0,
             self.folder_kind_icon(is_flashcard_set=is_flashcard_set),
         )
-        folder_item.setToolTip(
-            0,
-            self.folder_kind_label(is_flashcard_set=is_flashcard_set),
-        )
+        folder_item.setToolTip(0, folder_name)
+        folder_item.setToolTip(1, folder_name)
         item_flags = (
             folder_item.flags()
             | Qt.ItemIsUserCheckable
@@ -385,12 +408,45 @@ class SidebarFolderController:
         )
         if is_flashcard_set:
             item_flags &= ~Qt.ItemIsDropEnabled
+            folder_item.setChildIndicatorPolicy(
+                QTreeWidgetItem.ChildIndicatorPolicy.DontShowIndicatorWhenChildless
+            )
         else:
             item_flags |= Qt.ItemIsDropEnabled
+            folder_item.setChildIndicatorPolicy(
+                QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator
+            )
         folder_item.setFlags(item_flags)
         folder_item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
         self.apply_item_visual_state(folder_item)
         return folder_item
+
+    def update_folder_item_label(
+        self,
+        item: SidebarFolderItem,
+        folder_name: str,
+        flashcard_count: int,
+        progress_percent: int,
+    ) -> None:
+        """Refresh one sidebar item's visible name and progress summary."""
+        item.setData(self._folder_name_role, folder_name)
+        item.setText(
+            0,
+            self.format_folder_label(
+                folder_name,
+                flashcard_count,
+                progress_percent,
+            ),
+        )
+        item.setText(
+            1,
+            self.format_folder_summary(
+                flashcard_count,
+                progress_percent,
+            ),
+        )
+        item.setToolTip(0, folder_name)
+        item.setToolTip(1, folder_name)
 
     def create_placeholder_item(self, text: str) -> SidebarFolderItem:
         """Create one non-interactive placeholder item.
