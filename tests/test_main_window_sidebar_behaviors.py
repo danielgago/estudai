@@ -5,11 +5,17 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtWidgets import QAbstractItemView, QApplication, QMessageBox
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
+    QMessageBox,
+    QTreeWidgetItem,
+)
 
 from estudai.services.folder_storage import (
     PersistedFolder,
     create_managed_folder,
+    create_managed_set,
     list_persisted_folders,
 )
 from estudai.services.study_progress import (
@@ -90,7 +96,8 @@ def test_inline_rename_invalid_name_shows_warning(
     folder_item.setText("   ")
 
     assert warnings
-    assert window.sidebar_folder_list.item(0).text() == "biology (1 card | 0% done)"
+    assert window.sidebar_folder_list.item(0).text() == "biology"
+    assert window.sidebar_folder_list.item(0).text(1) == "1 card | 0% done"
 
 
 def test_sidebar_editor_closed_clears_tracking(app: QApplication) -> None:
@@ -117,11 +124,11 @@ def test_sidebar_click_ignores_non_folder_item(app: QApplication) -> None:
 
 
 def test_open_sidebar_menu_rename_action_uses_expected_labels(
-    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    app: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify context menu labels and rename dispatch are correct."""
+    create_managed_folder("Biology")
     window = MainWindow()
-    _add_sample_folder(window, tmp_path)
     folder_item = window.sidebar_folder_list.item(0)
     called: list[str] = []
 
@@ -171,13 +178,81 @@ def test_open_sidebar_menu_rename_action_uses_expected_labels(
     assert called == ["rename"]
     assert [action.text for action in _FakeMenu.last_instance.actions] == [
         "Rename",
+        "Forget progress",
+        "Delete",
         "Create Subfolder",
+        "Create Set",
+    ]
+    assert [action.tooltip for action in _FakeMenu.last_instance.actions] == [
+        "Rename",
+        "Reset folder progress",
+        "Delete",
+        "Create a child folder",
+        "Create a child flashcard set",
+    ]
+
+
+def test_open_sidebar_menu_for_set_hides_create_actions(
+    app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify sets do not expose create-folder or create-set actions."""
+    set_folder = create_managed_set("Biology")
+    window = MainWindow()
+    set_item = window.sidebar_folder_list.item(0)
+    called: list[str] = []
+
+    class _FakeAction:
+        def __init__(self, text: str) -> None:
+            self.text = text
+            self.tooltip = ""
+            self.enabled = True
+
+        def setToolTip(self, value: str) -> None:  # noqa: N802
+            self.tooltip = value
+
+        def setEnabled(self, enabled: bool) -> None:  # noqa: N802
+            self.enabled = enabled
+
+    class _FakeMenu:
+        last_instance = None
+
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.actions: list[_FakeAction] = []
+            _FakeMenu.last_instance = self
+
+        def addAction(self, text: str) -> _FakeAction:  # noqa: N802
+            action = _FakeAction(text)
+            self.actions.append(action)
+            return action
+
+        def exec(self, *_args, **_kwargs):  # noqa: A003
+            return self.actions[0]
+
+    monkeypatch.setattr("estudai.ui.main_window.QMenu", _FakeMenu)
+    monkeypatch.setattr(window.sidebar_folder_list, "itemAt", lambda _pos: set_item)
+    monkeypatch.setattr(
+        window, "rename_sidebar_folder", lambda _item: called.append("rename")
+    )
+    monkeypatch.setattr(
+        window,
+        "forget_sidebar_folder_progress",
+        lambda _items: called.append("forget"),
+    )
+    monkeypatch.setattr(
+        window, "delete_sidebar_folders", lambda _items: called.append("delete")
+    )
+
+    window.open_sidebar_folder_menu(QPoint(0, 0))
+
+    assert set_item.data(Qt.UserRole) == set_folder.id
+    assert called == ["rename"]
+    assert [action.text for action in _FakeMenu.last_instance.actions] == [
+        "Rename",
         "Forget progress",
         "Delete",
     ]
     assert [action.tooltip for action in _FakeMenu.last_instance.actions] == [
         "Rename",
-        "Create a child folder",
         "Reset folder progress",
         "Delete",
     ]
@@ -396,6 +471,32 @@ def test_handle_management_data_changed_builds_nested_sidebar_tree(
     assert child_item.checkState() == Qt.Unchecked
 
 
+def test_sidebar_items_show_distinct_folder_and_set_affordances(
+    app: QApplication,
+) -> None:
+    """Verify sidebar items expose visible folder/set distinctions."""
+    root_folder = create_managed_folder("Biology")
+    child_set = create_managed_set("Genetics", parent_id=root_folder.id)
+    window = MainWindow()
+
+    root_item = window.sidebar_folder_list.item(0)
+    child_item = window.sidebar_folder_list.item(1)
+
+    assert root_item.data(Qt.UserRole) == root_folder.id
+    assert child_item.data(Qt.UserRole) == child_set.id
+    assert root_item.toolTip(0) == "Biology"
+    assert root_item.toolTip(1) == "Biology"
+    assert child_item.toolTip(0) == "Genetics"
+    assert child_item.toolTip(1) == "Genetics"
+    assert root_item.icon(0).isNull() is False
+    assert child_item.icon(0).isNull() is False
+    assert root_item.icon(0).cacheKey() != child_item.icon(0).cacheKey()
+    assert (
+        root_item.childIndicatorPolicy()
+        == QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator
+    )
+
+
 def test_sidebar_enables_internal_drag_drop(app: QApplication) -> None:
     """Verify the sidebar tree uses internal drag-and-drop reordering."""
     window = MainWindow()
@@ -408,9 +509,10 @@ def test_sidebar_enables_internal_drag_drop(app: QApplication) -> None:
 def test_handle_sidebar_folder_drop_persists_reparenting(
     app: QApplication, tmp_path: Path
 ) -> None:
-    """Verify a completed drop persists the folder under its new parent."""
+    """Verify a completed drop persists a set under a folder container."""
     window = MainWindow()
-    _add_sample_folder(window, tmp_path, "biology")
+    create_managed_folder("biology")
+    window.handle_management_data_changed()
     _add_sample_folder(window, tmp_path, "chemistry")
     biology_item = window.sidebar_folder_list.item(0)
     chemistry_item = window.sidebar_folder_list.item(1)

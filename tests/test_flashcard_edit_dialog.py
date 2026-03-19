@@ -46,7 +46,7 @@ def test_dialog_rejects_side_without_text_or_image(
     warnings: list[str] = []
     dialog = FlashcardEditDialog("", "")
     monkeypatch.setattr(
-        "estudai.ui.dialog.flashcard_edit_dialog.QMessageBox.warning",
+        "estudai.ui.message_box.MessageBoxPresenter.show_warning",
         lambda *_args: warnings.append("warning"),
     )
 

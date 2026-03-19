@@ -155,6 +155,31 @@ def test_flashcard_display_hides_timer_and_reveals_answer() -> None:
     assert page.current_flashcard_question_text() == ""
 
 
+def test_flashcard_origin_path_is_shown_and_clickable() -> None:
+    """Verify the flashcard header shows the origin path and emits clicks."""
+    _get_app()
+    page = TimerPage()
+    origin_clicks: list[str] = []
+
+    page.flashcard_origin_requested.connect(lambda: origin_clicks.append("origin"))
+    page.show_flashcard_question("What is DNA?")
+    page.set_flashcard_origin("Science / Biology", clickable=True)
+
+    assert page.flashcard_origin_label.isHidden() is False
+    assert page.current_flashcard_origin_path() == "Science / Biology"
+    assert page.flashcard_origin_label.text() == "Science / Biology"
+    assert page.flashcard_origin_label.textFormat() == Qt.PlainText
+
+    page.flashcard_origin_label.clicked.emit()
+
+    assert origin_clicks == ["origin"]
+
+    page.clear_flashcard_display()
+
+    assert page.flashcard_origin_label.isHidden() is True
+    assert page.current_flashcard_origin_path() is None
+
+
 def test_copy_feedback_shows_only_while_flashcard_question_is_visible() -> None:
     """Verify copy feedback only appears for an active flashcard question."""
     _get_app()
@@ -284,11 +309,16 @@ def test_paused_flashcard_actions_are_positioned_above_question() -> None:
     _get_app()
     page = TimerPage()
     flashcard_layout = page.content_stack.widget(1).layout()
+    flashcard_header_layout = page.flashcard_header_container.layout()
     flashcard_content_layout = page.flashcard_content_layout
 
-    assert flashcard_layout.itemAt(0).widget() is page.flashcard_pause_actions_container
+    assert flashcard_layout.itemAt(0).widget() is page.flashcard_header_container
     assert flashcard_layout.itemAt(1).widget() is page.flashcard_content_widget
-    assert flashcard_layout.itemAt(0).alignment() == (Qt.AlignTop | Qt.AlignRight)
+    assert flashcard_header_layout.itemAt(0).widget() is page.flashcard_origin_label
+    assert (
+        flashcard_header_layout.itemAt(2).widget()
+        is page.flashcard_pause_actions_container
+    )
     assert flashcard_content_layout.itemAt(1).widget() is page.flashcard_question_label
     assert (
         flashcard_content_layout.itemAt(2).widget()

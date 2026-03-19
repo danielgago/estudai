@@ -12,7 +12,6 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QColor,
-    QFont,
     QKeySequence,
     QPalette,
     QShortcut,
@@ -24,7 +23,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QInputDialog,
-    QLabel,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -60,6 +58,7 @@ from estudai.services.settings import (
     load_app_settings,
 )
 from estudai.services.study_progress import (
+    FolderProgressSummary,
     load_folder_progress,
     summarize_folder_progress,
 )
@@ -84,6 +83,7 @@ from .navigation_icons import (
     load_navigation_icon,
 )
 from .pages import ManagementPage, SettingsPage, TimerPage
+from .sidebar_overlay import SidebarOverlayFrame
 from .sidebar_folders import (
     SidebarFolderController,
     SidebarFolderItem,
@@ -234,14 +234,7 @@ class MainWindow(QMainWindow):
             refresh_management_data=self._refresh_sidebar_data,
             switch_to_management=self.switch_to_management,
             switch_to_timer=self.switch_to_timer,
-            edit_dialog_factory=lambda question, answer, question_image_path, answer_image_path, folder_path: FlashcardEditDialog(
-                question,
-                answer,
-                question_image_path=question_image_path,
-                answer_image_path=answer_image_path,
-                base_folder_path=folder_path,
-                parent=self,
-            ),
+            edit_dialog_factory=self._create_flashcard_edit_dialog,
         )
         self._timer_controller = TimerPageController(
             parent=self,
@@ -252,23 +245,17 @@ class MainWindow(QMainWindow):
             iter_sidebar_folder_items=self._iter_sidebar_folder_items,
             set_navigation_visible=self.set_navigation_visible,
             switch_to_timer=self.switch_to_timer,
-            emit_show_flashcard=lambda flashcard: self.show_flashcard_requested.emit(
-                flashcard
-            ),
+            emit_show_flashcard=self._emit_show_flashcard_requested,
             refresh_sidebar_folder_progress_labels=(
                 self._refresh_sidebar_folder_progress_labels
             ),
-            start_flashcard_phase_timer=lambda duration_ms, callback: (
-                self._timer_controller.start_flashcard_phase_timer(
-                    duration_ms, callback
-                )
-            ),
+            start_flashcard_phase_timer=self._start_flashcard_phase_timer_from_controller,
             handle_flashcard_phase_timeout=(
-                lambda: self._timer_controller.handle_flashcard_phase_timeout()
+                self._handle_flashcard_phase_timeout_from_controller
             ),
-            handle_timer_cycle_completed=lambda: self.handle_timer_cycle_completed(),
-            load_settings=lambda: load_app_settings(),
-            default_sound_path_getter=lambda: get_default_notification_sound_path(),
+            handle_timer_cycle_completed=self.handle_timer_cycle_completed,
+            load_settings=self._load_current_app_settings,
+            default_sound_path_getter=self._get_default_notification_sound_path,
         )
         flashcard_phase_timer.timeout.connect(
             self._timer_controller.handle_flashcard_phase_timeout
@@ -279,33 +266,10 @@ class MainWindow(QMainWindow):
             app_state=self._app_state,
             runtime=self._timer_controller,
             checked_folder_ids_getter=self._get_checked_folder_ids,
-            handle_folder_data_changed=(
-                lambda preferred_checked_ids, preferred_current_folder_id: (
-                    self.handle_management_data_changed(
-                        preferred_checked_ids=preferred_checked_ids,
-                        preferred_current_folder_id=preferred_current_folder_id,
-                    )
-                )
-            ),
-            edit_dialog_factory=lambda question, answer, question_image_path, answer_image_path, folder_path: FlashcardEditDialog(
-                question,
-                answer,
-                question_image_path=question_image_path,
-                answer_image_path=answer_image_path,
-                base_folder_path=folder_path,
-                parent=self,
-            ),
+            handle_folder_data_changed=self._handle_folder_data_changed_from_controller,
+            edit_dialog_factory=self._create_flashcard_edit_dialog,
             show_warning_message=self._show_warning_message,
-            confirm_action=lambda title, message: (
-                QMessageBox.question(
-                    self,
-                    title,
-                    message,
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No,
-                )
-                == QMessageBox.Yes
-            ),
+            confirm_action=self._confirm_action,
         )
         self._sidebar_folder_operations_controller = SidebarFolderOperationsController(
             parent=self,
@@ -313,14 +277,7 @@ class MainWindow(QMainWindow):
             sidebar_folder_list=self.sidebar_folder_list,
             selected_folder_items_getter=self._selected_folder_items,
             checked_folder_ids_getter=self._get_checked_folder_ids,
-            handle_folder_data_changed=(
-                lambda preferred_checked_ids, preferred_current_folder_id: (
-                    self.handle_management_data_changed(
-                        preferred_checked_ids=preferred_checked_ids,
-                        preferred_current_folder_id=preferred_current_folder_id,
-                    )
-                )
-            ),
+            handle_folder_data_changed=self._handle_folder_data_changed_from_controller,
             refresh_sidebar_folder_progress_labels=(
                 self._refresh_sidebar_folder_progress_labels
             ),
@@ -338,22 +295,20 @@ class MainWindow(QMainWindow):
             sidebar=self.sidebar,
             sidebar_toggle_button=self.sidebar_toggle_button,
             settings_button=self.settings_button,
-            central_widget_getter=lambda: self.centralWidget(),
-            window_width_getter=lambda: self.width(),
-            timer_running_getter=lambda: self.timer_page.is_running,
+            central_widget_getter=self.centralWidget,
+            window_width_getter=self.width,
+            timer_running_getter=self._timer_page_is_running,
             stop_settings_preview=self.settings_page.stop_active_preview,
-            is_fullscreen=lambda: self.isFullScreen(),
+            is_fullscreen=self.isFullScreen,
             show_normal=self.showNormal,
             show_fullscreen=self.showFullScreen,
         )
         self._hotkey_controller = HotkeyController(
             parent=self,
             timer_page=self.timer_page,
-            current_page_getter=lambda: self.stacked_widget.currentWidget(),
+            current_page_getter=self.stacked_widget.currentWidget,
             hotkey_service=self._hotkey_service,
-            emit_hotkey_action=lambda action_value: (
-                self.global_hotkey_action_requested.emit(action_value)
-            ),
+            emit_hotkey_action=self._emit_global_hotkey_action_requested,
             show_warning_message=self._show_warning_message,
             toggle_fullscreen=self.toggle_fullscreen,
             exit_fullscreen=self.exit_fullscreen,
@@ -379,6 +334,9 @@ class MainWindow(QMainWindow):
         )
         self.timer_page.flashcard_marked_wrong.connect(
             self.handle_flashcard_marked_wrong
+        )
+        self.timer_page.flashcard_origin_requested.connect(
+            self.handle_flashcard_origin_requested
         )
         self.timer_page.flashcard_edit_requested.connect(
             self.handle_flashcard_edit_requested
@@ -422,20 +380,13 @@ class MainWindow(QMainWindow):
 
     def _build_sidebar(self, root_layout: QHBoxLayout) -> None:
         """Build the sidebar area."""
-        self.sidebar = QFrame(self.centralWidget())
+        self.sidebar = SidebarOverlayFrame(self.centralWidget())
         self.sidebar.setFrameShape(QFrame.StyledPanel)
         self.sidebar.setVisible(False)
+        self.sidebar.width_resize_requested.connect(self._handle_sidebar_width_resize)
         sidebar_layout = QVBoxLayout(self.sidebar)
         sidebar_layout.setContentsMargins(8, 8, 8, 8)
         sidebar_layout.setSpacing(8)
-
-        sidebar_title = QLabel("Folders")
-        sidebar_title_font = QFont(sidebar_title.font())
-        sidebar_title_font.setPointSize(16)
-        sidebar_title_font.setBold(True)
-        sidebar_title.setFont(sidebar_title_font)
-        sidebar_title.setStyleSheet("border: none;")
-        sidebar_layout.addWidget(sidebar_title)
 
         self.sidebar_folder_list = SidebarFolderTreeWidget()
         self.sidebar_folder_list.setSpacing(0)
@@ -453,14 +404,10 @@ class MainWindow(QMainWindow):
         self.sidebar_folder_list.setItemDelegate(
             SidebarCheckboxDelegate(self.sidebar_folder_list)
         )
-        self.sidebar_folder_list.itemChanged.connect(
-            lambda item, column: self.handle_sidebar_item_changed(item, column)
-        )
-        self.sidebar_folder_list.itemClicked.connect(
-            lambda item, column: self.handle_sidebar_folder_click(item, column)
-        )
+        self.sidebar_folder_list.itemChanged.connect(self.handle_sidebar_item_changed)
+        self.sidebar_folder_list.itemClicked.connect(self.handle_sidebar_folder_click)
         self.sidebar_folder_list.itemDoubleClicked.connect(
-            lambda item, column: self.handle_sidebar_folder_double_click(item, column)
+            self.handle_sidebar_folder_double_click
         )
         self.sidebar_folder_list.itemSelectionChanged.connect(
             self._update_sidebar_reorder_buttons
@@ -500,6 +447,10 @@ class MainWindow(QMainWindow):
         create_folder_button = QPushButton("Create Folder")
         create_folder_button.clicked.connect(self.prompt_and_create_folder)
         sidebar_layout.addWidget(create_folder_button)
+
+        create_set_button = QPushButton("Create Set")
+        create_set_button.clicked.connect(self.prompt_and_create_set)
+        sidebar_layout.addWidget(create_set_button)
 
         import_notebooklm_csv_button = QPushButton("Import NotebookLM CSV")
         import_notebooklm_csv_button.clicked.connect(
@@ -567,7 +518,7 @@ class MainWindow(QMainWindow):
         return self._hotkey_controller.start_stop_shortcut_sequences(binding)
 
     def resizeEvent(self, event) -> None:  # noqa: N802
-        """Resize sidebar width proportionally with window size."""
+        """Clamp sidebar width and reposition the overlay after window resize."""
         super().resizeEvent(event)
         self._update_sidebar_width()
 
@@ -613,10 +564,27 @@ class MainWindow(QMainWindow):
             palette.color(QPalette.WindowText),
             overlay_ratio=0.28,
         ).name(QColor.HexRgb)
+        resize_handle_color = blend_colors(
+            palette.color(QPalette.Window),
+            palette.color(QPalette.WindowText),
+            overlay_ratio=0.18,
+        ).name(QColor.HexRgb)
+        resize_handle_hover_color = blend_colors(
+            palette.color(QPalette.Window),
+            palette.color(QPalette.WindowText),
+            overlay_ratio=0.32,
+        ).name(QColor.HexRgb)
         self.sidebar.setStyleSheet(
-            "QFrame {"
+            "#sidebarOverlay {"
             " background-color: palette(window);"
             f" border: 1px solid {border_color};"
+            "}"
+            "#sidebarResizeHandle {"
+            f" border-left: 1px solid {resize_handle_color};"
+            " background-color: transparent;"
+            "}"
+            "#sidebarResizeHandle:hover {"
+            f" background-color: {resize_handle_hover_color};"
             "}"
         )
         self.sidebar_folder_list.setStyleSheet(
@@ -629,6 +597,13 @@ class MainWindow(QMainWindow):
         if controller is None:
             return
         controller.update_sidebar_width()
+
+    def _handle_sidebar_width_resize(self, width: int) -> None:
+        """Apply one sidebar width selected via the drag handle."""
+        controller = getattr(self, "_app_shell_controller", None)
+        if controller is None:
+            return
+        controller.set_sidebar_width(width)
 
     def _position_sidebar(self) -> None:
         """Place sidebar as an overlay anchored below the sidebar toggle button."""
@@ -672,9 +647,108 @@ class MainWindow(QMainWindow):
         """Refresh sidebar items while preserving the provided checked ids."""
         self.handle_management_data_changed(preferred_checked_ids=checked_ids)
 
+    def _handle_folder_data_changed_from_controller(
+        self,
+        preferred_checked_ids: set[str] | None,
+        preferred_current_folder_id: str | None,
+    ) -> None:
+        """Reload folder data while preserving controller-provided selections.
+
+        Args:
+            preferred_checked_ids: Checked folder ids to preserve after reload.
+            preferred_current_folder_id: Current folder id to keep selected.
+        """
+        self.handle_management_data_changed(
+            preferred_checked_ids=preferred_checked_ids,
+            preferred_current_folder_id=preferred_current_folder_id,
+        )
+
+    def _create_flashcard_edit_dialog(
+        self,
+        question: str,
+        answer: str,
+        question_image_path: str | None,
+        answer_image_path: str | None,
+        folder_path: Path,
+    ) -> FlashcardEditDialog:
+        """Create the shared flashcard edit dialog used across controllers.
+
+        Args:
+            question: Initial flashcard question text.
+            answer: Initial flashcard answer text.
+            question_image_path: Optional question image path.
+            answer_image_path: Optional answer image path.
+            folder_path: Base folder used to resolve relative image paths.
+
+        Returns:
+            FlashcardEditDialog: Configured edit dialog parented to the window.
+        """
+        return FlashcardEditDialog(
+            question,
+            answer,
+            question_image_path=question_image_path,
+            answer_image_path=answer_image_path,
+            base_folder_path=folder_path,
+            parent=self,
+        )
+
+    def _confirm_action(self, title: str, message: str) -> bool:
+        """Ask the user to confirm a destructive action.
+
+        Args:
+            title: Dialog title.
+            message: Confirmation prompt text.
+
+        Returns:
+            bool: True when the user confirms the action.
+        """
+        return (
+            QMessageBox.question(
+                self,
+                title,
+                message,
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            == QMessageBox.Yes
+        )
+
     def _show_warning_message(self, title: str, message: str) -> None:
         """Show a warning dialog using the main window as parent."""
         QMessageBox.warning(self, title, message)
+
+    def _emit_show_flashcard_requested(self, flashcard: Flashcard) -> None:
+        """Forward a flashcard request through the window signal seam.
+
+        Args:
+            flashcard: Flashcard selected for display.
+        """
+        self.show_flashcard_requested.emit(flashcard)
+
+    def _start_flashcard_phase_timer_from_controller(
+        self,
+        duration_ms: int,
+        callback: object,
+    ) -> None:
+        """Route phase-timer starts back through the timer controller.
+
+        Args:
+            duration_ms: Phase duration in milliseconds.
+            callback: Pending phase callback scheduled for timer completion.
+        """
+        self._timer_controller.start_flashcard_phase_timer(duration_ms, callback)
+
+    def _handle_flashcard_phase_timeout_from_controller(self) -> None:
+        """Route flashcard phase completion back through the timer controller."""
+        self._timer_controller.handle_flashcard_phase_timeout()
+
+    def _load_current_app_settings(self) -> AppSettings:
+        """Load application settings using the latest module-level implementation."""
+        return load_app_settings()
+
+    def _get_default_notification_sound_path(self) -> str:
+        """Resolve the default notification sound using the latest helper."""
+        return get_default_notification_sound_path()
 
     def _handle_settings_saved(self, _settings: AppSettings) -> None:
         """Return to the timer page after a successful settings save."""
@@ -710,9 +784,21 @@ class MainWindow(QMainWindow):
         """Apply live hotkeys before persisting settings to disk."""
         self._hotkey_controller.save_settings_from_page(settings)
 
+    def _emit_global_hotkey_action_requested(self, action_value: str) -> None:
+        """Forward a global hotkey action back onto the main-thread signal.
+
+        Args:
+            action_value: Serialized hotkey action enum value.
+        """
+        self.global_hotkey_action_requested.emit(action_value)
+
     def _handle_global_hotkey_action_requested(self, action_value: str) -> None:
         """Dispatch a hotkey action onto the same UI paths as button clicks."""
         self._hotkey_controller.handle_global_hotkey_action_requested(action_value)
+
+    def _timer_page_is_running(self) -> bool:
+        """Return whether the timer page countdown is currently active."""
+        return self.timer_page.is_running
 
     def _timer_page_is_active(self) -> bool:
         """Return whether timer hotkeys should be active for the current page."""
@@ -773,6 +859,18 @@ class MainWindow(QMainWindow):
     def handle_flashcard_delete_requested(self) -> None:
         """Delete the paused flashcard and remove it from the active session."""
         self._session_mutation_controller.handle_flashcard_delete_requested()
+
+    def handle_flashcard_origin_requested(self) -> None:
+        """Open management for the set that owns the visible flashcard."""
+        folder_id = self._timer_controller.visible_flashcard_folder_id
+        if folder_id is None:
+            return
+        folder_name = self._app_state.folder_names_by_id.get(folder_id)
+        if folder_name is None:
+            return
+        self.handle_timer_stop_requested()
+        self.timer_page.stop_timer()
+        self.open_management_for_folder(folder_id, folder_name)
 
     def toggle_sidebar(self) -> None:
         """Show or hide the left sidebar."""
@@ -878,14 +976,40 @@ class MainWindow(QMainWindow):
 
     def _sidebar_progress_percent(self, folder_id: str) -> int:
         """Return the current completion percentage for one folder."""
-        completion_mode = load_app_settings().wrong_answer_completion_mode
-        folder_flashcards = self.flashcards_by_folder.get(folder_id, [])
-        summary = summarize_folder_progress(
-            (flashcard.stable_id for flashcard in folder_flashcards),
-            load_folder_progress(folder_id),
-            completion_mode,
-        )
-        return summary.percent_done
+        return self._sidebar_progress_summary(folder_id).percent_done
+
+    def _sidebar_progress_summary(
+        self,
+        folder_id: str,
+        cache: dict[str, FolderProgressSummary] | None = None,
+    ) -> FolderProgressSummary:
+        """Return direct or aggregated progress for one sidebar node."""
+        if cache is not None and folder_id in cache:
+            return cache[folder_id]
+
+        if self._app_state.is_flashcard_set(folder_id):
+            completion_mode = load_app_settings().wrong_answer_completion_mode
+            folder_flashcards = self.flashcards_by_folder.get(folder_id, [])
+            summary = summarize_folder_progress(
+                (flashcard.stable_id for flashcard in folder_flashcards),
+                load_folder_progress(folder_id),
+                completion_mode,
+            )
+        else:
+            total_flashcards = 0
+            completed_flashcards = 0
+            for child_folder_id in self._app_state.child_folder_ids(folder_id):
+                child_summary = self._sidebar_progress_summary(child_folder_id, cache)
+                total_flashcards += child_summary.total_flashcards
+                completed_flashcards += child_summary.completed_flashcards
+            summary = FolderProgressSummary(
+                total_flashcards=total_flashcards,
+                completed_flashcards=completed_flashcards,
+            )
+
+        if cache is not None:
+            cache[folder_id] = summary
+        return summary
 
     def _refresh_sidebar_folder_progress_labels(
         self,
@@ -897,6 +1021,7 @@ class MainWindow(QMainWindow):
             folder_ids: Optional subset of folder ids to refresh.
         """
         were_signals_blocked = self.sidebar_folder_list.blockSignals(True)
+        progress_summary_cache: dict[str, FolderProgressSummary] = {}
         try:
             for item in self._iter_sidebar_folder_items():
                 folder_id = item.data(Qt.UserRole)
@@ -906,13 +1031,15 @@ class MainWindow(QMainWindow):
                     continue
                 if folder_id == self._sidebar_folders.renaming_folder_id:
                     continue
-                folder_flashcards = self.flashcards_by_folder.get(folder_id, [])
-                item.setText(
-                    self._format_sidebar_folder_label(
-                        self._folder_item_name(item),
-                        len(folder_flashcards),
-                        self._sidebar_progress_percent(folder_id),
-                    )
+                summary = self._sidebar_progress_summary(
+                    folder_id,
+                    progress_summary_cache,
+                )
+                self._sidebar_folders.update_folder_item_label(
+                    item,
+                    self._folder_item_name(item),
+                    summary.total_flashcards,
+                    summary.percent_done,
                 )
         finally:
             self.sidebar_folder_list.blockSignals(were_signals_blocked)
@@ -1001,7 +1128,7 @@ class MainWindow(QMainWindow):
         clicked_item: SidebarFolderItem,
         _column: int = 0,
     ) -> None:
-        """Open folder management when a folder is double-clicked.
+        """Open management only when a flashcard set is double-clicked.
 
         Args:
             clicked_item: The double-clicked folder list item.
@@ -1010,6 +1137,9 @@ class MainWindow(QMainWindow):
             return
         folder_id = clicked_item.data(Qt.UserRole)
         if folder_id is None:
+            return
+        if not self._app_state.is_flashcard_set(folder_id):
+            clicked_item.setExpanded(not clicked_item.isExpanded())
             return
         self.open_management_for_folder(folder_id, self._folder_item_name(clicked_item))
 
@@ -1029,21 +1159,40 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         rename_action = menu.addAction("Rename")
         rename_action.setToolTip("Rename")
-        create_subfolder_action = menu.addAction("Create Subfolder")
-        create_subfolder_action.setToolTip("Create a child folder")
         forget_progress_action = menu.addAction("Forget progress")
         forget_progress_action.setToolTip("Reset folder progress")
         delete_action = menu.addAction("Delete")
         delete_action.setToolTip("Delete")
+        selected_folder_id = selected_folder_items[0].data(Qt.UserRole)
+        selected_is_set = isinstance(
+            selected_folder_id,
+            str,
+        ) and self._app_state.is_flashcard_set(selected_folder_id)
         rename_action.setEnabled(len(selected_folder_items) == 1)
-        create_subfolder_action.setEnabled(len(selected_folder_items) == 1)
+        create_subfolder_action = None
+        create_set_action = None
+        if len(selected_folder_items) == 1 and not selected_is_set:
+            create_subfolder_action = menu.addAction("Create Subfolder")
+            create_subfolder_action.setToolTip("Create a child folder")
+            create_set_action = menu.addAction("Create Set")
+            create_set_action.setToolTip("Create a child flashcard set")
         chosen_action = menu.exec(
             self.sidebar_folder_list.viewport().mapToGlobal(position)
         )
         if chosen_action is rename_action and len(selected_folder_items) == 1:
             self.rename_sidebar_folder(selected_folder_items[0])
-        if chosen_action is create_subfolder_action and len(selected_folder_items) == 1:
+        if (
+            create_subfolder_action is not None
+            and chosen_action is create_subfolder_action
+            and len(selected_folder_items) == 1
+        ):
             self.prompt_and_create_subfolder(selected_folder_items[0])
+        if (
+            create_set_action is not None
+            and chosen_action is create_set_action
+            and len(selected_folder_items) == 1
+        ):
+            self.prompt_and_create_child_set(selected_folder_items[0])
         if chosen_action is forget_progress_action:
             self.forget_sidebar_folder_progress(selected_folder_items)
         if chosen_action is delete_action:
@@ -1175,6 +1324,10 @@ class MainWindow(QMainWindow):
         """Prompt for a folder name and create a managed empty folder."""
         self._prompt_and_create_folder()
 
+    def prompt_and_create_set(self) -> None:
+        """Prompt for a set name and create a managed empty flashcard set."""
+        self._prompt_and_create_set()
+
     def prompt_and_create_subfolder(self, folder_item: SidebarFolderItem) -> None:
         """Prompt for a subfolder name and create it under the selected folder.
 
@@ -1182,9 +1335,20 @@ class MainWindow(QMainWindow):
             folder_item: Parent folder item.
         """
         parent_folder_id = folder_item.data(Qt.UserRole)
-        if not isinstance(parent_folder_id, str):
+        if not isinstance(parent_folder_id, str) or self._app_state.is_flashcard_set(
+            parent_folder_id
+        ):
             return
         self._prompt_and_create_folder(parent_id=parent_folder_id)
+
+    def prompt_and_create_child_set(self, folder_item: SidebarFolderItem) -> None:
+        """Prompt for a set name and create it under the selected folder."""
+        parent_folder_id = folder_item.data(Qt.UserRole)
+        if not isinstance(parent_folder_id, str) or self._app_state.is_flashcard_set(
+            parent_folder_id
+        ):
+            return
+        self._prompt_and_create_set(parent_id=parent_folder_id)
 
     def _prompt_and_create_folder(self, parent_id: str | None = None) -> None:
         """Prompt for a folder name and create it at the requested level.
@@ -1201,6 +1365,20 @@ class MainWindow(QMainWindow):
             return
         self._sidebar_folder_operations_controller.create_folder(
             folder_name,
+            parent_id=parent_id,
+        )
+
+    def _prompt_and_create_set(self, parent_id: str | None = None) -> None:
+        """Prompt for a set name and create it at the requested level."""
+        set_name, accepted = QInputDialog.getText(
+            self,
+            "Create child set" if parent_id is not None else "Create set",
+            "Child set name:" if parent_id is not None else "Set name:",
+        )
+        if not accepted:
+            return
+        self._sidebar_folder_operations_controller.create_set(
+            set_name,
             parent_id=parent_id,
         )
 
@@ -1336,6 +1514,8 @@ class MainWindow(QMainWindow):
         flashcard_count: int,
         progress_percent: int,
         checked: bool,
+        *,
+        is_flashcard_set: bool,
     ) -> SidebarFolderItem:
         """Create one folder item for the sidebar list.
 
@@ -1345,6 +1525,7 @@ class MainWindow(QMainWindow):
             flashcard_count: Number of flashcards in folder.
             progress_percent: Percent of flashcards completed for the folder.
             checked: Whether the item starts checked.
+            is_flashcard_set: Whether the item is an editable flashcard set.
 
         Returns:
             SidebarFolderItem: Configured tree item.
@@ -1355,6 +1536,7 @@ class MainWindow(QMainWindow):
             flashcard_count,
             progress_percent,
             checked,
+            is_flashcard_set=is_flashcard_set,
         )
 
     def _apply_sidebar_item_visual_state(self, item: SidebarFolderItem) -> None:
@@ -1392,19 +1574,6 @@ class MainWindow(QMainWindow):
             f"{details}",
         )
 
-    def _format_sidebar_folder_label(
-        self,
-        folder_name: str,
-        flashcard_count: int,
-        progress_percent: int,
-    ) -> str:
-        """Build sidebar folder label with card count."""
-        return self._sidebar_folders.format_folder_label(
-            folder_name,
-            flashcard_count,
-            progress_percent,
-        )
-
     def handle_management_data_changed(
         self,
         preferred_checked_ids: set[str] | None = None,
@@ -1426,6 +1595,8 @@ class MainWindow(QMainWindow):
                     folder_id=loaded_folder.persisted_folder.id,
                     folder_name=loaded_folder.persisted_folder.name,
                     folder_path=loaded_folder.stored_path,
+                    parent_id=loaded_folder.persisted_folder.parent_id,
+                    is_flashcard_set=loaded_folder.persisted_folder.is_flashcard_set,
                     flashcards=loaded_folder.flashcards,
                     selected_indexes=self._app_state.normalized_selected_indexes(
                         loaded_folder.persisted_folder.id,
@@ -1438,6 +1609,7 @@ class MainWindow(QMainWindow):
         self.sidebar_folder_list.blockSignals(True)
         self.sidebar_folder_list.clear()
         folder_items_by_id: dict[str, SidebarFolderItem] = {}
+        progress_summary_cache: dict[str, FolderProgressSummary] = {}
 
         for loaded_folder in catalog_result.folders:
             persisted_folder = loaded_folder.persisted_folder
@@ -1448,12 +1620,17 @@ class MainWindow(QMainWindow):
                 else persisted_folder.id in preferred_checked_ids
                 or (parent_item is not None and parent_item.checkState() == Qt.Checked)
             )
+            summary = self._sidebar_progress_summary(
+                persisted_folder.id,
+                progress_summary_cache,
+            )
             folder_item = self._create_sidebar_folder_item(
                 persisted_folder.id,
                 persisted_folder.name,
-                flashcard_count=len(loaded_folder.flashcards),
-                progress_percent=loaded_folder.progress_percent,
+                flashcard_count=summary.total_flashcards,
+                progress_percent=summary.percent_done,
                 checked=is_checked,
+                is_flashcard_set=persisted_folder.is_flashcard_set,
             )
             if parent_item is None:
                 self.sidebar_folder_list.addItem(folder_item)
@@ -1486,8 +1663,10 @@ class MainWindow(QMainWindow):
         self._refresh_loaded_flashcards()
         if self.stacked_widget.currentWidget() is self.management_page:
             editing_folder_id = self._management_controller.editing_folder_id
-            if editing_folder_id is not None and self._app_state.has_folder(
-                editing_folder_id
+            if (
+                editing_folder_id is not None
+                and self._app_state.has_folder(editing_folder_id)
+                and self._app_state.is_flashcard_set(editing_folder_id)
             ):
                 self.management_page.set_folder_flashcards(
                     editing_folder_id,

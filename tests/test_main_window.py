@@ -22,7 +22,7 @@ from estudai.services.csv_flashcards import Flashcard
 from estudai.services.csv_flashcards import get_managed_csv_path
 from estudai.services.csv_flashcards import update_flashcard_in_folder
 from estudai.services.folder_storage import (
-    create_managed_folder,
+    create_managed_set,
     list_persisted_folders,
     rename_persisted_folder,
 )
@@ -270,6 +270,26 @@ def test_sidebar_width_is_capped_for_large_windows(app: QApplication) -> None:
     assert window.sidebar.width() == 300
 
 
+def test_sidebar_resize_handle_updates_and_preserves_overlay_width(
+    app: QApplication,
+) -> None:
+    """Verify sidebar resize requests update and preserve overlay width."""
+    window = MainWindow()
+    window.resize(3000, 1200)
+    window.centralWidget().resize(3000, 1200)
+    window._update_sidebar_width()
+    start_width = window.sidebar.width()
+
+    window.sidebar._begin_resize(300)
+    window.sidebar._update_resize(420)
+    window.sidebar._finish_resize()
+    window.resize(2200, 1200)
+    window.centralWidget().resize(2200, 1200)
+    window._update_sidebar_width()
+
+    assert window.sidebar.width() == start_width + 120
+
+
 def test_sidebar_clicking_outside_closes_when_open(app: QApplication) -> None:
     """Verify clicks outside the sidebar close it."""
     window = MainWindow()
@@ -288,7 +308,14 @@ def test_sidebar_button_order_is_welcoming(app: QApplication) -> None:
     """Verify sidebar keeps reorder controls above create/import actions."""
     window = MainWindow()
     sidebar_layout = window.sidebar.layout()
-    reorder_layout = sidebar_layout.itemAt(2).layout()
+    reorder_layout = next(
+        (
+            sidebar_layout.itemAt(index).layout()
+            for index in range(sidebar_layout.count())
+            if sidebar_layout.itemAt(index).layout() is not None
+        ),
+        None,
+    )
     assert reorder_layout is not None
     reorder_button_texts = [
         reorder_layout.itemAt(index).widget().text()
@@ -305,6 +332,7 @@ def test_sidebar_button_order_is_welcoming(app: QApplication) -> None:
     assert action_button_texts == [
         "Reset Progress",
         "Create Folder",
+        "Create Set",
         "Import NotebookLM CSV",
         "Import Existing Folder",
     ]
@@ -423,7 +451,8 @@ def test_add_folder_loads_csv_flashcards(app: QApplication, tmp_path: Path) -> N
 
     assert added is True
     assert window.sidebar_folder_list.count() == 1
-    assert window.sidebar_folder_list.item(0).text() == "biology (2 cards | 0% done)"
+    assert window.sidebar_folder_list.item(0).text() == "biology"
+    assert window.sidebar_folder_list.item(0).text(1) == "2 cards | 0% done"
     assert window.current_folder_name == "biology"
     assert len(window.loaded_flashcards) == 2
     assert len(persisted) == 1
@@ -499,7 +528,10 @@ def test_sidebar_folder_context_actions_rename_and_delete(
     window.rename_sidebar_folder(folder_item)
     folder_item.setText("Biology Updated")
     renamed_item = window.sidebar_folder_list.item(0)
-    assert renamed_item.text() == "Biology Updated (1 card | 0% done)"
+    assert renamed_item.text() == "Biology Updated"
+    assert renamed_item.text(1) == "1 card | 0% done"
+    assert renamed_item.toolTip(0) == "Biology Updated"
+    assert renamed_item.toolTip(1) == "Biology Updated"
 
     monkeypatch.setattr(
         "estudai.ui.main_window.QMessageBox.question",
@@ -825,7 +857,7 @@ def test_invalid_csv_folder_warns_and_loads_as_empty(
     app: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify one unreadable folder does not prevent the window from loading."""
-    persisted_folder = create_managed_folder("Broken")
+    persisted_folder = create_managed_set("Broken")
     broken_csv = Path(persisted_folder.stored_path) / "cards.csv"
     broken_csv.write_bytes(b"\xff\xfe\x00bad")
     warnings: list[str] = []
@@ -865,7 +897,7 @@ def test_prompt_add_folder_surfaces_import_errors(
 def test_prompt_add_folder_can_split_multiple_csvs_into_child_folders(
     app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Verify the import prompt can place each CSV into its own child folder."""
+    """Verify the import prompt can place each CSV into its own child set."""
     source_folder = tmp_path / "science"
     source_folder.mkdir()
     (source_folder / "biology.csv").write_text(
@@ -890,10 +922,13 @@ def test_prompt_add_folder_can_split_multiple_csvs_into_child_folders(
         "chemistry",
     ]
     root_item = window.sidebar_folder_list.item(0)
-    assert root_item.text() == "science (0 cards | 0% done)"
+    assert root_item.text() == "science"
+    assert root_item.text(1) == "2 cards | 0% done"
     assert root_item.childCount() == 2
-    assert root_item.child(0).text() == "biology (1 card | 0% done)"
-    assert root_item.child(1).text() == "chemistry (1 card | 0% done)"
+    assert root_item.child(0).text() == "biology"
+    assert root_item.child(0).text(1) == "1 card | 0% done"
+    assert root_item.child(1).text() == "chemistry"
+    assert root_item.child(1).text(1) == "1 card | 0% done"
 
 
 def test_prompt_add_folder_split_cancel_leaves_sidebar_unchanged(
@@ -1372,7 +1407,7 @@ def test_legacy_managed_folder_migrates_and_persists_progress(
             answer_display_duration_seconds=3,
         ),
     )
-    persisted_folder = create_managed_folder("Biology")
+    persisted_folder = create_managed_set("Biology")
     managed_csv = get_managed_csv_path(Path(persisted_folder.stored_path))
     managed_csv.write_text("Q1?,A1.\nQ2?,A2.\n", encoding="utf-8")
 
@@ -1619,6 +1654,43 @@ def test_flashcard_sequence_uses_default_sound_for_both_phases_when_unset(
 
     assert player.play_calls == 2
     assert player.source_values == [str(default_sound_path), str(default_sound_path)]
+
+
+def test_flashcard_origin_click_opens_management_for_visible_card(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify clicking the visible flashcard origin opens that set in management."""
+    window = MainWindow()
+    biology_folder = tmp_path / "biology"
+    biology_folder.mkdir()
+    (biology_folder / "cards.csv").write_text(
+        "DNA?,Genetic material.\n", encoding="utf-8"
+    )
+    assert window.add_folder(biology_folder) is True
+    folder_item = window.sidebar_folder_list.item(0)
+    folder_id = folder_item.data(Qt.UserRole)
+    assert isinstance(folder_id, str)
+    monkeypatch.setattr(
+        window._timer_controller,
+        "start_flashcard_phase_timer",
+        lambda _delay, _callback: None,
+    )
+
+    assert window._timer_controller.start_study_session() is True
+    flashcard = window._timer_controller.next_flashcard_for_display()
+    assert flashcard is not None
+
+    window.show_flashcard_popup(flashcard)
+
+    assert window.timer_page.current_flashcard_origin_path() == "biology"
+    assert window._timer_controller.visible_flashcard_folder_id == folder_id
+
+    window.timer_page.flashcard_origin_label.clicked.emit()
+
+    assert window.stacked_widget.currentWidget() is window.management_page
+    assert window._management_controller.editing_folder_id == folder_id
+    assert window._timer_controller.study_session.active is False
+    assert window.timer_page.flashcard_question_label.isHidden() is True
 
 
 def test_flashcard_sequence_stops_sound_when_question_phase_ends(
@@ -2071,7 +2143,8 @@ def test_create_folder_from_prompt(
     window.prompt_and_create_folder()
 
     assert window.sidebar_folder_list.count() == 1
-    assert window.sidebar_folder_list.item(0).text() == "Biology (0 cards | 0% done)"
+    assert window.sidebar_folder_list.item(0).text() == "Biology"
+    assert window.sidebar_folder_list.item(0).text(1) == "0 cards | 0% done"
 
 
 def test_double_click_folder_opens_management_and_save_updates_selection(
@@ -2266,7 +2339,8 @@ def test_sidebar_progress_percentage_updates_after_scoring(
         lambda _delay, callback: callbacks.append(callback),
     )
 
-    assert window.sidebar_folder_list.item(0).text() == "biology (2 cards | 0% done)"
+    assert window.sidebar_folder_list.item(0).text() == "biology"
+    assert window.sidebar_folder_list.item(0).text(1) == "2 cards | 0% done"
     assert window._timer_controller.start_study_session() is True
     flashcard = window._timer_controller.next_flashcard_for_display()
     assert flashcard is not None
@@ -2276,7 +2350,8 @@ def test_sidebar_progress_percentage_updates_after_scoring(
     window.timer_page.correct_button.click()
     callbacks.pop(0)()
 
-    assert window.sidebar_folder_list.item(0).text() == "biology (2 cards | 50% done)"
+    assert window.sidebar_folder_list.item(0).text() == "biology"
+    assert window.sidebar_folder_list.item(0).text(1) == "2 cards | 50% done"
 
 
 def test_reset_all_progress_button_clears_all_sidebar_progress(
@@ -2322,15 +2397,19 @@ def test_reset_all_progress_button_clears_all_sidebar_progress(
         "estudai.ui.main_window.QMessageBox.question",
         lambda *_args, **_kwargs: QMessageBox.Yes,
     )
-    assert window.sidebar_folder_list.item(0).text() == "biology (2 cards | 50% done)"
-    assert window.sidebar_folder_list.item(1).text() == "chemistry (1 card | 100% done)"
+    assert window.sidebar_folder_list.item(0).text() == "biology"
+    assert window.sidebar_folder_list.item(0).text(1) == "2 cards | 50% done"
+    assert window.sidebar_folder_list.item(1).text() == "chemistry"
+    assert window.sidebar_folder_list.item(1).text(1) == "1 card | 100% done"
 
     window.reset_all_progress_button.click()
 
     assert load_folder_progress(biology_folder_id) == {}
     assert load_folder_progress(chemistry_folder_id) == {}
-    assert window.sidebar_folder_list.item(0).text() == "biology (2 cards | 0% done)"
-    assert window.sidebar_folder_list.item(1).text() == "chemistry (1 card | 0% done)"
+    assert window.sidebar_folder_list.item(0).text() == "biology"
+    assert window.sidebar_folder_list.item(0).text(1) == "2 cards | 0% done"
+    assert window.sidebar_folder_list.item(1).text() == "chemistry"
+    assert window.sidebar_folder_list.item(1).text(1) == "1 card | 0% done"
 
 
 def test_management_reset_progress_button_clears_current_folder_progress(
@@ -2362,11 +2441,13 @@ def test_management_reset_progress_button_clears_current_folder_progress(
         lambda *_args, **_kwargs: QMessageBox.Yes,
     )
 
-    assert window.sidebar_folder_list.item(0).text() == "biology (2 cards | 50% done)"
+    assert window.sidebar_folder_list.item(0).text() == "biology"
+    assert window.sidebar_folder_list.item(0).text(1) == "2 cards | 50% done"
     window.management_page.reset_progress_button.click()
 
     assert load_folder_progress(folder_id) == {}
-    assert window.sidebar_folder_list.item(0).text() == "biology (2 cards | 0% done)"
+    assert window.sidebar_folder_list.item(0).text() == "biology"
+    assert window.sidebar_folder_list.item(0).text(1) == "2 cards | 0% done"
 
 
 def test_management_table_keeps_native_checkbox_indicator_styles(

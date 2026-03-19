@@ -8,7 +8,6 @@ import re
 from pylatexenc.latex2text import LatexNodes2Text
 
 _INLINE_MATH_PATTERN = re.compile(r"\$(.+?)\$")
-_SCRIPT_EXTRA_CHARS = {"+", "-", "=", "/", "(", ")"}
 _LATEX_TEXT_CONVERTER = LatexNodes2Text()
 
 
@@ -112,16 +111,22 @@ def _read_script_operand(text: str, start_index: int) -> tuple[str, int]:
             return raw_operand, cursor - start_index
         return text[start_index:], len(text) - start_index
 
-    cursor = start_index
-    while cursor < len(text):
-        current = text[cursor]
-        if current.isalnum() or current in _SCRIPT_EXTRA_CHARS:
+    first_character = text[start_index]
+    if first_character in {"+", "-"}:
+        cursor = start_index + 1
+        while cursor < len(text) and text[cursor].isdigit():
             cursor += 1
-            continue
-        break
-    if cursor == start_index:
-        return text[start_index], 1
-    return text[start_index:cursor], cursor - start_index
+        return text[start_index:cursor], cursor - start_index
+
+    if first_character.isdigit():
+        cursor = start_index + 1
+        while cursor < len(text) and text[cursor].isdigit():
+            cursor += 1
+        if cursor < len(text) and text[cursor] in {"+", "-"}:
+            cursor += 1
+        return text[start_index:cursor], cursor - start_index
+
+    return text[start_index], 1
 
 
 def _escape_html_text(text: str) -> str:

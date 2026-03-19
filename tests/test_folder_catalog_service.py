@@ -6,7 +6,7 @@ import pytest
 
 from estudai.services.csv_flashcards import replace_flashcards_in_folder
 from estudai.services.folder_catalog import PersistedFolderCatalogService
-from estudai.services.folder_storage import create_managed_folder
+from estudai.services.folder_storage import create_managed_folder, create_managed_set
 from estudai.services.settings import WrongAnswerCompletionMode
 from estudai.services.study_progress import (
     FlashcardProgressEntry,
@@ -29,7 +29,7 @@ def isolated_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_load_catalog_returns_flashcards_and_progress_percent() -> None:
     """Verify catalog loading aggregates folder flashcards and progress."""
-    persisted_folder = create_managed_folder("Biology")
+    persisted_folder = create_managed_set("Biology")
     folder_path = Path(persisted_folder.stored_path)
     loaded_flashcards = replace_flashcards_in_folder(
         folder_path,
@@ -60,7 +60,7 @@ def test_load_catalog_returns_flashcards_and_progress_percent() -> None:
 
 def test_load_catalog_prunes_progress_for_removed_flashcards() -> None:
     """Verify catalog loading drops orphaned progress entries after reload."""
-    persisted_folder = create_managed_folder("Biology")
+    persisted_folder = create_managed_set("Biology")
     folder_path = Path(persisted_folder.stored_path)
     first_flashcards = replace_flashcards_in_folder(
         folder_path,

@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from estudai.services.folder_storage import create_managed_folder
+from estudai.services.folder_storage import create_managed_folder, create_managed_set
 from estudai.ui.dialog.notebooklm_import_dialog import NotebookLMCsvImportDialog
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -41,7 +41,7 @@ def test_choose_csv_file_populates_preview_and_enables_import(
     app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify selecting CSV populates preview and enables import."""
-    create_managed_folder("Biology")
+    create_managed_set("Biology")
     csv_path = tmp_path / "notebooklm.csv"
     csv_path.write_text(
         "Question,Answer\n" "What is \\(x^2\\)?,Square.\n" ",Missing question.\n",
@@ -66,7 +66,7 @@ def test_choose_csv_file_error_and_cancel_paths(
     app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify file picker cancel and parser errors are handled safely."""
-    create_managed_folder("Biology")
+    create_managed_set("Biology")
     csv_path = tmp_path / "notebooklm.csv"
     csv_path.write_text("Question,Answer\nQ?,A.\n", encoding="utf-8")
     dialog = NotebookLMCsvImportDialog()
@@ -94,7 +94,7 @@ def test_choose_csv_file_error_and_cancel_paths(
         ),
     )
     monkeypatch.setattr(
-        "estudai.ui.dialog.notebooklm_import_dialog.QMessageBox.warning",
+        "estudai.ui.message_box.MessageBoxPresenter.show_warning",
         lambda *_args, **_kwargs: warnings.append("warning"),
     )
     dialog._choose_csv_file()
@@ -113,7 +113,7 @@ def test_create_target_folder_paths(
     dialog = NotebookLMCsvImportDialog()
     warnings: list[str] = []
     monkeypatch.setattr(
-        "estudai.ui.dialog.notebooklm_import_dialog.QMessageBox.warning",
+        "estudai.ui.message_box.MessageBoxPresenter.show_warning",
         lambda *_args, **_kwargs: warnings.append("warning"),
     )
 
@@ -143,12 +143,11 @@ def test_create_target_folder_paths(
 
 
 def test_reload_folders_shows_hierarchical_labels(app: QApplication) -> None:
-    """Verify nested folders are labeled by path in the target combo box."""
+    """Verify nested target sets are labeled by their full folder path."""
     root_folder = create_managed_folder("Biology")
-    create_managed_folder("Genetics", parent_id=root_folder.id)
+    create_managed_set("Genetics", parent_id=root_folder.id)
 
     dialog = NotebookLMCsvImportDialog()
 
-    assert dialog.target_folder_combo.count() == 2
-    assert dialog.target_folder_combo.itemText(0) == "Biology"
-    assert dialog.target_folder_combo.itemText(1) == "Biology / Genetics"
+    assert dialog.target_folder_combo.count() == 1
+    assert dialog.target_folder_combo.itemText(0) == "Biology / Genetics"

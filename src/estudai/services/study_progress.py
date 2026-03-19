@@ -67,26 +67,14 @@ class FolderProgressSummary:
 
 
 def get_study_progress_path() -> Path:
-    """Return the study-progress JSON file path.
-
-    Returns:
-        Path: Persistent study-progress file path.
-    """
+    """Return the study-progress JSON file path."""
     from .folder_storage import get_app_data_dir
 
     return get_app_data_dir() / STUDY_PROGRESS_FILENAME
 
 
 def reviewed_progress(correct_count: int, wrong_count: int) -> FlashcardProgress:
-    """Build a reviewed progress payload stamped with the current UTC time.
-
-    Args:
-        correct_count: Correct-answer count to persist.
-        wrong_count: Wrong-answer count to persist.
-
-    Returns:
-        FlashcardProgress: Normalized progress payload.
-    """
+    """Build a reviewed progress payload stamped with the current UTC time."""
     return FlashcardProgress(
         correct_count=max(0, correct_count),
         wrong_count=max(0, wrong_count),

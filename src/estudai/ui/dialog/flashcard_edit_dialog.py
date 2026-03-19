@@ -9,7 +9,6 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
-    QMessageBox,
     QPushButton,
     QPlainTextEdit,
     QVBoxLayout,
@@ -19,6 +18,7 @@ from estudai.services.csv_flashcards import (
     FLASHCARD_IMAGE_FILE_DIALOG_FILTER,
     normalize_flashcard_fields,
 )
+from estudai.ui.message_box import MessageBoxPresenter
 
 
 class FlashcardEditDialog(QDialog):
@@ -38,6 +38,7 @@ class FlashcardEditDialog(QDialog):
         self._base_folder_path = base_folder_path
         self._question_image_path = question_image_path
         self._answer_image_path = answer_image_path
+        self._message_box = MessageBoxPresenter(self)
         self._build_ui(question, answer)
 
     def _build_ui(self, question: str, answer: str) -> None:
@@ -58,41 +59,25 @@ class FlashcardEditDialog(QDialog):
         self.answer_edit.setTabChangesFocus(True)
         layout.addWidget(self.answer_edit)
 
-        layout.addWidget(QLabel("Question image"))
-        self.question_image_summary_label = QLabel()
-        self.question_image_summary_label.setWordWrap(True)
-        layout.addWidget(self.question_image_summary_label)
-        question_image_buttons = QHBoxLayout()
-        self.choose_question_image_button = QPushButton("Choose Question Image")
-        self.choose_question_image_button.clicked.connect(
-            lambda: self._choose_image("question")
+        (
+            self.question_image_summary_label,
+            self.choose_question_image_button,
+            self.remove_question_image_button,
+        ) = self._build_image_section(
+            layout,
+            "Question image",
+            "question",
         )
-        question_image_buttons.addWidget(self.choose_question_image_button)
-        self.remove_question_image_button = QPushButton("Remove")
-        self.remove_question_image_button.clicked.connect(
-            lambda: self._remove_image("question")
-        )
-        question_image_buttons.addWidget(self.remove_question_image_button)
-        question_image_buttons.addStretch()
-        layout.addLayout(question_image_buttons)
 
-        layout.addWidget(QLabel("Answer image"))
-        self.answer_image_summary_label = QLabel()
-        self.answer_image_summary_label.setWordWrap(True)
-        layout.addWidget(self.answer_image_summary_label)
-        answer_image_buttons = QHBoxLayout()
-        self.choose_answer_image_button = QPushButton("Choose Answer Image")
-        self.choose_answer_image_button.clicked.connect(
-            lambda: self._choose_image("answer")
+        (
+            self.answer_image_summary_label,
+            self.choose_answer_image_button,
+            self.remove_answer_image_button,
+        ) = self._build_image_section(
+            layout,
+            "Answer image",
+            "answer",
         )
-        answer_image_buttons.addWidget(self.choose_answer_image_button)
-        self.remove_answer_image_button = QPushButton("Remove")
-        self.remove_answer_image_button.clicked.connect(
-            lambda: self._remove_image("answer")
-        )
-        answer_image_buttons.addWidget(self.remove_answer_image_button)
-        answer_image_buttons.addStretch()
-        layout.addLayout(answer_image_buttons)
 
         buttons_row = QHBoxLayout()
         buttons_row.addStretch()
@@ -108,6 +93,28 @@ class FlashcardEditDialog(QDialog):
         layout.addLayout(buttons_row)
         self._refresh_image_summary_labels()
 
+    def _build_image_section(
+        self,
+        layout: QVBoxLayout,
+        label_text: str,
+        side: str,
+    ) -> tuple[QLabel, QPushButton, QPushButton]:
+        """Build one image picker section and append to the layout."""
+        layout.addWidget(QLabel(label_text))
+        summary_label = QLabel()
+        summary_label.setWordWrap(True)
+        layout.addWidget(summary_label)
+        buttons = QHBoxLayout()
+        choose_button = QPushButton(f"Choose {label_text}")
+        choose_button.clicked.connect(lambda: self._choose_image(side))
+        buttons.addWidget(choose_button)
+        remove_button = QPushButton("Remove")
+        remove_button.clicked.connect(lambda: self._remove_image(side))
+        buttons.addWidget(remove_button)
+        buttons.addStretch()
+        layout.addLayout(buttons)
+        return summary_label, choose_button, remove_button
+
     def _handle_save_clicked(self) -> None:
         """Validate current fields and accept when the inputs are valid."""
         try:
@@ -118,7 +125,7 @@ class FlashcardEditDialog(QDialog):
                 answer_image_path=self._answer_image_path,
             )
         except ValueError as error:
-            QMessageBox.warning(self, "Edit flashcard", str(error))
+            self._message_box.show_warning("Edit flashcard", str(error))
             return
         self.question_edit.setPlainText(question)
         self.answer_edit.setPlainText(answer)

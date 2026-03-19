@@ -15,16 +15,27 @@ from .csv_flashcards import (
     Flashcard,
     ensure_managed_flashcards,
     get_managed_flashcard_media_dir,
+    get_managed_csv_path,
     load_flashcards_from_folder,
     list_source_csv_files,
 )
-from .study_progress import delete_folder_progress
+from .study_progress import (
+    FlashcardProgressEntry,
+    delete_folder_progress,
+    load_folder_progress,
+    save_progress_entries,
+)
 
 APP_NAME = "estudai"
 ENV_DATA_DIR = "ESTUDAI_DATA_DIR"
 REGISTRY_FILENAME = "folders.json"
 LIBRARY_FOLDER_NAME = "folder-library"
 _UNCHANGED_PARENT = object()
+NODE_KIND_FOLDER = "folder"
+NODE_KIND_SET = "set"
+_LEGACY_NODE_KIND = "legacy"
+_FLASHCARDS_SOURCE_SUFFIX = "#flashcards"
+_FLASHCARDS_SET_SUFFIX = " Flashcards"
 
 
 @dataclass(frozen=True)
@@ -39,6 +50,7 @@ class PersistedFolder:
         stored_path: Managed directory path used by the application.
         parent_id: Optional parent folder identifier for nested structures.
         sort_order: Zero-based sibling order within the parent folder.
+        kind: Whether the node is a navigational folder or flashcard set.
     """
 
     id: str
@@ -47,6 +59,17 @@ class PersistedFolder:
     stored_path: str
     parent_id: str | None = None
     sort_order: int = 0
+    kind: str = NODE_KIND_SET
+
+    @property
+    def is_flashcard_set(self) -> bool:
+        """Return whether this node is an editable flashcard set."""
+        return self.kind == NODE_KIND_SET
+
+    @property
+    def is_folder(self) -> bool:
+        """Return whether this node is a navigational container folder."""
+        return self.kind == NODE_KIND_FOLDER
 
 
 @dataclass(frozen=True)
@@ -63,63 +86,35 @@ class ImportedFolderPaths:
 
 
 def _validate_folder_name(name: str) -> str:
-    """Validate and normalize a folder display name.
-
-    Args:
-        name: Folder name provided by the user.
-
-    Returns:
-        str: Stripped folder name.
-
-    Raises:
-        ValueError: If the folder name is empty.
-    """
+    """Validate folder name is non-empty after stripping."""
     normalized_name = name.strip()
     if not normalized_name:
-        msg = "Folder name cannot be empty."
-        raise ValueError(msg)
+        raise ValueError("Folder name cannot be empty.")
     return normalized_name
 
 
 def get_app_data_dir() -> Path:
-    """Return the app data directory using OS-specific defaults.
-
-    Returns:
-        Path: Directory used for persistent app state.
-    """
+    """Return the app data directory using OS-specific defaults."""
     configured_path = os.getenv(ENV_DATA_DIR)
     if configured_path:
         data_dir = Path(configured_path)
     elif os.name == "nt":
-        appdata = os.getenv("APPDATA")
-        base_dir = Path(appdata) if appdata else Path.home() / "AppData" / "Roaming"
-        data_dir = base_dir / APP_NAME
+        base = Path(os.getenv("APPDATA") or Path.home() / "AppData" / "Roaming")
+        data_dir = base / APP_NAME
     else:
-        xdg_data_home = os.getenv("XDG_DATA_HOME")
-        base_dir = (
-            Path(xdg_data_home) if xdg_data_home else Path.home() / ".local" / "share"
-        )
-        data_dir = base_dir / APP_NAME
-
+        base = Path(os.getenv("XDG_DATA_HOME") or Path.home() / ".local" / "share")
+        data_dir = base / APP_NAME
     data_dir.mkdir(parents=True, exist_ok=True)
     return data_dir
 
 
 def get_registry_path() -> Path:
-    """Return the persisted folder registry file path.
-
-    Returns:
-        Path: JSON file containing persisted folder metadata.
-    """
+    """Return the persisted folder registry file path."""
     return get_app_data_dir() / REGISTRY_FILENAME
 
 
 def get_library_dir() -> Path:
-    """Return the managed folder library root.
-
-    Returns:
-        Path: Directory where copied user folders are stored.
-    """
+    """Return the managed folder library root."""
     library_dir = get_app_data_dir() / LIBRARY_FOLDER_NAME
     library_dir.mkdir(parents=True, exist_ok=True)
     return library_dir
@@ -159,6 +154,10 @@ def _deserialize_persisted_folder(
     if not isinstance(sort_order, int):
         sort_order = fallback_sort_order
 
+    kind = entry.get("kind", _LEGACY_NODE_KIND)
+    if kind not in {NODE_KIND_FOLDER, NODE_KIND_SET, _LEGACY_NODE_KIND}:
+        kind = _LEGACY_NODE_KIND
+
     return PersistedFolder(
         id=folder_id,
         name=folder_name,
@@ -166,6 +165,7 @@ def _deserialize_persisted_folder(
         stored_path=stored_path,
         parent_id=parent_id,
         sort_order=sort_order,
+        kind=str(kind),
     )
 
 
@@ -296,9 +296,134 @@ def _load_registry_entries() -> tuple[list[PersistedFolder], bool]:
         persisted_folders.append(persisted_folder)
 
     normalized_folders = _normalize_persisted_folders(persisted_folders)
+    migrated_folders, migration_applied = _migrate_legacy_persisted_folders(
+        normalized_folders
+    )
+    normalized_folders = _normalize_persisted_folders(migrated_folders)
     if normalized_folders != persisted_folders:
         needs_save = True
+    if migration_applied:
+        needs_save = True
     return normalized_folders, needs_save
+
+
+def _folder_has_direct_flashcards(folder_path: Path) -> bool:
+    """Return whether one stored folder currently owns direct flashcards."""
+    try:
+        return bool(load_flashcards_from_folder(folder_path))
+    except csv.Error, OSError, UnicodeDecodeError, ValueError:
+        return get_managed_csv_path(folder_path).exists() or bool(
+            list_source_csv_files(folder_path)
+        )
+
+
+def _flashcards_set_source_path(source_path: str) -> str:
+    """Return a synthetic source key for direct flashcards under one folder."""
+    if not source_path:
+        return ""
+    return f"{source_path}{_FLASHCARDS_SOURCE_SUFFIX}"
+
+
+def _flashcards_set_name(folder_name: str) -> str:
+    """Return the default child-set name for one container folder."""
+    return f"{folder_name}{_FLASHCARDS_SET_SUFFIX}"
+
+
+def _move_folder_progress(source_folder_id: str, target_folder_id: str) -> None:
+    """Move persisted study progress from one folder id to another."""
+    source_progress = load_folder_progress(source_folder_id)
+    if source_progress:
+        save_progress_entries(
+            [
+                FlashcardProgressEntry(
+                    folder_id=target_folder_id,
+                    flashcard_id=flashcard_id,
+                    progress=progress,
+                )
+                for flashcard_id, progress in source_progress.items()
+            ]
+        )
+    delete_folder_progress(source_folder_id)
+
+
+def _move_legacy_folder_flashcards(
+    source_folder_path: Path,
+    target_folder_path: Path,
+) -> None:
+    """Move direct flashcard files from a mixed legacy folder into a child set."""
+    if target_folder_path.exists():
+        shutil.rmtree(target_folder_path)
+    target_folder_path.mkdir(parents=True, exist_ok=False)
+
+    managed_csv = get_managed_csv_path(source_folder_path)
+    if managed_csv.exists():
+        shutil.move(
+            str(managed_csv),
+            str(get_managed_csv_path(target_folder_path)),
+        )
+        for source_csv in list_source_csv_files(source_folder_path):
+            source_csv.unlink()
+    else:
+        for source_csv in list_source_csv_files(source_folder_path):
+            shutil.move(str(source_csv), str(target_folder_path / source_csv.name))
+
+    media_dir = get_managed_flashcard_media_dir(source_folder_path)
+    if media_dir.exists():
+        shutil.move(
+            str(media_dir),
+            str(get_managed_flashcard_media_dir(target_folder_path)),
+        )
+
+
+def _migrate_legacy_persisted_folders(
+    folders: list[PersistedFolder],
+) -> tuple[list[PersistedFolder], bool]:
+    """Upgrade legacy nodes that do not yet distinguish folders from sets."""
+    if not any(folder.kind == _LEGACY_NODE_KIND for folder in folders):
+        return folders, False
+
+    children_by_parent: dict[str | None, list[PersistedFolder]] = {}
+    for folder in folders:
+        children_by_parent.setdefault(folder.parent_id, []).append(folder)
+
+    migrated_folders: list[PersistedFolder] = []
+    migration_applied = False
+    for folder in folders:
+        if folder.kind != _LEGACY_NODE_KIND:
+            migrated_folders.append(folder)
+            continue
+
+        legacy_children = children_by_parent.get(folder.id, [])
+        direct_flashcards_exist = _folder_has_direct_flashcards(
+            Path(folder.stored_path)
+        )
+        if not legacy_children:
+            migrated_folders.append(replace(folder, kind=NODE_KIND_SET))
+            migration_applied = True
+            continue
+
+        migrated_folder = replace(folder, kind=NODE_KIND_FOLDER)
+        migrated_folders.append(migrated_folder)
+        migration_applied = True
+        if not direct_flashcards_exist:
+            continue
+
+        child_set_id = uuid4().hex
+        child_set_path = get_library_dir() / child_set_id
+        _move_legacy_folder_flashcards(Path(folder.stored_path), child_set_path)
+        child_set = PersistedFolder(
+            id=child_set_id,
+            name=_flashcards_set_name(folder.name),
+            source_path=_flashcards_set_source_path(folder.source_path),
+            stored_path=str(child_set_path),
+            parent_id=folder.id,
+            sort_order=0,
+            kind=NODE_KIND_SET,
+        )
+        migrated_folders.append(child_set)
+        _move_folder_progress(folder.id, child_set.id)
+
+    return migrated_folders, migration_applied
 
 
 def list_persisted_folders() -> list[PersistedFolder]:
@@ -368,6 +493,9 @@ def _validate_parent_folder(
     if parent_folder is None:
         msg = f"Folder not found: {parent_id}"
         raise KeyError(msg)
+    if parent_folder.is_flashcard_set:
+        msg = "Flashcard sets cannot contain child folders or sets."
+        raise ValueError(msg)
 
     if moving_folder_id is None:
         return
@@ -454,16 +582,18 @@ def _reassign_sibling_orders(
     return result
 
 
-def create_managed_folder(
+def _create_managed_node(
     name: str,
     *,
     parent_id: str | None = None,
+    kind: str,
 ) -> PersistedFolder:
-    """Create a managed empty folder in app storage.
+    """Create one managed folder or flashcard set in app storage.
 
     Args:
         name: Display name for the new folder.
         parent_id: Optional parent folder id for nested creation.
+        kind: Node kind to persist.
 
     Returns:
         PersistedFolder: Created folder metadata.
@@ -486,10 +616,29 @@ def create_managed_folder(
         stored_path=str(stored_folder_path),
         parent_id=parent_id,
         sort_order=sibling_count,
+        kind=kind,
     )
     save_persisted_folders([*persisted_folders, persisted_folder])
     created_folder = _folder_by_id(list_persisted_folders(), folder_id)
     return created_folder if created_folder is not None else persisted_folder
+
+
+def create_managed_folder(
+    name: str,
+    *,
+    parent_id: str | None = None,
+) -> PersistedFolder:
+    """Create a managed empty navigational folder in app storage."""
+    return _create_managed_node(name, parent_id=parent_id, kind=NODE_KIND_FOLDER)
+
+
+def create_managed_set(
+    name: str,
+    *,
+    parent_id: str | None = None,
+) -> PersistedFolder:
+    """Create a managed empty flashcard set in app storage."""
+    return _create_managed_node(name, parent_id=parent_id, kind=NODE_KIND_SET)
 
 
 def rename_persisted_folder(folder_id: str, new_name: str) -> PersistedFolder:
@@ -773,6 +922,7 @@ def _upsert_imported_folder(
     stored_path: Path,
     parent_id: str | None,
     next_sort_order_by_parent: dict[str | None, int],
+    kind: str,
 ) -> PersistedFolder:
     """Insert or update one imported folder entry in memory.
 
@@ -784,6 +934,7 @@ def _upsert_imported_folder(
         stored_path: Managed directory path used by the application.
         parent_id: Parent folder id for the imported folder.
         next_sort_order_by_parent: Next available sibling positions by parent.
+        kind: Whether the imported node is a folder or flashcard set.
 
     Returns:
         PersistedFolder: Inserted or updated folder metadata.
@@ -801,6 +952,7 @@ def _upsert_imported_folder(
             parent_id=parent_id,
             next_sort_order_by_parent=next_sort_order_by_parent,
         ),
+        kind=kind,
     )
 
     updated_existing = False
@@ -881,6 +1033,72 @@ def _import_csv_file(
         stored_path=stored_folder_path,
         parent_id=parent_id,
         next_sort_order_by_parent=next_sort_order_by_parent,
+        kind=NODE_KIND_SET,
+    )
+    return ImportedFolderPaths(
+        root_folder=imported_folder,
+        imported_folder_ids={imported_folder.id},
+    )
+
+
+def _copy_imported_source_csv_files(
+    source_csv_files: list[Path],
+    destination_folder: Path,
+) -> None:
+    """Copy source CSV files into one managed flashcard-set folder."""
+    if destination_folder.exists():
+        shutil.rmtree(destination_folder)
+    destination_folder.mkdir(parents=True, exist_ok=False)
+    for source_csv in source_csv_files:
+        shutil.copy2(source_csv, destination_folder / source_csv.name)
+
+
+def _import_grouped_folder_flashcards(
+    source_folder: Path,
+    persisted_folders: list[PersistedFolder],
+    *,
+    parent_id: str,
+    next_sort_order_by_parent: dict[str | None, int],
+) -> ImportedFolderPaths:
+    """Import direct flashcards from one mixed folder into a child flashcard set."""
+    source_csv_files = list_source_csv_files(source_folder)
+    source_key = _flashcards_set_source_path(str(source_folder))
+    existing_folder = next(
+        (folder for folder in persisted_folders if folder.source_path == source_key),
+        None,
+    )
+    previous_flashcards, managed_media_backup_dir, preserved_media_dir = (
+        _load_previous_flashcards(existing_folder)
+    )
+    stored_folder_path = get_library_dir() / (
+        existing_folder.id if existing_folder is not None else uuid4().hex
+    )
+
+    try:
+        _copy_imported_source_csv_files(source_csv_files, stored_folder_path)
+        if preserved_media_dir is not None and preserved_media_dir.exists():
+            shutil.copytree(
+                preserved_media_dir,
+                get_managed_flashcard_media_dir(stored_folder_path),
+                dirs_exist_ok=True,
+            )
+        ensure_managed_flashcards(
+            stored_folder_path,
+            previous_flashcards=previous_flashcards,
+        )
+    finally:
+        if managed_media_backup_dir is not None:
+            managed_media_backup_dir.cleanup()
+
+    imported_folder = _upsert_imported_folder(
+        persisted_folders,
+        existing_folder=existing_folder,
+        name=_flashcards_set_name(source_folder.name or str(source_folder)),
+        source_path=source_key,
+        stored_path=stored_folder_path,
+        parent_id=parent_id,
+        next_sort_order_by_parent=next_sort_order_by_parent,
+        kind=NODE_KIND_SET,
     )
     return ImportedFolderPaths(
         root_folder=imported_folder,
@@ -921,11 +1139,13 @@ def _import_folder_tree(
         existing_folder.id if existing_folder is not None else uuid4().hex
     )
     source_csv_files = list_source_csv_files(source_folder)
+    child_directories = _sorted_child_directories(source_folder)
     should_split_source_csvs = split_csv_into_subfolders and len(source_csv_files) > 1
+    root_is_container_folder = bool(child_directories) or should_split_source_csvs
 
     try:
         _copy_imported_folder_contents(source_folder, stored_folder_path)
-        if should_split_source_csvs:
+        if should_split_source_csvs or (root_is_container_folder and source_csv_files):
             _remove_split_source_csv_copies(stored_folder_path, source_csv_files)
         if preserved_media_dir is not None and preserved_media_dir.exists():
             shutil.copytree(
@@ -933,10 +1153,11 @@ def _import_folder_tree(
                 get_managed_flashcard_media_dir(stored_folder_path),
                 dirs_exist_ok=True,
             )
-        ensure_managed_flashcards(
-            stored_folder_path,
-            previous_flashcards=previous_flashcards,
-        )
+        if not root_is_container_folder:
+            ensure_managed_flashcards(
+                stored_folder_path,
+                previous_flashcards=previous_flashcards,
+            )
     finally:
         if managed_media_backup_dir is not None:
             managed_media_backup_dir.cleanup()
@@ -949,9 +1170,18 @@ def _import_folder_tree(
         stored_path=stored_folder_path,
         parent_id=parent_id,
         next_sort_order_by_parent=next_sort_order_by_parent,
+        kind=NODE_KIND_FOLDER if root_is_container_folder else NODE_KIND_SET,
     )
 
     imported_folder_ids = {imported_folder.id}
+    if root_is_container_folder and source_csv_files and not should_split_source_csvs:
+        child_import = _import_grouped_folder_flashcards(
+            source_folder,
+            persisted_folders,
+            parent_id=imported_folder.id,
+            next_sort_order_by_parent=next_sort_order_by_parent,
+        )
+        imported_folder_ids.update(child_import.imported_folder_ids)
     child_entries: list[tuple[str, str, Path]] = []
     if should_split_source_csvs:
         child_entries.extend(
@@ -964,7 +1194,7 @@ def _import_folder_tree(
         )
     child_entries.extend(
         (child_directory.name.casefold(), "directory", child_directory)
-        for child_directory in _sorted_child_directories(source_folder)
+        for child_directory in child_directories
     )
 
     for _, child_entry_type, child_path in sorted(child_entries):

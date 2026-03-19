@@ -1,5 +1,7 @@
 """Timer page."""
 
+from collections.abc import Callable
+
 from PySide6.QtCore import (
     QEasingCurve,
     QEvent,
@@ -10,7 +12,7 @@ from PySide6.QtCore import (
     QTimer,
     Signal,
 )
-from PySide6.QtGui import QColor, QFont, QPalette, QPixmap, QTextDocument
+from PySide6.QtGui import QColor, QFont, QMouseEvent, QPalette, QPixmap, QTextDocument
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -33,6 +35,22 @@ from estudai.ui.utils import (
 )
 
 
+class _ClickableLabel(QLabel):
+    """QLabel variant that emits a signal when the user clicks it."""
+
+    clicked = Signal()
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        """Emit ``clicked`` on left-button release, then continue default handling.
+
+        Args:
+            event: Mouse event delivered by Qt.
+        """
+        if event.button() == Qt.LeftButton and self.isEnabled():
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
+
+
 class TimerPage(QWidget):
     """Timer page for study sessions."""
 
@@ -43,6 +61,7 @@ class TimerPage(QWidget):
     flashcard_phase_skip_requested = Signal()
     flashcard_marked_correct = Signal()
     flashcard_marked_wrong = Signal()
+    flashcard_origin_requested = Signal()
     flashcard_edit_requested = Signal()
     flashcard_delete_requested = Signal()
     stop_requested = Signal()
@@ -52,6 +71,9 @@ class TimerPage(QWidget):
     _FLASHCARD_IMAGE_MAX_HEIGHT = 220
     _FLASHCARD_IMAGE_MIN_HEIGHT = 80
     _IMAGE_PATH_UNCHANGED = object()
+    _PRIMARY_CONTROL_BUTTON_MIN_WIDTH = 110
+    _SCORE_ACTION_BUTTON_MIN_WIDTH = 84
+    _SCORE_ACTION_BUTTON_HEIGHT = 44
 
     def __init__(self, default_duration_seconds: int = 25 * 60):
         super().__init__()
@@ -70,6 +92,8 @@ class TimerPage(QWidget):
         self._current_flashcard_answer: str = ""
         self._current_question_image_path: str | None = None
         self._current_answer_image_path: str | None = None
+        self._current_flashcard_origin_path: str | None = None
+        self._flashcard_origin_clickable = False
         self._folder_name: str = "No folders selected"
         self._card_count: int = 0
         self._session_progress_text: str = ""
@@ -110,82 +134,96 @@ class TimerPage(QWidget):
         flashcard_layout = QVBoxLayout(flashcard_view)
         flashcard_layout.setContentsMargins(0, 0, 0, 0)
         flashcard_layout.setSpacing(10)
+        self.flashcard_header_container = QWidget()
+        flashcard_header_layout = QHBoxLayout(self.flashcard_header_container)
+        flashcard_header_layout.setContentsMargins(0, 0, 0, 0)
+        flashcard_header_layout.setSpacing(10)
+        self.flashcard_origin_label = _ClickableLabel("")
+        self.flashcard_origin_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self.flashcard_origin_label.setWordWrap(True)
+        self.flashcard_origin_label.setTextFormat(Qt.PlainText)
+        self.flashcard_origin_label.setTextInteractionFlags(Qt.NoTextInteraction)
+        self.flashcard_origin_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Minimum,
+        )
+        self.flashcard_origin_label.setVisible(False)
+        self.flashcard_origin_label.clicked.connect(
+            self._handle_flashcard_origin_clicked
+        )
+        origin_label_font = QFont(self.flashcard_origin_label.font())
+        origin_label_font.setPointSize(11)
+        self.flashcard_origin_label.setFont(origin_label_font)
+        flashcard_header_layout.addWidget(self.flashcard_origin_label, 1)
+        flashcard_header_layout.addStretch(1)
         self.flashcard_actions_container = QWidget()
-        actions_size_policy = self.flashcard_actions_container.sizePolicy()
-        actions_size_policy.setRetainSizeWhenHidden(True)
-        self.flashcard_actions_container.setSizePolicy(actions_size_policy)
+        self._retain_size_when_hidden(self.flashcard_actions_container)
         flashcard_actions_layout = QHBoxLayout(self.flashcard_actions_container)
         flashcard_actions_layout.setContentsMargins(0, 0, 0, 0)
         flashcard_actions_layout.setSpacing(14)
         flashcard_actions_layout.addStretch(1)
-        self.correct_button = QPushButton("✓")
-        self.correct_button.setToolTip("Mark correct")
-        self.correct_button.setProperty("scoreAction", "correct")
-        self.correct_button.setCheckable(True)
-        self.correct_button.clicked.connect(self._handle_correct_button_clicked)
-        self.correct_button.setMinimumWidth(84)
-        self.correct_button.setFixedHeight(44)
-        self.correct_button.setEnabled(False)
-        self.wrong_button = QPushButton("✕")
-        self.wrong_button.setToolTip("Mark wrong")
-        self.wrong_button.setProperty("scoreAction", "wrong")
-        self.wrong_button.setCheckable(True)
-        self.wrong_button.clicked.connect(self._handle_wrong_button_clicked)
-        self.wrong_button.setMinimumWidth(84)
-        self.wrong_button.setFixedHeight(44)
-        self.wrong_button.setEnabled(False)
+        self.correct_button = self._create_score_action_button(
+            "✓",
+            tooltip="Mark correct",
+            score_action="correct",
+            clicked_handler=self._handle_correct_button_clicked,
+        )
+        self.wrong_button = self._create_score_action_button(
+            "✕",
+            tooltip="Mark wrong",
+            score_action="wrong",
+            clicked_handler=self._handle_wrong_button_clicked,
+        )
         flashcard_actions_layout.addWidget(self.correct_button)
         flashcard_actions_layout.addWidget(self.wrong_button)
         flashcard_actions_layout.addStretch(1)
         self.flashcard_actions_container.setVisible(False)
 
         self.flashcard_pause_actions_container = QWidget()
-        pause_actions_size_policy = self.flashcard_pause_actions_container.sizePolicy()
-        pause_actions_size_policy.setRetainSizeWhenHidden(True)
-        self.flashcard_pause_actions_container.setSizePolicy(pause_actions_size_policy)
+        self._retain_size_when_hidden(self.flashcard_pause_actions_container)
         flashcard_pause_actions_layout = QHBoxLayout(
             self.flashcard_pause_actions_container
         )
         flashcard_pause_actions_layout.setContentsMargins(0, 0, 0, 0)
         flashcard_pause_actions_layout.setSpacing(10)
         flashcard_pause_actions_layout.addStretch(1)
-        self.skip_phase_button = QPushButton("Skip")
-        self.skip_phase_button.setToolTip("Advance the current flashcard phase")
-        self.skip_phase_button.clicked.connect(self.flashcard_phase_skip_requested.emit)
-        self.skip_phase_button.setMinimumWidth(130)
-        self.skip_phase_button.setEnabled(False)
+        self.skip_phase_button = self._create_button(
+            "Skip",
+            tooltip="Advance the current flashcard phase",
+            clicked_handler=self.flashcard_phase_skip_requested.emit,
+            minimum_width=130,
+            enabled=False,
+        )
         flashcard_pause_actions_layout.addWidget(self.skip_phase_button)
-        self.shuffle_queue_button = QPushButton("Shuffle Queue")
-        self.shuffle_queue_button.setToolTip("Shuffle remaining queue")
-        self.shuffle_queue_button.clicked.connect(
-            self.flashcard_queue_shuffle_requested.emit
+        self.shuffle_queue_button = self._create_button(
+            "Shuffle Queue",
+            tooltip="Shuffle remaining queue",
+            clicked_handler=self.flashcard_queue_shuffle_requested.emit,
+            minimum_width=140,
+            enabled=False,
+            visible=False,
         )
-        self.shuffle_queue_button.setMinimumWidth(140)
-        self.shuffle_queue_button.setVisible(False)
-        self.shuffle_queue_button.setEnabled(False)
         flashcard_pause_actions_layout.addWidget(self.shuffle_queue_button)
-        self.edit_flashcard_button = QPushButton("Edit")
-        self.edit_flashcard_button.setToolTip("Edit current flashcard")
-        self.edit_flashcard_button.clicked.connect(self.flashcard_edit_requested.emit)
-        self.edit_flashcard_button.setMinimumWidth(110)
-        self.edit_flashcard_button.setEnabled(False)
-        flashcard_pause_actions_layout.addWidget(self.edit_flashcard_button)
-        self.delete_flashcard_button = QPushButton("Delete")
-        self.delete_flashcard_button.setToolTip("Delete current flashcard")
-        self.delete_flashcard_button.clicked.connect(
-            self.flashcard_delete_requested.emit
+        self.edit_flashcard_button = self._create_button(
+            "Edit",
+            tooltip="Edit current flashcard",
+            clicked_handler=self.flashcard_edit_requested.emit,
+            minimum_width=self._PRIMARY_CONTROL_BUTTON_MIN_WIDTH,
+            enabled=False,
         )
-        self.delete_flashcard_button.setMinimumWidth(110)
-        self.delete_flashcard_button.setEnabled(False)
+        flashcard_pause_actions_layout.addWidget(self.edit_flashcard_button)
+        self.delete_flashcard_button = self._create_button(
+            "Delete",
+            tooltip="Delete current flashcard",
+            clicked_handler=self.flashcard_delete_requested.emit,
+            minimum_width=self._PRIMARY_CONTROL_BUTTON_MIN_WIDTH,
+            enabled=False,
+        )
         flashcard_pause_actions_layout.addWidget(self.delete_flashcard_button)
         flashcard_pause_actions_layout.addStretch(1)
         self.flashcard_pause_actions_container.setVisible(False)
-        flashcard_layout.addWidget(self.flashcard_pause_actions_container)
-
-        flashcard_layout.setAlignment(
-            self.flashcard_pause_actions_container,
-            Qt.AlignTop | Qt.AlignRight,
-        )
+        flashcard_header_layout.addWidget(self.flashcard_pause_actions_container)
+        flashcard_layout.addWidget(self.flashcard_header_container)
         self.flashcard_content_widget = QWidget()
         self.flashcard_content_widget.setSizePolicy(
             QSizePolicy.Policy.Expanding,
@@ -195,37 +233,19 @@ class TimerPage(QWidget):
         self.flashcard_content_layout.setContentsMargins(8, 0, 8, 0)
         self.flashcard_content_layout.setSpacing(12)
         self.flashcard_content_layout.addStretch(1)
-        self.flashcard_question_label = QLabel("")
-        self.flashcard_question_label.setAlignment(Qt.AlignCenter)
-        self.flashcard_question_label.setWordWrap(True)
-        self.flashcard_question_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.flashcard_question_label.setSizePolicy(
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Minimum,
+        self.flashcard_question_label = self._create_flashcard_text_label(
+            point_size=self._FLASHCARD_QUESTION_BASE_POINT_SIZE,
+            weight=QFont.ExtraBold,
         )
-        question_font = QFont(self.flashcard_question_label.font())
-        question_font.setPointSize(self._FLASHCARD_QUESTION_BASE_POINT_SIZE)
-        question_font.setWeight(QFont.ExtraBold)
-        self.flashcard_question_label.setFont(question_font)
-        self.flashcard_question_label.setVisible(False)
         self.flashcard_content_layout.addWidget(self.flashcard_question_label)
         self.flashcard_question_image_label = QLabel("")
         self._configure_flashcard_image_label(self.flashcard_question_image_label)
         self.flashcard_content_layout.addWidget(self.flashcard_question_image_label)
 
-        self.flashcard_answer_label = QLabel("")
-        self.flashcard_answer_label.setAlignment(Qt.AlignCenter)
-        self.flashcard_answer_label.setWordWrap(True)
-        self.flashcard_answer_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.flashcard_answer_label.setSizePolicy(
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Minimum,
+        self.flashcard_answer_label = self._create_flashcard_text_label(
+            point_size=self._FLASHCARD_ANSWER_BASE_POINT_SIZE,
+            weight=QFont.DemiBold,
         )
-        answer_font = QFont(self.flashcard_answer_label.font())
-        answer_font.setPointSize(self._FLASHCARD_ANSWER_BASE_POINT_SIZE)
-        answer_font.setWeight(QFont.DemiBold)
-        self.flashcard_answer_label.setFont(answer_font)
-        self.flashcard_answer_label.setVisible(False)
         self.flashcard_content_layout.addWidget(self.flashcard_answer_label)
         self.flashcard_answer_image_label = QLabel("")
         self._configure_flashcard_image_label(self.flashcard_answer_image_label)
@@ -272,24 +292,30 @@ class TimerPage(QWidget):
         controls_layout.setSpacing(10)
         controls_layout.addStretch(1)
 
-        self.start_button = QPushButton("Start")
-        self.start_button.setToolTip("Start")
-        self.start_button.clicked.connect(self.start_timer)
-        self.start_button.setMinimumWidth(110)
+        self.start_button = self._create_button(
+            "Start",
+            tooltip="Start",
+            clicked_handler=self.start_timer,
+            minimum_width=self._PRIMARY_CONTROL_BUTTON_MIN_WIDTH,
+        )
         controls_layout.addWidget(self.start_button)
 
-        self.pause_button = QPushButton("Pause")
-        self.pause_button.setToolTip("Pause")
-        self.pause_button.clicked.connect(self.pause_timer)
-        self.pause_button.setEnabled(False)
-        self.pause_button.setMinimumWidth(110)
+        self.pause_button = self._create_button(
+            "Pause",
+            tooltip="Pause",
+            clicked_handler=self.pause_timer,
+            minimum_width=self._PRIMARY_CONTROL_BUTTON_MIN_WIDTH,
+            enabled=False,
+        )
         controls_layout.addWidget(self.pause_button)
 
-        self.stop_button = QPushButton("Stop")
-        self.stop_button.setToolTip("Stop")
-        self.stop_button.clicked.connect(self._handle_stop_button_clicked)
-        self.stop_button.setEnabled(False)
-        self.stop_button.setMinimumWidth(110)
+        self.stop_button = self._create_button(
+            "Stop",
+            tooltip="Stop",
+            clicked_handler=self._handle_stop_button_clicked,
+            minimum_width=self._PRIMARY_CONTROL_BUTTON_MIN_WIDTH,
+            enabled=False,
+        )
         controls_layout.addWidget(self.stop_button)
         controls_layout.addStretch(1)
         layout.addLayout(controls_layout)
@@ -319,16 +345,126 @@ class TimerPage(QWidget):
         super().resizeEvent(event)
         self._update_flashcard_content_presentation()
 
-    def _apply_palette_styles(self) -> None:
-        """Apply palette-aware styles for non-native progress visuals."""
-        palette = self.palette()
-        active_track = blend_colors(
-            palette.color(QPalette.Window),
-            palette.color(QPalette.AlternateBase),
-            overlay_ratio=0.65,
-        ).name(QColor.HexRgb)
-        active_fill = palette.color(QPalette.Highlight).name(QColor.HexRgb)
-        self.flashcard_progress_bar.setStyleSheet(
+    def _retain_size_when_hidden(self, widget: QWidget) -> None:
+        """Keep a widget's layout footprint even while it is hidden.
+
+        Args:
+            widget: Widget whose size policy should retain hidden size.
+        """
+        size_policy = widget.sizePolicy()
+        size_policy.setRetainSizeWhenHidden(True)
+        widget.setSizePolicy(size_policy)
+
+    def _create_button(
+        self,
+        text: str,
+        *,
+        tooltip: str,
+        clicked_handler: Callable[[], object],
+        minimum_width: int,
+        enabled: bool = True,
+        visible: bool = True,
+        checkable: bool = False,
+        fixed_height: int | None = None,
+    ) -> QPushButton:
+        """Create a timer-page button with shared presentation defaults.
+
+        Args:
+            text: Visible button text.
+            tooltip: Tooltip text shown for the button.
+            clicked_handler: Callable connected to the clicked signal.
+            minimum_width: Minimum width applied to the button.
+            enabled: Whether the button starts enabled.
+            visible: Whether the button starts visible.
+            checkable: Whether the button is toggleable.
+            fixed_height: Optional fixed height for the button.
+
+        Returns:
+            Configured push button.
+        """
+        button = QPushButton(text)
+        button.setToolTip(tooltip)
+        button.clicked.connect(clicked_handler)
+        button.setMinimumWidth(minimum_width)
+        if fixed_height is not None:
+            button.setFixedHeight(fixed_height)
+        button.setCheckable(checkable)
+        button.setEnabled(enabled)
+        button.setVisible(visible)
+        return button
+
+    def _create_score_action_button(
+        self,
+        text: str,
+        *,
+        tooltip: str,
+        score_action: str,
+        clicked_handler: Callable[[], object],
+    ) -> QPushButton:
+        """Create one flashcard score button with its shared configuration.
+
+        Args:
+            text: Visible button label.
+            tooltip: Tooltip text shown for the button.
+            score_action: Property value used to identify the score action.
+            clicked_handler: Callable connected to the clicked signal.
+
+        Returns:
+            Configured score button.
+        """
+        button = self._create_button(
+            text,
+            tooltip=tooltip,
+            clicked_handler=clicked_handler,
+            minimum_width=self._SCORE_ACTION_BUTTON_MIN_WIDTH,
+            enabled=False,
+            checkable=True,
+            fixed_height=self._SCORE_ACTION_BUTTON_HEIGHT,
+        )
+        button.setProperty("scoreAction", score_action)
+        return button
+
+    def _create_flashcard_text_label(self, *, point_size: int, weight: int) -> QLabel:
+        """Create a flashcard text label with shared formatting defaults.
+
+        Args:
+            point_size: Base point size for the label font.
+            weight: Font weight applied to the label.
+
+        Returns:
+            Configured flashcard text label.
+        """
+        label = QLabel("")
+        label.setAlignment(Qt.AlignCenter)
+        label.setWordWrap(True)
+        label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        label.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Minimum,
+        )
+        label_font = QFont(label.font())
+        label_font.setPointSize(point_size)
+        label_font.setWeight(weight)
+        label.setFont(label_font)
+        label.setVisible(False)
+        return label
+
+    def _build_flashcard_progress_stylesheet(
+        self,
+        *,
+        active_track: str,
+        active_fill: str,
+    ) -> str:
+        """Return the palette-aware stylesheet for the flashcard progress bar.
+
+        Args:
+            active_track: Background color for the active track.
+            active_fill: Fill color for the active chunk.
+
+        Returns:
+            Progress bar stylesheet.
+        """
+        return (
             "QProgressBar {"
             " border: none;"
             " border-radius: 3px;"
@@ -344,6 +480,78 @@ class TimerPage(QWidget):
             "QProgressBar[flashcardProgressActive='true']::chunk {"
             f" background: {active_fill};"
             "}"
+        )
+
+    def _build_score_button_stylesheet(
+        self,
+        *,
+        fill_color: QColor,
+        text_tint: QColor,
+        border_color: QColor,
+        hover_color: QColor,
+        checked_fill_color: QColor,
+        checked_text_color: QColor,
+        checked_border_color: QColor,
+        disabled_fill_color: QColor,
+        disabled_text_color: QColor,
+        disabled_border_color: QColor,
+    ) -> str:
+        """Return the score-button stylesheet for one accent color variant.
+
+        Args:
+            fill_color: Default button background color.
+            text_tint: Default button text color.
+            border_color: Default border color.
+            hover_color: Hover background color.
+            checked_fill_color: Checked and pressed background color.
+            checked_text_color: Checked and pressed text color.
+            checked_border_color: Checked and pressed border color.
+            disabled_fill_color: Disabled background color.
+            disabled_text_color: Disabled text color.
+            disabled_border_color: Disabled border color.
+
+        Returns:
+            Score button stylesheet.
+        """
+        return (
+            "QPushButton {"
+            f" background-color: {fill_color.name(QColor.HexRgb)};"
+            f" color: {text_tint.name(QColor.HexRgb)};"
+            f" border: 1px solid {border_color.name(QColor.HexRgb)};"
+            " border-radius: 14px;"
+            " padding: 6px 18px;"
+            " font-size: 20px;"
+            " font-weight: 700;"
+            "}"
+            "QPushButton:hover:!disabled {"
+            f" background-color: {hover_color.name(QColor.HexRgb)};"
+            "}"
+            "QPushButton:pressed:!disabled, QPushButton:checked {"
+            f" background-color: {checked_fill_color.name(QColor.HexRgb)};"
+            f" color: {checked_text_color.name(QColor.HexRgb)};"
+            f" border: 2px solid {checked_border_color.name(QColor.HexRgb)};"
+            "}"
+            "QPushButton:disabled {"
+            f" background-color: {disabled_fill_color.name(QColor.HexRgb)};"
+            f" color: {disabled_text_color.name(QColor.HexRgb)};"
+            f" border: 1px solid {disabled_border_color.name(QColor.HexRgb)};"
+            "}"
+        )
+
+    def _apply_palette_styles(self) -> None:
+        """Apply palette-aware styles for non-native progress visuals."""
+        palette = self.palette()
+        active_track = blend_colors(
+            palette.color(QPalette.Window),
+            palette.color(QPalette.AlternateBase),
+            overlay_ratio=0.65,
+        ).name(QColor.HexRgb)
+        active_fill = palette.color(QPalette.Highlight).name(QColor.HexRgb)
+        self.flashcard_progress_bar.setStyleSheet(
+            self._build_flashcard_progress_stylesheet(
+                active_track=active_track,
+                active_fill=active_fill,
+            )
         )
         self._apply_score_button_styles()
 
@@ -385,28 +593,18 @@ class TimerPage(QWidget):
                 overlay_ratio=0.4,
             )
             button.setStyleSheet(
-                "QPushButton {"
-                f" background-color: {fill_color.name(QColor.HexRgb)};"
-                f" color: {text_tint.name(QColor.HexRgb)};"
-                f" border: 1px solid {border_color.name(QColor.HexRgb)};"
-                " border-radius: 14px;"
-                " padding: 6px 18px;"
-                " font-size: 20px;"
-                " font-weight: 700;"
-                "}"
-                "QPushButton:hover:!disabled {"
-                f" background-color: {hover_color.name(QColor.HexRgb)};"
-                "}"
-                "QPushButton:pressed:!disabled, QPushButton:checked {"
-                f" background-color: {checked_fill_color.name(QColor.HexRgb)};"
-                f" color: {checked_text_color.name(QColor.HexRgb)};"
-                f" border: 2px solid {checked_border_color.name(QColor.HexRgb)};"
-                "}"
-                "QPushButton:disabled {"
-                f" background-color: {disabled_fill_color.name(QColor.HexRgb)};"
-                f" color: {disabled_text_color.name(QColor.HexRgb)};"
-                f" border: 1px solid {disabled_border_color.name(QColor.HexRgb)};"
-                "}"
+                self._build_score_button_stylesheet(
+                    fill_color=fill_color,
+                    text_tint=text_tint,
+                    border_color=border_color,
+                    hover_color=hover_color,
+                    checked_fill_color=checked_fill_color,
+                    checked_text_color=checked_text_color,
+                    checked_border_color=checked_border_color,
+                    disabled_fill_color=disabled_fill_color,
+                    disabled_text_color=disabled_text_color,
+                    disabled_border_color=disabled_border_color,
+                )
             )
 
     def start_timer(self):
@@ -580,12 +778,45 @@ class TimerPage(QWidget):
         self._update_flashcard_content_presentation()
         self._start_flashcard_progress(display_duration_seconds)
 
+    def set_flashcard_origin(
+        self,
+        origin_path: str | None,
+        *,
+        clickable: bool,
+    ) -> None:
+        """Show or hide the active flashcard origin path in the header.
+
+        Args:
+            origin_path: Full origin path for the visible flashcard, if known.
+            clickable: Whether clicking the path should trigger in-app navigation.
+        """
+        self._current_flashcard_origin_path = origin_path
+        self._flashcard_origin_clickable = clickable and bool(origin_path)
+        if not origin_path:
+            self.flashcard_origin_label.clear()
+            self.flashcard_origin_label.setToolTip("")
+            self.flashcard_origin_label.setCursor(Qt.ArrowCursor)
+            self.flashcard_origin_label.setVisible(False)
+            return
+        self.flashcard_origin_label.setText(origin_path)
+        self.flashcard_origin_label.setToolTip(origin_path)
+        self.flashcard_origin_label.setCursor(
+            Qt.PointingHandCursor if clickable else Qt.ArrowCursor
+        )
+        self.flashcard_origin_label.setVisible(True)
+
+    def current_flashcard_origin_path(self) -> str | None:
+        """Return the origin path shown for the current flashcard."""
+        return self._current_flashcard_origin_path
+
     def clear_flashcard_display(self) -> None:
         """Hide flashcard question/answer and show timer display."""
         self._current_flashcard_question = ""
         self._current_flashcard_answer = ""
         self._current_question_image_path = None
         self._current_answer_image_path = None
+        self._current_flashcard_origin_path = None
+        self._flashcard_origin_clickable = False
         self.flashcard_question_label.setText("")
         self.flashcard_question_label.setVisible(False)
         self.flashcard_question_image_label.clear()
@@ -594,6 +825,10 @@ class TimerPage(QWidget):
         self.flashcard_answer_label.setVisible(False)
         self.flashcard_answer_image_label.clear()
         self.flashcard_answer_image_label.setVisible(False)
+        self.flashcard_origin_label.clear()
+        self.flashcard_origin_label.setToolTip("")
+        self.flashcard_origin_label.setCursor(Qt.ArrowCursor)
+        self.flashcard_origin_label.setVisible(False)
         self._hide_copy_feedback()
         self.content_stack.setCurrentIndex(0)
         self.set_flashcard_controls_active(False)
@@ -1103,6 +1338,11 @@ class TimerPage(QWidget):
         if self.wrong_button.isChecked():
             self.correct_button.setChecked(False)
         self.flashcard_marked_wrong.emit()
+
+    def _handle_flashcard_origin_clicked(self) -> None:
+        """Emit the flashcard-origin navigation request."""
+        if self._flashcard_origin_clickable:
+            self.flashcard_origin_requested.emit()
 
     def _start_flashcard_progress(self, duration_seconds: int) -> None:
         """Animate progress bar for flashcard phase durations.

@@ -308,7 +308,7 @@ def test_forget_progress_refreshes_labels_and_session(
         ),
     )
     monkeypatch.setattr(
-        "estudai.ui.controllers.sidebar_folder_operations_controller.QMessageBox.question",
+        "estudai.ui.message_box.MessageBoxPresenter.confirm_yes_no",
         lambda *_args, **_kwargs: QMessageBox.Yes,
     )
 

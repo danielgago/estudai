@@ -95,6 +95,15 @@ DEFAULT_IN_APP_SHORTCUT_BINDINGS: dict[InAppShortcutAction, str] = {
     InAppShortcutAction.COPY_QUESTION: "C",
 }
 
+_IN_APP_SHORTCUT_FIELD_MAP: dict[InAppShortcutAction, str] = {
+    InAppShortcutAction.PAUSE_RESUME: "in_app_pause_resume_shortcut",
+    InAppShortcutAction.START_STOP: "in_app_start_stop_shortcut",
+    InAppShortcutAction.SKIP_PHASE: "in_app_skip_phase_shortcut",
+    InAppShortcutAction.MARK_CORRECT: "in_app_mark_correct_shortcut",
+    InAppShortcutAction.MARK_WRONG: "in_app_mark_wrong_shortcut",
+    InAppShortcutAction.COPY_QUESTION: "in_app_copy_question_shortcut",
+}
+
 
 @dataclass(frozen=True)
 class AppSettings:
@@ -143,6 +152,78 @@ class AppSettings:
     ]
 
 
+# ── Data-driven field descriptors for load/save ──────────────────────────
+
+# (field_name, settings_key, minimum, maximum)
+_INT_FIELD_SPECS: list[tuple[str, str, int, int]] = [
+    (
+        "timer_duration_seconds",
+        SETTINGS_KEY_TIMER_DURATION_SECONDS,
+        0,
+        MAX_TIMER_DURATION_SECONDS,
+    ),
+    (
+        "flashcard_probability_percent",
+        SETTINGS_KEY_FLASHCARD_PROBABILITY_PERCENT,
+        0,
+        100,
+    ),
+    (
+        "question_display_duration_seconds",
+        SETTINGS_KEY_QUESTION_DURATION_SECONDS,
+        1,
+        3600,
+    ),
+    ("answer_display_duration_seconds", SETTINGS_KEY_ANSWER_DURATION_SECONDS, 1, 3600),
+    (
+        "wrong_answer_reinsert_after_count",
+        SETTINGS_KEY_WRONG_ANSWER_REINSERT_AFTER_COUNT,
+        0,
+        999,
+    ),
+]
+
+# (field_name, settings_key, enum_type)
+_ENUM_FIELD_SPECS: list[tuple[str, str, type[StrEnum]]] = [
+    (
+        "wrong_answer_completion_mode",
+        SETTINGS_KEY_WRONG_ANSWER_COMPLETION_MODE,
+        WrongAnswerCompletionMode,
+    ),
+    (
+        "wrong_answer_reinsertion_mode",
+        SETTINGS_KEY_WRONG_ANSWER_REINSERTION_MODE,
+        WrongAnswerReinsertionMode,
+    ),
+]
+
+# (field_name, settings_key) — all allow_empty=True text fields
+_TEXT_FIELD_SPECS: list[tuple[str, str]] = [
+    ("pause_resume_hotkey", SETTINGS_KEY_HOTKEY_PAUSE_RESUME),
+    ("start_stop_hotkey", SETTINGS_KEY_HOTKEY_START_STOP),
+    ("skip_phase_hotkey", SETTINGS_KEY_HOTKEY_SKIP_PHASE),
+    ("mark_correct_hotkey", SETTINGS_KEY_HOTKEY_MARK_CORRECT),
+    ("mark_wrong_hotkey", SETTINGS_KEY_HOTKEY_MARK_WRONG),
+    ("copy_question_hotkey", SETTINGS_KEY_HOTKEY_COPY_QUESTION),
+    ("in_app_pause_resume_shortcut", SETTINGS_KEY_IN_APP_SHORTCUT_PAUSE_RESUME),
+    ("in_app_start_stop_shortcut", SETTINGS_KEY_IN_APP_SHORTCUT_START_STOP),
+    ("in_app_skip_phase_shortcut", SETTINGS_KEY_IN_APP_SHORTCUT_SKIP_PHASE),
+    ("in_app_mark_correct_shortcut", SETTINGS_KEY_IN_APP_SHORTCUT_MARK_CORRECT),
+    ("in_app_mark_wrong_shortcut", SETTINGS_KEY_IN_APP_SHORTCUT_MARK_WRONG),
+    ("in_app_copy_question_shortcut", SETTINGS_KEY_IN_APP_SHORTCUT_COPY_QUESTION),
+]
+
+# Action enum → AppSettings field name mappings
+_HOTKEY_FIELD_MAP: dict[HotkeyAction, str] = {
+    HotkeyAction.PAUSE_RESUME: "pause_resume_hotkey",
+    HotkeyAction.START_STOP: "start_stop_hotkey",
+    HotkeyAction.SKIP_PHASE: "skip_phase_hotkey",
+    HotkeyAction.MARK_CORRECT: "mark_correct_hotkey",
+    HotkeyAction.MARK_WRONG: "mark_wrong_hotkey",
+    HotkeyAction.COPY_QUESTION: "copy_question_hotkey",
+}
+
+
 def get_default_notification_sound_path() -> str:
     """Return the default notification sound path when available.
 
@@ -167,20 +248,12 @@ def get_default_notification_sound_path() -> str:
 
 
 def _settings_path() -> Path:
-    """Return the QSettings file path.
-
-    Returns:
-        Path: INI file path used by QSettings.
-    """
+    """Return the QSettings file path."""
     return get_app_data_dir() / SETTINGS_FILENAME
 
 
 def _open_settings() -> QSettings:
-    """Create a QSettings instance using app-local INI storage.
-
-    Returns:
-        QSettings: Configured QSettings object.
-    """
+    """Create a QSettings instance using app-local INI storage."""
     return QSettings(str(_settings_path()), QSettings.IniFormat)
 
 
@@ -191,17 +264,7 @@ def _normalize_int(
     minimum: int,
     maximum: int,
 ) -> int:
-    """Normalize integer-like values into a safe bounded range.
-
-    Args:
-        raw_value: Raw value loaded from QSettings.
-        default: Fallback integer when conversion fails.
-        minimum: Inclusive lower bound.
-        maximum: Inclusive upper bound.
-
-    Returns:
-        int: Bounded integer value.
-    """
+    """Normalize integer-like values into a safe bounded range."""
     try:
         value = int(raw_value)
     except TypeError, ValueError:
@@ -210,15 +273,7 @@ def _normalize_int(
 
 
 def _normalize_bool(raw_value: object, *, default: bool) -> bool:
-    """Normalize truthy/falsey settings values into a boolean.
-
-    Args:
-        raw_value: Raw value loaded from QSettings.
-        default: Fallback boolean when conversion is ambiguous.
-
-    Returns:
-        bool: Normalized boolean value.
-    """
+    """Normalize truthy/falsey settings values into a boolean."""
     if isinstance(raw_value, bool):
         return raw_value
     if isinstance(raw_value, str):
@@ -272,15 +327,7 @@ def _normalize_text(
 
 
 def _load_study_order_settings(qsettings: QSettings) -> tuple[StudyOrderMode, bool]:
-    """Load study-order settings, including migration from the legacy boolean.
-
-    Args:
-        qsettings: QSettings storage handle.
-
-    Returns:
-        tuple[StudyOrderMode, bool]: Study-order mode and queue-start shuffle
-            preference.
-    """
+    """Load study-order settings, migrating legacy random_order_enabled boolean."""
     has_study_order_mode = qsettings.contains(SETTINGS_KEY_FLASHCARD_STUDY_ORDER_MODE)
     has_queue_start_shuffled = qsettings.contains(
         SETTINGS_KEY_FLASHCARD_QUEUE_START_SHUFFLED
@@ -319,12 +366,7 @@ def _load_study_order_settings(qsettings: QSettings) -> tuple[StudyOrderMode, bo
 def hotkey_bindings_from_settings(settings: AppSettings) -> dict[HotkeyAction, str]:
     """Return the persisted hotkey bindings keyed by app action."""
     return {
-        HotkeyAction.PAUSE_RESUME: settings.pause_resume_hotkey,
-        HotkeyAction.START_STOP: settings.start_stop_hotkey,
-        HotkeyAction.SKIP_PHASE: settings.skip_phase_hotkey,
-        HotkeyAction.MARK_CORRECT: settings.mark_correct_hotkey,
-        HotkeyAction.MARK_WRONG: settings.mark_wrong_hotkey,
-        HotkeyAction.COPY_QUESTION: settings.copy_question_hotkey,
+        action: getattr(settings, field) for action, field in _HOTKEY_FIELD_MAP.items()
     }
 
 
@@ -333,12 +375,8 @@ def in_app_shortcut_bindings_from_settings(
 ) -> dict[InAppShortcutAction, str]:
     """Return the persisted in-app shortcut bindings keyed by action."""
     return {
-        InAppShortcutAction.PAUSE_RESUME: settings.in_app_pause_resume_shortcut,
-        InAppShortcutAction.START_STOP: settings.in_app_start_stop_shortcut,
-        InAppShortcutAction.SKIP_PHASE: settings.in_app_skip_phase_shortcut,
-        InAppShortcutAction.MARK_CORRECT: settings.in_app_mark_correct_shortcut,
-        InAppShortcutAction.MARK_WRONG: settings.in_app_mark_wrong_shortcut,
-        InAppShortcutAction.COPY_QUESTION: settings.in_app_copy_question_shortcut,
+        action: getattr(settings, field)
+        for action, field in _IN_APP_SHORTCUT_FIELD_MAP.items()
     }
 
 
@@ -362,6 +400,54 @@ def _normalize_notification_sound_display_name(
     return _default_notification_sound_display_name(sound_path)
 
 
+def _load_notification_sound_settings(
+    qsettings: QSettings,
+    kwargs: dict[str, object],
+) -> None:
+    """Load notification-sound settings, migrating legacy single-sound key.
+
+    Populates question/answer sound path and display name keys in *kwargs*.
+    """
+    legacy_path = _normalize_text(
+        qsettings.value(SETTINGS_KEY_LEGACY_NOTIFICATION_SOUND_PATH, ""),
+        default="",
+        allow_empty=True,
+    )
+    has_question = qsettings.contains(SETTINGS_KEY_QUESTION_NOTIFICATION_SOUND_PATH)
+    has_answer = qsettings.contains(SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_PATH)
+
+    for slot, path_key, name_key in (
+        (
+            "question",
+            SETTINGS_KEY_QUESTION_NOTIFICATION_SOUND_PATH,
+            SETTINGS_KEY_QUESTION_NOTIFICATION_SOUND_DISPLAY_NAME,
+        ),
+        (
+            "answer",
+            SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_PATH,
+            SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_DISPLAY_NAME,
+        ),
+    ):
+        default_path = getattr(AppSettings, f"{slot}_notification_sound_path")
+        path = _normalize_text(
+            qsettings.value(path_key, default_path),
+            default=default_path,
+            allow_empty=True,
+        )
+        # Migrate legacy single-sound → dual question/answer slots
+        if not has_question and not has_answer and legacy_path:
+            path = legacy_path
+        display_name = _normalize_text(
+            qsettings.value(name_key, ""),
+            default="",
+            allow_empty=True,
+        )
+        if path and not display_name:
+            display_name = _default_notification_sound_display_name(path)
+        kwargs[f"{slot}_notification_sound_path"] = path
+        kwargs[f"{slot}_notification_sound_display_name"] = display_name
+
+
 def load_app_settings() -> AppSettings:
     """Load current app settings from QSettings.
 
@@ -369,240 +455,45 @@ def load_app_settings() -> AppSettings:
         AppSettings: Persisted settings or default values.
     """
     qsettings = _open_settings()
-    flashcard_study_order_mode, flashcard_queue_start_shuffled = (
-        _load_study_order_settings(qsettings)
-    )
-    legacy_notification_sound_path = _normalize_text(
-        qsettings.value(
-            SETTINGS_KEY_LEGACY_NOTIFICATION_SOUND_PATH,
-            "",
-        ),
-        default="",
-        allow_empty=True,
-    )
-    has_question_notification_sound_path = qsettings.contains(
-        SETTINGS_KEY_QUESTION_NOTIFICATION_SOUND_PATH
-    )
-    has_answer_notification_sound_path = qsettings.contains(
-        SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_PATH
-    )
-    question_notification_sound_path = _normalize_text(
-        qsettings.value(
-            SETTINGS_KEY_QUESTION_NOTIFICATION_SOUND_PATH,
-            AppSettings.question_notification_sound_path,
-        ),
-        default=AppSettings.question_notification_sound_path,
-        allow_empty=True,
-    )
-    answer_notification_sound_path = _normalize_text(
-        qsettings.value(
-            SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_PATH,
-            AppSettings.answer_notification_sound_path,
-        ),
-        default=AppSettings.answer_notification_sound_path,
-        allow_empty=True,
-    )
-    if (
-        not has_question_notification_sound_path
-        and not has_answer_notification_sound_path
-        and legacy_notification_sound_path
-    ):
-        question_notification_sound_path = legacy_notification_sound_path
-        answer_notification_sound_path = legacy_notification_sound_path
-    question_notification_sound_display_name = _normalize_text(
-        qsettings.value(
-            SETTINGS_KEY_QUESTION_NOTIFICATION_SOUND_DISPLAY_NAME,
-            "",
-        ),
-        default="",
-        allow_empty=True,
-    )
-    if (
-        question_notification_sound_path
-        and not question_notification_sound_display_name
-    ):
-        question_notification_sound_display_name = (
-            _default_notification_sound_display_name(question_notification_sound_path)
+    kwargs: dict[str, object] = {}
+
+    # Integer fields
+    for field_name, key, minimum, maximum in _INT_FIELD_SPECS:
+        default = getattr(AppSettings, field_name)
+        kwargs[field_name] = _normalize_int(
+            qsettings.value(key, default),
+            default=default,
+            minimum=minimum,
+            maximum=maximum,
         )
-    answer_notification_sound_display_name = _normalize_text(
-        qsettings.value(
-            SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_DISPLAY_NAME,
-            "",
-        ),
-        default="",
-        allow_empty=True,
-    )
-    if answer_notification_sound_path and not answer_notification_sound_display_name:
-        answer_notification_sound_display_name = (
-            _default_notification_sound_display_name(answer_notification_sound_path)
+
+    # Enum fields
+    for field_name, key, enum_type in _ENUM_FIELD_SPECS:
+        default = getattr(AppSettings, field_name)
+        kwargs[field_name] = _normalize_enum(
+            qsettings.value(key, default.value),
+            enum_type=enum_type,
+            default=default,
         )
-    return AppSettings(
-        timer_duration_seconds=_normalize_int(
-            qsettings.value(
-                SETTINGS_KEY_TIMER_DURATION_SECONDS,
-                AppSettings.timer_duration_seconds,
-            ),
-            default=AppSettings.timer_duration_seconds,
-            minimum=0,
-            maximum=MAX_TIMER_DURATION_SECONDS,
-        ),
-        flashcard_probability_percent=_normalize_int(
-            qsettings.value(
-                SETTINGS_KEY_FLASHCARD_PROBABILITY_PERCENT,
-                AppSettings.flashcard_probability_percent,
-            ),
-            default=AppSettings.flashcard_probability_percent,
-            minimum=0,
-            maximum=100,
-        ),
-        flashcard_study_order_mode=flashcard_study_order_mode,
-        flashcard_queue_start_shuffled=flashcard_queue_start_shuffled,
-        question_display_duration_seconds=_normalize_int(
-            qsettings.value(
-                SETTINGS_KEY_QUESTION_DURATION_SECONDS,
-                AppSettings.question_display_duration_seconds,
-            ),
-            default=AppSettings.question_display_duration_seconds,
-            minimum=1,
-            maximum=3600,
-        ),
-        answer_display_duration_seconds=_normalize_int(
-            qsettings.value(
-                SETTINGS_KEY_ANSWER_DURATION_SECONDS,
-                AppSettings.answer_display_duration_seconds,
-            ),
-            default=AppSettings.answer_display_duration_seconds,
-            minimum=1,
-            maximum=3600,
-        ),
-        question_notification_sound_path=question_notification_sound_path,
-        question_notification_sound_display_name=(
-            question_notification_sound_display_name
-        ),
-        answer_notification_sound_path=answer_notification_sound_path,
-        answer_notification_sound_display_name=answer_notification_sound_display_name,
-        wrong_answer_completion_mode=_normalize_enum(
-            qsettings.value(
-                SETTINGS_KEY_WRONG_ANSWER_COMPLETION_MODE,
-                AppSettings.wrong_answer_completion_mode.value,
-            ),
-            enum_type=WrongAnswerCompletionMode,
-            default=AppSettings.wrong_answer_completion_mode,
-        ),
-        wrong_answer_reinsertion_mode=_normalize_enum(
-            qsettings.value(
-                SETTINGS_KEY_WRONG_ANSWER_REINSERTION_MODE,
-                AppSettings.wrong_answer_reinsertion_mode.value,
-            ),
-            enum_type=WrongAnswerReinsertionMode,
-            default=AppSettings.wrong_answer_reinsertion_mode,
-        ),
-        wrong_answer_reinsert_after_count=_normalize_int(
-            qsettings.value(
-                SETTINGS_KEY_WRONG_ANSWER_REINSERT_AFTER_COUNT,
-                AppSettings.wrong_answer_reinsert_after_count,
-            ),
-            default=AppSettings.wrong_answer_reinsert_after_count,
-            minimum=0,
-            maximum=999,
-        ),
-        pause_resume_hotkey=_normalize_text(
-            qsettings.value(
-                SETTINGS_KEY_HOTKEY_PAUSE_RESUME,
-                AppSettings.pause_resume_hotkey,
-            ),
-            default=AppSettings.pause_resume_hotkey,
+
+    # Text fields (hotkeys + shortcuts)
+    for field_name, key in _TEXT_FIELD_SPECS:
+        default = getattr(AppSettings, field_name)
+        kwargs[field_name] = _normalize_text(
+            qsettings.value(key, default),
+            default=default,
             allow_empty=True,
-        ),
-        start_stop_hotkey=_normalize_text(
-            qsettings.value(
-                SETTINGS_KEY_HOTKEY_START_STOP,
-                AppSettings.start_stop_hotkey,
-            ),
-            default=AppSettings.start_stop_hotkey,
-            allow_empty=True,
-        ),
-        skip_phase_hotkey=_normalize_text(
-            qsettings.value(
-                SETTINGS_KEY_HOTKEY_SKIP_PHASE,
-                AppSettings.skip_phase_hotkey,
-            ),
-            default=AppSettings.skip_phase_hotkey,
-            allow_empty=True,
-        ),
-        mark_correct_hotkey=_normalize_text(
-            qsettings.value(
-                SETTINGS_KEY_HOTKEY_MARK_CORRECT,
-                AppSettings.mark_correct_hotkey,
-            ),
-            default=AppSettings.mark_correct_hotkey,
-            allow_empty=True,
-        ),
-        mark_wrong_hotkey=_normalize_text(
-            qsettings.value(
-                SETTINGS_KEY_HOTKEY_MARK_WRONG,
-                AppSettings.mark_wrong_hotkey,
-            ),
-            default=AppSettings.mark_wrong_hotkey,
-            allow_empty=True,
-        ),
-        copy_question_hotkey=_normalize_text(
-            qsettings.value(
-                SETTINGS_KEY_HOTKEY_COPY_QUESTION,
-                AppSettings.copy_question_hotkey,
-            ),
-            default=AppSettings.copy_question_hotkey,
-            allow_empty=True,
-        ),
-        in_app_pause_resume_shortcut=_normalize_text(
-            qsettings.value(
-                SETTINGS_KEY_IN_APP_SHORTCUT_PAUSE_RESUME,
-                AppSettings.in_app_pause_resume_shortcut,
-            ),
-            default=AppSettings.in_app_pause_resume_shortcut,
-            allow_empty=True,
-        ),
-        in_app_start_stop_shortcut=_normalize_text(
-            qsettings.value(
-                SETTINGS_KEY_IN_APP_SHORTCUT_START_STOP,
-                AppSettings.in_app_start_stop_shortcut,
-            ),
-            default=AppSettings.in_app_start_stop_shortcut,
-            allow_empty=True,
-        ),
-        in_app_skip_phase_shortcut=_normalize_text(
-            qsettings.value(
-                SETTINGS_KEY_IN_APP_SHORTCUT_SKIP_PHASE,
-                AppSettings.in_app_skip_phase_shortcut,
-            ),
-            default=AppSettings.in_app_skip_phase_shortcut,
-            allow_empty=True,
-        ),
-        in_app_mark_correct_shortcut=_normalize_text(
-            qsettings.value(
-                SETTINGS_KEY_IN_APP_SHORTCUT_MARK_CORRECT,
-                AppSettings.in_app_mark_correct_shortcut,
-            ),
-            default=AppSettings.in_app_mark_correct_shortcut,
-            allow_empty=True,
-        ),
-        in_app_mark_wrong_shortcut=_normalize_text(
-            qsettings.value(
-                SETTINGS_KEY_IN_APP_SHORTCUT_MARK_WRONG,
-                AppSettings.in_app_mark_wrong_shortcut,
-            ),
-            default=AppSettings.in_app_mark_wrong_shortcut,
-            allow_empty=True,
-        ),
-        in_app_copy_question_shortcut=_normalize_text(
-            qsettings.value(
-                SETTINGS_KEY_IN_APP_SHORTCUT_COPY_QUESTION,
-                AppSettings.in_app_copy_question_shortcut,
-            ),
-            default=AppSettings.in_app_copy_question_shortcut,
-            allow_empty=True,
-        ),
-    )
+        )
+
+    # Study order: migrates legacy random_order_enabled boolean
+    study_order_mode, queue_start_shuffled = _load_study_order_settings(qsettings)
+    kwargs["flashcard_study_order_mode"] = study_order_mode
+    kwargs["flashcard_queue_start_shuffled"] = queue_start_shuffled
+
+    # Notification sounds: migrates legacy single-sound key to dual slots
+    _load_notification_sound_settings(qsettings, kwargs)
+
+    return AppSettings(**kwargs)
 
 
 def save_app_settings(settings: AppSettings) -> None:
@@ -612,24 +503,45 @@ def save_app_settings(settings: AppSettings) -> None:
         settings: Settings payload to persist.
     """
     qsettings = _open_settings()
-    qsettings.setValue(
-        SETTINGS_KEY_TIMER_DURATION_SECONDS,
-        _normalize_int(
-            settings.timer_duration_seconds,
-            default=AppSettings.timer_duration_seconds,
-            minimum=0,
-            maximum=MAX_TIMER_DURATION_SECONDS,
-        ),
-    )
-    qsettings.setValue(
-        SETTINGS_KEY_FLASHCARD_PROBABILITY_PERCENT,
-        _normalize_int(
-            settings.flashcard_probability_percent,
-            default=AppSettings.flashcard_probability_percent,
-            minimum=0,
-            maximum=100,
-        ),
-    )
+
+    # Integer fields
+    for field_name, key, minimum, maximum in _INT_FIELD_SPECS:
+        default = getattr(AppSettings, field_name)
+        qsettings.setValue(
+            key,
+            _normalize_int(
+                getattr(settings, field_name),
+                default=default,
+                minimum=minimum,
+                maximum=maximum,
+            ),
+        )
+
+    # Enum fields
+    for field_name, key, enum_type in _ENUM_FIELD_SPECS:
+        default = getattr(AppSettings, field_name)
+        qsettings.setValue(
+            key,
+            _normalize_enum(
+                getattr(settings, field_name),
+                enum_type=enum_type,
+                default=default,
+            ).value,
+        )
+
+    # Text fields (hotkeys + shortcuts)
+    for field_name, key in _TEXT_FIELD_SPECS:
+        default = getattr(AppSettings, field_name)
+        qsettings.setValue(
+            key,
+            _normalize_text(
+                getattr(settings, field_name),
+                default=default,
+                allow_empty=True,
+            ),
+        )
+
+    # Study order
     qsettings.setValue(
         SETTINGS_KEY_FLASHCARD_STUDY_ORDER_MODE,
         _normalize_enum(
@@ -642,183 +554,40 @@ def save_app_settings(settings: AppSettings) -> None:
         SETTINGS_KEY_FLASHCARD_QUEUE_START_SHUFFLED,
         bool(settings.flashcard_queue_start_shuffled),
     )
-    qsettings.setValue(
-        SETTINGS_KEY_QUESTION_DURATION_SECONDS,
-        _normalize_int(
-            settings.question_display_duration_seconds,
-            default=AppSettings.question_display_duration_seconds,
-            minimum=1,
-            maximum=3600,
-        ),
-    )
-    qsettings.setValue(
-        SETTINGS_KEY_ANSWER_DURATION_SECONDS,
-        _normalize_int(
-            settings.answer_display_duration_seconds,
-            default=AppSettings.answer_display_duration_seconds,
-            minimum=1,
-            maximum=3600,
-        ),
-    )
-    qsettings.setValue(
-        SETTINGS_KEY_QUESTION_NOTIFICATION_SOUND_PATH,
-        settings.question_notification_sound_path.strip(),
-    )
-    normalized_question_notification_sound_path = (
-        settings.question_notification_sound_path.strip()
-    )
-    qsettings.setValue(
-        SETTINGS_KEY_QUESTION_NOTIFICATION_SOUND_DISPLAY_NAME,
+
+    # Notification sounds (question + answer slots)
+    _SOUND_SLOTS = (
         (
-            _normalize_notification_sound_display_name(
-                settings.question_notification_sound_display_name,
-                sound_path=normalized_question_notification_sound_path,
-            )
-            if normalized_question_notification_sound_path
-            else ""
+            "question",
+            SETTINGS_KEY_QUESTION_NOTIFICATION_SOUND_PATH,
+            SETTINGS_KEY_QUESTION_NOTIFICATION_SOUND_DISPLAY_NAME,
         ),
-    )
-    qsettings.setValue(
-        SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_PATH,
-        settings.answer_notification_sound_path.strip(),
-    )
-    normalized_answer_notification_sound_path = (
-        settings.answer_notification_sound_path.strip()
-    )
-    qsettings.setValue(
-        SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_DISPLAY_NAME,
         (
-            _normalize_notification_sound_display_name(
-                settings.answer_notification_sound_display_name,
-                sound_path=normalized_answer_notification_sound_path,
-            )
-            if normalized_answer_notification_sound_path
-            else ""
+            "answer",
+            SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_PATH,
+            SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_DISPLAY_NAME,
         ),
     )
+    for slot, path_key, name_key in _SOUND_SLOTS:
+        path = getattr(settings, f"{slot}_notification_sound_path").strip()
+        display_name = getattr(settings, f"{slot}_notification_sound_display_name")
+        qsettings.setValue(path_key, path)
+        qsettings.setValue(
+            name_key,
+            (
+                _normalize_notification_sound_display_name(
+                    display_name,
+                    sound_path=path,
+                )
+                if path
+                else ""
+            ),
+        )
+
+    # Remove legacy keys
     qsettings.remove(SETTINGS_KEY_LEGACY_NOTIFICATION_SOUND_PATH)
     qsettings.remove(SETTINGS_KEY_FLASHCARD_RANDOM_ORDER_ENABLED)
-    qsettings.setValue(
-        SETTINGS_KEY_WRONG_ANSWER_COMPLETION_MODE,
-        _normalize_enum(
-            settings.wrong_answer_completion_mode,
-            enum_type=WrongAnswerCompletionMode,
-            default=AppSettings.wrong_answer_completion_mode,
-        ).value,
-    )
-    qsettings.setValue(
-        SETTINGS_KEY_WRONG_ANSWER_REINSERTION_MODE,
-        _normalize_enum(
-            settings.wrong_answer_reinsertion_mode,
-            enum_type=WrongAnswerReinsertionMode,
-            default=AppSettings.wrong_answer_reinsertion_mode,
-        ).value,
-    )
-    qsettings.setValue(
-        SETTINGS_KEY_WRONG_ANSWER_REINSERT_AFTER_COUNT,
-        _normalize_int(
-            settings.wrong_answer_reinsert_after_count,
-            default=AppSettings.wrong_answer_reinsert_after_count,
-            minimum=0,
-            maximum=999,
-        ),
-    )
-    qsettings.setValue(
-        SETTINGS_KEY_HOTKEY_PAUSE_RESUME,
-        _normalize_text(
-            settings.pause_resume_hotkey,
-            default=AppSettings.pause_resume_hotkey,
-            allow_empty=True,
-        ),
-    )
-    qsettings.setValue(
-        SETTINGS_KEY_HOTKEY_START_STOP,
-        _normalize_text(
-            settings.start_stop_hotkey,
-            default=AppSettings.start_stop_hotkey,
-            allow_empty=True,
-        ),
-    )
-    qsettings.setValue(
-        SETTINGS_KEY_HOTKEY_SKIP_PHASE,
-        _normalize_text(
-            settings.skip_phase_hotkey,
-            default=AppSettings.skip_phase_hotkey,
-            allow_empty=True,
-        ),
-    )
-    qsettings.setValue(
-        SETTINGS_KEY_HOTKEY_MARK_CORRECT,
-        _normalize_text(
-            settings.mark_correct_hotkey,
-            default=AppSettings.mark_correct_hotkey,
-            allow_empty=True,
-        ),
-    )
-    qsettings.setValue(
-        SETTINGS_KEY_HOTKEY_MARK_WRONG,
-        _normalize_text(
-            settings.mark_wrong_hotkey,
-            default=AppSettings.mark_wrong_hotkey,
-            allow_empty=True,
-        ),
-    )
-    qsettings.setValue(
-        SETTINGS_KEY_HOTKEY_COPY_QUESTION,
-        _normalize_text(
-            settings.copy_question_hotkey,
-            default=AppSettings.copy_question_hotkey,
-            allow_empty=True,
-        ),
-    )
-    qsettings.setValue(
-        SETTINGS_KEY_IN_APP_SHORTCUT_PAUSE_RESUME,
-        _normalize_text(
-            settings.in_app_pause_resume_shortcut,
-            default=AppSettings.in_app_pause_resume_shortcut,
-            allow_empty=True,
-        ),
-    )
-    qsettings.setValue(
-        SETTINGS_KEY_IN_APP_SHORTCUT_START_STOP,
-        _normalize_text(
-            settings.in_app_start_stop_shortcut,
-            default=AppSettings.in_app_start_stop_shortcut,
-            allow_empty=True,
-        ),
-    )
-    qsettings.setValue(
-        SETTINGS_KEY_IN_APP_SHORTCUT_SKIP_PHASE,
-        _normalize_text(
-            settings.in_app_skip_phase_shortcut,
-            default=AppSettings.in_app_skip_phase_shortcut,
-            allow_empty=True,
-        ),
-    )
-    qsettings.setValue(
-        SETTINGS_KEY_IN_APP_SHORTCUT_MARK_CORRECT,
-        _normalize_text(
-            settings.in_app_mark_correct_shortcut,
-            default=AppSettings.in_app_mark_correct_shortcut,
-            allow_empty=True,
-        ),
-    )
-    qsettings.setValue(
-        SETTINGS_KEY_IN_APP_SHORTCUT_MARK_WRONG,
-        _normalize_text(
-            settings.in_app_mark_wrong_shortcut,
-            default=AppSettings.in_app_mark_wrong_shortcut,
-            allow_empty=True,
-        ),
-    )
-    qsettings.setValue(
-        SETTINGS_KEY_IN_APP_SHORTCUT_COPY_QUESTION,
-        _normalize_text(
-            settings.in_app_copy_question_shortcut,
-            default=AppSettings.in_app_copy_question_shortcut,
-            allow_empty=True,
-        ),
-    )
+
     qsettings.sync()
 
 

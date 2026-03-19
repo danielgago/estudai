@@ -335,7 +335,7 @@ def test_delete_selected_flashcards_removes_rows_after_confirmation(
         ),
     )
     monkeypatch.setattr(
-        "estudai.ui.controllers.management_page_controller.QMessageBox.question",
+        "estudai.ui.message_box.MessageBoxPresenter.confirm_yes_no",
         lambda *_args, **_kwargs: QMessageBox.Yes,
     )
 

@@ -253,15 +253,12 @@ class StudySessionController:
 
         flashcard_index = self.current_flashcard_index
         counters = self.card_counters[flashcard_index]
+        use_wrong_answer_rule = False
 
         if score == "wrong":
             counters.wrong_count += 1
             self.card_states[flashcard_index] = StudyCardState.WRONG_PENDING
-            if self.study_order_mode is StudyOrderMode.QUEUE:
-                self._reinsert_flashcard(
-                    flashcard_index,
-                    use_wrong_answer_rule=True,
-                )
+            use_wrong_answer_rule = True
         elif score == "correct":
             counters.correct_count += 1
             if self._is_completed(flashcard_index):
@@ -270,18 +267,17 @@ class StudySessionController:
                 self.card_states[flashcard_index] = self._pending_state_for(
                     flashcard_index
                 )
-                if self.study_order_mode is StudyOrderMode.QUEUE:
-                    self._reinsert_flashcard(
-                        flashcard_index,
-                        use_wrong_answer_rule=False,
-                    )
         else:
             self.card_states[flashcard_index] = self._pending_state_for(flashcard_index)
-            if self.study_order_mode is StudyOrderMode.QUEUE:
-                self._reinsert_flashcard(
-                    flashcard_index,
-                    use_wrong_answer_rule=False,
-                )
+
+        if (
+            self.study_order_mode is StudyOrderMode.QUEUE
+            and self.card_states[flashcard_index] is not StudyCardState.COMPLETED
+        ):
+            self._reinsert_flashcard(
+                flashcard_index,
+                use_wrong_answer_rule=use_wrong_answer_rule,
+            )
 
         self.current_flashcard_index = None
         return True

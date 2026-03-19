@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QKeySequenceEdit,
-    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -54,6 +53,7 @@ from estudai.services.settings import (
     validate_notification_sound_file,
 )
 from estudai.ui.audio_playback import TimedAudioPlaybackController
+from estudai.ui.message_box import MessageBoxPresenter
 from estudai.ui.utils import set_muted_label_color
 
 SOUND_PREVIEW_LIMIT_MS = 5000
@@ -98,6 +98,7 @@ class SettingsPage(QWidget):
             self,
             player=self._sound_player,
         )
+        self._message_box = MessageBoxPresenter(self)
         self._preview_sound_controller.playback_started.connect(
             self._handle_preview_playback_started
         )
@@ -659,14 +660,14 @@ class SettingsPage(QWidget):
         """Save current form values into QSettings."""
         validation_message = self._validate_settings_form()
         if validation_message is not None:
-            QMessageBox.warning(self, "Invalid settings", validation_message)
+            self._message_box.show_warning("Invalid settings", validation_message)
             return
         settings = self._collect_settings()
         try:
             settings = self._apply_pending_sound_uploads(settings)
             self._save_settings_callback(settings)
         except (FileNotFoundError, ValueError) as error:
-            QMessageBox.warning(self, "Invalid settings", str(error))
+            self._message_box.show_warning("Invalid settings", str(error))
             return
         self._apply_saved_sound_state(settings)
         self.timer_duration_seconds_changed.emit(settings.timer_duration_seconds)
@@ -745,7 +746,7 @@ class SettingsPage(QWidget):
         try:
             resolved_source = validate_notification_sound_file(Path(selected_path))
         except (FileNotFoundError, ValueError) as error:
-            QMessageBox.warning(self, "Upload sound", str(error))
+            self._message_box.show_warning("Upload sound", str(error))
             return
         if slot_name == "question":
             self._pending_question_notification_sound_source_path = str(resolved_source)
@@ -796,19 +797,24 @@ class SettingsPage(QWidget):
     def _play_selected_sound(self, *, custom_sound_path: str, sound_role: str) -> None:
         """Play one selected notification sound or the bundled default."""
         if not self._preview_sound_controller.is_available:
-            QMessageBox.warning(
-                self,
+            self._message_box.show_warning(
                 "Test sound",
                 "Audio playback is unavailable on this system.",
             )
             return
         sound_path_value = custom_sound_path or self._default_notification_sound_path
         if not sound_path_value:
-            QMessageBox.warning(self, "Test sound", "No notification sound available.")
+            self._message_box.show_warning(
+                "Test sound",
+                "No notification sound available.",
+            )
             return
         sound_path = Path(sound_path_value)
         if not sound_path.exists():
-            QMessageBox.warning(self, "Test sound", "Saved sound file is missing.")
+            self._message_box.show_warning(
+                "Test sound",
+                "Saved sound file is missing.",
+            )
             self._update_sound_summary()
             return
         self._preview_sound_controller.play(
