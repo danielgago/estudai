@@ -156,17 +156,45 @@ class AppSettings:
 
 # (field_name, settings_key, minimum, maximum)
 _INT_FIELD_SPECS: list[tuple[str, str, int, int]] = [
-    ("timer_duration_seconds", SETTINGS_KEY_TIMER_DURATION_SECONDS, 0, MAX_TIMER_DURATION_SECONDS),
-    ("flashcard_probability_percent", SETTINGS_KEY_FLASHCARD_PROBABILITY_PERCENT, 0, 100),
-    ("question_display_duration_seconds", SETTINGS_KEY_QUESTION_DURATION_SECONDS, 1, 3600),
+    (
+        "timer_duration_seconds",
+        SETTINGS_KEY_TIMER_DURATION_SECONDS,
+        0,
+        MAX_TIMER_DURATION_SECONDS,
+    ),
+    (
+        "flashcard_probability_percent",
+        SETTINGS_KEY_FLASHCARD_PROBABILITY_PERCENT,
+        0,
+        100,
+    ),
+    (
+        "question_display_duration_seconds",
+        SETTINGS_KEY_QUESTION_DURATION_SECONDS,
+        1,
+        3600,
+    ),
     ("answer_display_duration_seconds", SETTINGS_KEY_ANSWER_DURATION_SECONDS, 1, 3600),
-    ("wrong_answer_reinsert_after_count", SETTINGS_KEY_WRONG_ANSWER_REINSERT_AFTER_COUNT, 0, 999),
+    (
+        "wrong_answer_reinsert_after_count",
+        SETTINGS_KEY_WRONG_ANSWER_REINSERT_AFTER_COUNT,
+        0,
+        999,
+    ),
 ]
 
 # (field_name, settings_key, enum_type)
 _ENUM_FIELD_SPECS: list[tuple[str, str, type[StrEnum]]] = [
-    ("wrong_answer_completion_mode", SETTINGS_KEY_WRONG_ANSWER_COMPLETION_MODE, WrongAnswerCompletionMode),
-    ("wrong_answer_reinsertion_mode", SETTINGS_KEY_WRONG_ANSWER_REINSERTION_MODE, WrongAnswerReinsertionMode),
+    (
+        "wrong_answer_completion_mode",
+        SETTINGS_KEY_WRONG_ANSWER_COMPLETION_MODE,
+        WrongAnswerCompletionMode,
+    ),
+    (
+        "wrong_answer_reinsertion_mode",
+        SETTINGS_KEY_WRONG_ANSWER_REINSERTION_MODE,
+        WrongAnswerReinsertionMode,
+    ),
 ]
 
 # (field_name, settings_key) — all allow_empty=True text fields
@@ -239,7 +267,7 @@ def _normalize_int(
     """Normalize integer-like values into a safe bounded range."""
     try:
         value = int(raw_value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         value = default
     return max(minimum, min(maximum, value))
 
@@ -338,8 +366,7 @@ def _load_study_order_settings(qsettings: QSettings) -> tuple[StudyOrderMode, bo
 def hotkey_bindings_from_settings(settings: AppSettings) -> dict[HotkeyAction, str]:
     """Return the persisted hotkey bindings keyed by app action."""
     return {
-        action: getattr(settings, field)
-        for action, field in _HOTKEY_FIELD_MAP.items()
+        action: getattr(settings, field) for action, field in _HOTKEY_FIELD_MAP.items()
     }
 
 
@@ -383,7 +410,8 @@ def _load_notification_sound_settings(
     """
     legacy_path = _normalize_text(
         qsettings.value(SETTINGS_KEY_LEGACY_NOTIFICATION_SOUND_PATH, ""),
-        default="", allow_empty=True,
+        default="",
+        allow_empty=True,
     )
     has_question = qsettings.contains(SETTINGS_KEY_QUESTION_NOTIFICATION_SOUND_PATH)
     has_answer = qsettings.contains(SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_PATH)
@@ -403,13 +431,16 @@ def _load_notification_sound_settings(
         default_path = getattr(AppSettings, f"{slot}_notification_sound_path")
         path = _normalize_text(
             qsettings.value(path_key, default_path),
-            default=default_path, allow_empty=True,
+            default=default_path,
+            allow_empty=True,
         )
         # Migrate legacy single-sound → dual question/answer slots
         if not has_question and not has_answer and legacy_path:
             path = legacy_path
         display_name = _normalize_text(
-            qsettings.value(name_key, ""), default="", allow_empty=True,
+            qsettings.value(name_key, ""),
+            default="",
+            allow_empty=True,
         )
         if path and not display_name:
             display_name = _default_notification_sound_display_name(path)
@@ -431,7 +462,9 @@ def load_app_settings() -> AppSettings:
         default = getattr(AppSettings, field_name)
         kwargs[field_name] = _normalize_int(
             qsettings.value(key, default),
-            default=default, minimum=minimum, maximum=maximum,
+            default=default,
+            minimum=minimum,
+            maximum=maximum,
         )
 
     # Enum fields
@@ -439,7 +472,8 @@ def load_app_settings() -> AppSettings:
         default = getattr(AppSettings, field_name)
         kwargs[field_name] = _normalize_enum(
             qsettings.value(key, default.value),
-            enum_type=enum_type, default=default,
+            enum_type=enum_type,
+            default=default,
         )
 
     # Text fields (hotkeys + shortcuts)
@@ -447,7 +481,8 @@ def load_app_settings() -> AppSettings:
         default = getattr(AppSettings, field_name)
         kwargs[field_name] = _normalize_text(
             qsettings.value(key, default),
-            default=default, allow_empty=True,
+            default=default,
+            allow_empty=True,
         )
 
     # Study order: migrates legacy random_order_enabled boolean
@@ -472,26 +507,39 @@ def save_app_settings(settings: AppSettings) -> None:
     # Integer fields
     for field_name, key, minimum, maximum in _INT_FIELD_SPECS:
         default = getattr(AppSettings, field_name)
-        qsettings.setValue(key, _normalize_int(
-            getattr(settings, field_name),
-            default=default, minimum=minimum, maximum=maximum,
-        ))
+        qsettings.setValue(
+            key,
+            _normalize_int(
+                getattr(settings, field_name),
+                default=default,
+                minimum=minimum,
+                maximum=maximum,
+            ),
+        )
 
     # Enum fields
     for field_name, key, enum_type in _ENUM_FIELD_SPECS:
         default = getattr(AppSettings, field_name)
-        qsettings.setValue(key, _normalize_enum(
-            getattr(settings, field_name),
-            enum_type=enum_type, default=default,
-        ).value)
+        qsettings.setValue(
+            key,
+            _normalize_enum(
+                getattr(settings, field_name),
+                enum_type=enum_type,
+                default=default,
+            ).value,
+        )
 
     # Text fields (hotkeys + shortcuts)
     for field_name, key in _TEXT_FIELD_SPECS:
         default = getattr(AppSettings, field_name)
-        qsettings.setValue(key, _normalize_text(
-            getattr(settings, field_name),
-            default=default, allow_empty=True,
-        ))
+        qsettings.setValue(
+            key,
+            _normalize_text(
+                getattr(settings, field_name),
+                default=default,
+                allow_empty=True,
+            ),
+        )
 
     # Study order
     qsettings.setValue(
@@ -509,10 +557,16 @@ def save_app_settings(settings: AppSettings) -> None:
 
     # Notification sounds (question + answer slots)
     _SOUND_SLOTS = (
-        ("question", SETTINGS_KEY_QUESTION_NOTIFICATION_SOUND_PATH,
-         SETTINGS_KEY_QUESTION_NOTIFICATION_SOUND_DISPLAY_NAME),
-        ("answer", SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_PATH,
-         SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_DISPLAY_NAME),
+        (
+            "question",
+            SETTINGS_KEY_QUESTION_NOTIFICATION_SOUND_PATH,
+            SETTINGS_KEY_QUESTION_NOTIFICATION_SOUND_DISPLAY_NAME,
+        ),
+        (
+            "answer",
+            SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_PATH,
+            SETTINGS_KEY_ANSWER_NOTIFICATION_SOUND_DISPLAY_NAME,
+        ),
     )
     for slot, path_key, name_key in _SOUND_SLOTS:
         path = getattr(settings, f"{slot}_notification_sound_path").strip()
@@ -520,9 +574,14 @@ def save_app_settings(settings: AppSettings) -> None:
         qsettings.setValue(path_key, path)
         qsettings.setValue(
             name_key,
-            _normalize_notification_sound_display_name(
-                display_name, sound_path=path,
-            ) if path else "",
+            (
+                _normalize_notification_sound_display_name(
+                    display_name,
+                    sound_path=path,
+                )
+                if path
+                else ""
+            ),
         )
 
     # Remove legacy keys

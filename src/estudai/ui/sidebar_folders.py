@@ -266,7 +266,9 @@ class SidebarFolderController:
         self._renaming_folder_id = None
         self._renaming_original_name = None
 
-    def _folder_ids_where(self, predicate: Callable[[SidebarFolderItem], bool]) -> set[str]:
+    def _folder_ids_where(
+        self, predicate: Callable[[SidebarFolderItem], bool]
+    ) -> set[str]:
         """Return folder ids matching a predicate."""
         return {
             folder_id

@@ -275,7 +275,8 @@ class StudySessionController:
             and self.card_states[flashcard_index] is not StudyCardState.COMPLETED
         ):
             self._reinsert_flashcard(
-                flashcard_index, use_wrong_answer_rule=use_wrong_answer_rule,
+                flashcard_index,
+                use_wrong_answer_rule=use_wrong_answer_rule,
             )
 
         self.current_flashcard_index = None

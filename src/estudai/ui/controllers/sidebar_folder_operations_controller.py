@@ -310,7 +310,9 @@ class SidebarFolderOperationsController:
         return None
 
     def _child_index(
-        self, parent_item: object, child_item: SidebarFolderItem,
+        self,
+        parent_item: object,
+        child_item: SidebarFolderItem,
     ) -> int:
         """Return the sibling index of a child within its parent container."""
         if isinstance(parent_item, SidebarFolderItem):
@@ -406,7 +408,9 @@ class SidebarFolderOperationsController:
         parent_row = self._child_index(grandparent_item, parent_item)
         self._persist_folder_move(
             lambda: reparent_persisted_folder(
-                folder_id, grandparent_id, new_index=parent_row + 1,
+                folder_id,
+                grandparent_id,
+                new_index=parent_row + 1,
             ),
             folder_id,
         )
@@ -444,6 +448,5 @@ class SidebarFolderOperationsController:
     def _folder_ids_from_items(folder_items: list[SidebarFolderItem]) -> set[str]:
         """Return managed folder ids represented by sidebar items."""
         return {
-            fid for item in folder_items
-            if (fid := item.data(Qt.UserRole)) is not None
+            fid for item in folder_items if (fid := item.data(Qt.UserRole)) is not None
         }

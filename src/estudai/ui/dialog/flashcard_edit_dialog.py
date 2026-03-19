@@ -59,15 +59,25 @@ class FlashcardEditDialog(QDialog):
         self.answer_edit.setTabChangesFocus(True)
         layout.addWidget(self.answer_edit)
 
-        self.question_image_summary_label, self.choose_question_image_button, \
-            self.remove_question_image_button = self._build_image_section(
-                layout, "Question image", "question",
-            )
+        (
+            self.question_image_summary_label,
+            self.choose_question_image_button,
+            self.remove_question_image_button,
+        ) = self._build_image_section(
+            layout,
+            "Question image",
+            "question",
+        )
 
-        self.answer_image_summary_label, self.choose_answer_image_button, \
-            self.remove_answer_image_button = self._build_image_section(
-                layout, "Answer image", "answer",
-            )
+        (
+            self.answer_image_summary_label,
+            self.choose_answer_image_button,
+            self.remove_answer_image_button,
+        ) = self._build_image_section(
+            layout,
+            "Answer image",
+            "answer",
+        )
 
         buttons_row = QHBoxLayout()
         buttons_row.addStretch()

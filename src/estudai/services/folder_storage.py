@@ -120,7 +120,7 @@ def _deserialize_persisted_folder(
         folder_name = str(entry["name"])
         source_path = str(entry["source_path"])
         stored_path = str(entry["stored_path"])
-    except (KeyError, TypeError):
+    except KeyError, TypeError:
         return None
 
     parent_id = entry.get("parent_id")
@@ -636,7 +636,7 @@ def _load_previous_flashcards(
     if previous_stored_path.exists():
         try:
             previous_flashcards = load_flashcards_from_folder(previous_stored_path)
-        except (csv.Error, OSError, UnicodeDecodeError, ValueError):
+        except csv.Error, OSError, UnicodeDecodeError, ValueError:
             previous_flashcards = []
         previous_media_dir = get_managed_flashcard_media_dir(previous_stored_path)
         if previous_media_dir.exists():

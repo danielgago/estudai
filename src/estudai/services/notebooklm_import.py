@@ -82,10 +82,15 @@ def parse_notebooklm_csv(csv_path: Path) -> NotebookLMImportPreview:
             if line_number == 1 and _is_header_row(row):
                 continue
             if len(row) != 2:
-                preview_rows.append(NotebookLMPreviewRow(
-                    row_number=line_number, question="", answer="",
-                    is_valid=False, reason="Expected exactly 2 columns: Question,Answer.",
-                ))
+                preview_rows.append(
+                    NotebookLMPreviewRow(
+                        row_number=line_number,
+                        question="",
+                        answer="",
+                        is_valid=False,
+                        reason="Expected exactly 2 columns: Question,Answer.",
+                    )
+                )
                 continue
             question = normalize_inline_latex(row[0])
             answer = normalize_inline_latex(row[1])
@@ -95,10 +100,15 @@ def parse_notebooklm_csv(csv_path: Path) -> NotebookLMImportPreview:
             elif not answer:
                 reason = "Answer cannot be empty."
             is_valid = not reason
-            preview_rows.append(NotebookLMPreviewRow(
-                row_number=line_number, question=question, answer=answer,
-                is_valid=is_valid, reason=reason,
-            ))
+            preview_rows.append(
+                NotebookLMPreviewRow(
+                    row_number=line_number,
+                    question=question,
+                    answer=answer,
+                    is_valid=is_valid,
+                    reason=reason,
+                )
+            )
             if is_valid:
                 valid_rows.append((question, answer))
     return NotebookLMImportPreview(rows=preview_rows, valid_rows=valid_rows)

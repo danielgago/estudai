@@ -221,7 +221,8 @@ class HotkeyController:
     def trigger_timer_page_start_stop(self) -> None:
         """Mirror the start/stop button path for shortcuts."""
         self._click_timer_button(
-            self._timer_page.start_button, self._timer_page.stop_button,
+            self._timer_page.start_button,
+            self._timer_page.stop_button,
         )
 
     def trigger_timer_page_mark_correct(self) -> None:
