@@ -222,7 +222,9 @@ class ManagementPageController:
         else:
             checked_ids.discard(self._editing_folder_id)
         self._app_state.update_selected_indexes(
-            self._editing_folder_id, selected_indexes
+            self._editing_folder_id,
+            selected_indexes,
+            flashcard_count=len(flashcard_rows),
         )
         self._refresh_management_data(checked_ids)
         self._switch_to_timer()
