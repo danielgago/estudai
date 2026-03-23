@@ -5,14 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator
 
 from PySide6.QtCore import QTimer, Qt, Signal
-from PySide6.QtGui import QFont, QIcon
-from PySide6.QtWidgets import (
-    QApplication,
-    QHeaderView,
-    QStyle,
-    QTreeWidget,
-    QTreeWidgetItem,
-)
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import QHeaderView, QTreeWidget, QTreeWidgetItem
 
 from estudai.ui.utils import format_card_count
 
@@ -330,25 +324,6 @@ class SidebarFolderController:
         """
         return "Flashcard set" if is_flashcard_set else "Folder"
 
-    def folder_kind_icon(self, *, is_flashcard_set: bool) -> QIcon:
-        """Return the icon used to distinguish folders from flashcard sets.
-
-        Args:
-            is_flashcard_set: Whether the item represents an editable flashcard set.
-
-        Returns:
-            QIcon: Standard icon for the sidebar item kind.
-        """
-        style = QApplication.style()
-        if style is None:
-            return QIcon()
-        standard_pixmap = (
-            QStyle.StandardPixmap.SP_FileIcon
-            if is_flashcard_set
-            else QStyle.StandardPixmap.SP_DirClosedIcon
-        )
-        return style.standardIcon(standard_pixmap)
-
     def create_folder_item(
         self,
         folder_id: str,
@@ -391,10 +366,6 @@ class SidebarFolderController:
             1,
             Qt.TextAlignmentRole,
             int(Qt.AlignRight | Qt.AlignVCenter),
-        )
-        folder_item.setIcon(
-            0,
-            self.folder_kind_icon(is_flashcard_set=is_flashcard_set),
         )
         folder_item.setToolTip(0, folder_name)
         folder_item.setToolTip(1, folder_name)
