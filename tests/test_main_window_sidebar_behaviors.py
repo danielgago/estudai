@@ -474,7 +474,7 @@ def test_handle_management_data_changed_builds_nested_sidebar_tree(
 def test_sidebar_items_show_distinct_folder_and_set_affordances(
     app: QApplication,
 ) -> None:
-    """Verify sidebar items expose visible folder/set distinctions."""
+    """Verify sidebar items distinguish folders from sets without icons."""
     root_folder = create_managed_folder("Biology")
     child_set = create_managed_set("Genetics", parent_id=root_folder.id)
     window = MainWindow()
@@ -488,9 +488,8 @@ def test_sidebar_items_show_distinct_folder_and_set_affordances(
     assert root_item.toolTip(1) == "Biology"
     assert child_item.toolTip(0) == "Genetics"
     assert child_item.toolTip(1) == "Genetics"
-    assert root_item.icon(0).isNull() is False
-    assert child_item.icon(0).isNull() is False
-    assert root_item.icon(0).cacheKey() != child_item.icon(0).cacheKey()
+    assert root_item.icon(0).isNull() is True
+    assert child_item.icon(0).isNull() is True
     assert (
         root_item.childIndicatorPolicy()
         == QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator

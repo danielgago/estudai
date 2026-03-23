@@ -2184,6 +2184,32 @@ def test_double_click_folder_opens_management_and_save_updates_selection(
     assert window.loaded_flashcards[0].answer == "Updated messenger molecule."
 
 
+def test_saving_first_flashcard_in_empty_set_updates_loaded_count(
+    app: QApplication,
+) -> None:
+    """Verify saving the first card in an empty set refreshes timer selection."""
+    persisted_folder = create_managed_set("Biology")
+    window = MainWindow()
+    folder_item = window.sidebar_folder_list.item(0)
+    folder_id = folder_item.data(Qt.UserRole)
+    assert folder_id == persisted_folder.id
+
+    window.open_management_for_folder(persisted_folder.id, "Biology")
+    assert window.management_page.flashcards_table.rowCount() == 0
+
+    window.management_page.add_flashcard_row("What is DNA?", "Genetic material.")
+    window.save_management_changes()
+
+    refreshed_item = window.sidebar_folder_list.item(0)
+    assert window.stacked_widget.currentWidget() is window.timer_page
+    assert refreshed_item.checkState() == Qt.Checked
+    assert refreshed_item.text(1) == "1 card | 0% done"
+    assert len(window.flashcards_by_folder[persisted_folder.id]) == 1
+    assert len(window.loaded_flashcards) == 1
+    assert window.loaded_flashcards[0].question == "What is DNA?"
+    assert window.loaded_flashcards[0].answer == "Genetic material."
+
+
 def test_management_row_selection_does_not_mark_page_dirty(
     app: QApplication, tmp_path: Path
 ) -> None:

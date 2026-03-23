@@ -62,7 +62,7 @@ def test_sidebar_folder_controller_creates_items_and_tracks_checked_ids(
 def test_sidebar_folder_controller_distinguishes_folders_from_sets(
     app: QApplication,
 ) -> None:
-    """Verify folders and sets expose distinct sidebar visuals."""
+    """Verify folders and sets keep distinct behavior without item icons."""
     folder_list = SidebarFolderTreeWidget()
     controller = SidebarFolderController(folder_list, Qt.UserRole + 1)
 
@@ -85,9 +85,8 @@ def test_sidebar_folder_controller_distinguishes_folders_from_sets(
 
     assert folder_item.toolTip(0) == "Biology"
     assert set_item.toolTip(0) == "Genetics"
-    assert folder_item.icon(0).isNull() is False
-    assert set_item.icon(0).isNull() is False
-    assert folder_item.icon(0).cacheKey() != set_item.icon(0).cacheKey()
+    assert folder_item.icon(0).isNull() is True
+    assert set_item.icon(0).isNull() is True
     assert bool(folder_item.flags() & Qt.ItemIsDropEnabled) is True
     assert bool(set_item.flags() & Qt.ItemIsDropEnabled) is False
     assert (

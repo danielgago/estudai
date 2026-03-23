@@ -308,6 +308,85 @@ def test_save_changes_persists_rows_refreshes_state_and_returns_to_timer(
     assert switch_calls == ["management", "timer"]
 
 
+def test_save_changes_keeps_newly_added_flashcards_selected_after_refresh(
+    app: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify save keeps selection when a previously empty set gets new rows."""
+    app_state = StudyApplicationState()
+    app_state.replace_folders(
+        [
+            FolderLibraryState(
+                folder_id="bio",
+                folder_name="Biology",
+                folder_path=Path("/tmp/bio"),
+                flashcards=[],
+                selected_indexes=set(),
+            )
+        ]
+    )
+    page = _FakeManagementPage()
+    page.collect_result = (
+        [FlashcardRowData(question="New Q?", answer="New A.")],
+        {0},
+    )
+    refresh_calls: list[set[str]] = []
+    switch_calls: list[str] = []
+    replace_calls: list[tuple[Path, list[FlashcardRowData]]] = []
+
+    def _refresh_management_data(checked_ids: set[str]) -> None:
+        refresh_calls.append(set(checked_ids))
+        app_state.replace_folders(
+            [
+                FolderLibraryState(
+                    folder_id="bio",
+                    folder_name="Biology",
+                    folder_path=Path("/tmp/bio"),
+                    flashcards=[_flashcard("New Q?", "New A.", 1)],
+                    selected_indexes=app_state.normalized_selected_indexes("bio", 1),
+                )
+            ]
+        )
+
+    controller = ManagementPageController(
+        parent=QWidget(),
+        management_page=page,  # type: ignore[arg-type]
+        app_state=app_state,
+        selected_folder_items_getter=lambda: [],
+        sidebar_folder_items_iter=lambda: [],
+        folder_name_resolver=lambda _item: "Biology",
+        checked_folder_ids_getter=lambda: {"bio"},
+        refresh_management_data=_refresh_management_data,
+        switch_to_management=lambda: switch_calls.append("management"),
+        switch_to_timer=lambda: switch_calls.append("timer"),
+        edit_dialog_factory=lambda question, answer, question_image_path, answer_image_path, folder_path: _FakeEditDialog(
+            question,
+            answer,
+            question_image_path,
+            answer_image_path,
+            folder_path,
+        ),
+    )
+    controller.open_for_folder("bio", "Biology")
+
+    monkeypatch.setattr(
+        "estudai.ui.controllers.management_page_controller.replace_flashcards_in_folder",
+        lambda folder_path, rows: replace_calls.append((folder_path, list(rows))),
+    )
+
+    controller.save_changes()
+
+    assert replace_calls == [
+        (
+            Path("/tmp/bio"),
+            [FlashcardRowData(question="New Q?", answer="New A.")],
+        )
+    ]
+    assert app_state.selected_indexes_for_folder("bio") == {0}
+    assert refresh_calls == [{"bio"}]
+    assert switch_calls == ["management", "timer"]
+
+
 def test_delete_selected_flashcards_removes_rows_after_confirmation(
     app: QApplication,
     monkeypatch: pytest.MonkeyPatch,

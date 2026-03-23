@@ -132,18 +132,27 @@ class StudyApplicationState:
         self,
         folder_id: str,
         selected_indexes: set[int],
+        *,
+        flashcard_count: int | None = None,
     ) -> None:
         """Persist normalized timer selection indexes for one folder.
 
         Args:
             folder_id: Folder identifier to update.
             selected_indexes: Candidate selected indexes.
+            flashcard_count: Optional flashcard count used to normalize the
+                selection when the persisted folder data has changed but the
+                in-memory cache has not been refreshed yet.
         """
-        folder_flashcards = self.flashcards_by_folder.get(folder_id)
-        if folder_flashcards is None:
+        if flashcard_count is None:
+            folder_flashcards = self.flashcards_by_folder.get(folder_id)
+            if folder_flashcards is None:
+                return
+            flashcard_count = len(folder_flashcards)
+        if flashcard_count < 0:
             return
         self.selected_flashcard_indexes_by_folder[folder_id] = (
-            normalize_selected_indexes(selected_indexes, len(folder_flashcards))
+            normalize_selected_indexes(selected_indexes, flashcard_count)
         )
 
     def selected_indexes_after_deletion(
