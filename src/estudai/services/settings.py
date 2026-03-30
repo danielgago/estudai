@@ -630,5 +630,9 @@ def copy_notification_sound_file(source_path: Path, *, slot_name: str) -> str:
     copied_sound_path = (
         sounds_dir / f"{normalized_slot_name}-notification-sound{extension}"
     )
-    shutil.copy2(resolved_source, copied_sound_path)
+    try:
+        shutil.copy2(resolved_source, copied_sound_path)
+    except OSError as error:
+        msg = f"Could not copy sound file: {error}"
+        raise OSError(msg) from error
     return str(copied_sound_path)

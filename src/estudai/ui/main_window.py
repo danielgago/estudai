@@ -1607,59 +1607,66 @@ class MainWindow(QMainWindow):
             ]
         )
         self.sidebar_folder_list.blockSignals(True)
-        self.sidebar_folder_list.clear()
-        folder_items_by_id: dict[str, SidebarFolderItem] = {}
-        progress_summary_cache: dict[str, FolderProgressSummary] = {}
+        try:
+            self.sidebar_folder_list.clear()
+            folder_items_by_id: dict[str, SidebarFolderItem] = {}
+            progress_summary_cache: dict[str, FolderProgressSummary] = {}
 
-        for loaded_folder in catalog_result.folders:
-            persisted_folder = loaded_folder.persisted_folder
-            parent_item = folder_items_by_id.get(persisted_folder.parent_id)
-            is_checked = (
-                True
-                if preferred_checked_ids is None
-                else persisted_folder.id in preferred_checked_ids
-                or (parent_item is not None and parent_item.checkState() == Qt.Checked)
-            )
-            summary = self._sidebar_progress_summary(
-                persisted_folder.id,
-                progress_summary_cache,
-            )
-            folder_item = self._create_sidebar_folder_item(
-                persisted_folder.id,
-                persisted_folder.name,
-                flashcard_count=summary.total_flashcards,
-                progress_percent=summary.percent_done,
-                checked=is_checked,
-                is_flashcard_set=persisted_folder.is_flashcard_set,
-            )
-            if parent_item is None:
-                self.sidebar_folder_list.addItem(folder_item)
-            else:
-                parent_item.addChild(folder_item)
-                parent_item.setExpanded(
-                    parent_item.data(Qt.UserRole) in expanded_folder_ids
-                    or preferred_checked_ids is None
+            for loaded_folder in catalog_result.folders:
+                persisted_folder = loaded_folder.persisted_folder
+                parent_item = folder_items_by_id.get(persisted_folder.parent_id)
+                is_checked = (
+                    True
+                    if preferred_checked_ids is None
+                    else persisted_folder.id in preferred_checked_ids
+                    or (
+                        parent_item is not None
+                        and parent_item.checkState() == Qt.Checked
+                    )
                 )
-            folder_items_by_id[persisted_folder.id] = folder_item
-            if persisted_folder.id in expanded_folder_ids or (
-                preferred_checked_ids is None
-                and folder_item.childCount() > 0
-                and persisted_folder.parent_id is None
-            ):
-                folder_item.setExpanded(True)
-            if persisted_folder.id == preferred_current_folder_id:
-                preferred_current_item = folder_item
+                summary = self._sidebar_progress_summary(
+                    persisted_folder.id,
+                    progress_summary_cache,
+                )
+                folder_item = self._create_sidebar_folder_item(
+                    persisted_folder.id,
+                    persisted_folder.name,
+                    flashcard_count=summary.total_flashcards,
+                    progress_percent=summary.percent_done,
+                    checked=is_checked,
+                    is_flashcard_set=persisted_folder.is_flashcard_set,
+                )
+                if parent_item is None:
+                    self.sidebar_folder_list.addItem(folder_item)
+                else:
+                    parent_item.addChild(folder_item)
+                    parent_item.setExpanded(
+                        parent_item.data(Qt.UserRole) in expanded_folder_ids
+                        or preferred_checked_ids is None
+                    )
+                folder_items_by_id[persisted_folder.id] = folder_item
+                if persisted_folder.id in expanded_folder_ids or (
+                    preferred_checked_ids is None
+                    and folder_item.childCount() > 0
+                    and persisted_folder.parent_id is None
+                ):
+                    folder_item.setExpanded(True)
+                if persisted_folder.id == preferred_current_folder_id:
+                    preferred_current_item = folder_item
 
-        if self.sidebar_folder_list.count() == 0:
-            self.sidebar_folder_list.addItem(
-                self._sidebar_folders.create_placeholder_item("No saved folders yet.")
-            )
-        else:
-            if preferred_current_item is None:
-                self.sidebar_folder_list.setCurrentRow(0)
+            if self.sidebar_folder_list.count() == 0:
+                self.sidebar_folder_list.addItem(
+                    self._sidebar_folders.create_placeholder_item(
+                        "No saved folders yet."
+                    )
+                )
             else:
-                self.sidebar_folder_list.setCurrentItem(preferred_current_item)
-        self.sidebar_folder_list.blockSignals(False)
+                if preferred_current_item is None:
+                    self.sidebar_folder_list.setCurrentRow(0)
+                else:
+                    self.sidebar_folder_list.setCurrentItem(preferred_current_item)
+        finally:
+            self.sidebar_folder_list.blockSignals(False)
         self._refresh_loaded_flashcards()
         if self.stacked_widget.currentWidget() is self.management_page:
             editing_folder_id = self._management_controller.editing_folder_id

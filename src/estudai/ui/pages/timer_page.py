@@ -360,7 +360,7 @@ class TimerPage(QWidget):
         text: str,
         *,
         tooltip: str,
-        clicked_handler: Callable[[], object],
+        clicked_handler: Callable[[], None],
         minimum_width: int,
         enabled: bool = True,
         visible: bool = True,
@@ -399,7 +399,7 @@ class TimerPage(QWidget):
         *,
         tooltip: str,
         score_action: str,
-        clicked_handler: Callable[[], object],
+        clicked_handler: Callable[[], None],
     ) -> QPushButton:
         """Create one flashcard score button with its shared configuration.
 

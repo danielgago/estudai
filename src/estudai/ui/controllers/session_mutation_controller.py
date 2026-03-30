@@ -20,7 +20,7 @@ from estudai.ui.study_session import StudySessionController
 
 CheckedFolderIdsGetter = Callable[[], set[str]]
 HandleFolderDataChanged = Callable[[set[str] | None, str | None], None]
-EditDialogFactory = Callable[[str, str, str | None, str | None, Path], object]
+EditDialogFactory = Callable[[str, str, str | None, str | None, Path], QDialog | None]
 ShowWarningMessage = Callable[[str, str], None]
 ConfirmAction = Callable[[str, str], bool]
 
