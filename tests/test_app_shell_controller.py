@@ -77,13 +77,17 @@ def _build_controller(
     sidebar_toggle_button.setGeometry(8, 8, 44, 44)
     settings_button = QPushButton("", central_widget)
     settings_button.setGeometry(56, 8, 44, 44)
+    stats_button = QPushButton("", central_widget)
+    stats_button.setGeometry(104, 8, 44, 44)
     stacked_widget = QStackedWidget(central_widget)
     timer_page = QWidget()
     management_page = QWidget()
     settings_page = QWidget()
+    stats_page = QWidget()
     stacked_widget.addWidget(timer_page)
     stacked_widget.addWidget(management_page)
     stacked_widget.addWidget(settings_page)
+    stacked_widget.addWidget(stats_page)
     stacked_widget.setCurrentWidget(timer_page)
     preview_calls: list[str] = []
     fullscreen_state = _FullscreenState()
@@ -92,9 +96,11 @@ def _build_controller(
         timer_page=timer_page,
         management_page=management_page,
         settings_page=settings_page,
+        stats_page=stats_page,
         sidebar=sidebar,
         sidebar_toggle_button=sidebar_toggle_button,
         settings_button=settings_button,
+        stats_button=stats_button,
         central_widget_getter=lambda: central_widget,
         window_width_getter=lambda: window_width,
         timer_running_getter=lambda: timer_running,

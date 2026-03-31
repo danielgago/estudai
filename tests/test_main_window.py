@@ -149,7 +149,7 @@ def test_main_window_registers_all_pages(app: QApplication) -> None:
     """Verify that all expected pages are present in the stack."""
     window = MainWindow()
 
-    assert window.stacked_widget.count() == 3
+    assert window.stacked_widget.count() == 4
     assert window.stacked_widget.currentWidget() is window.timer_page
     assert window.current_folder_name == "No sets selected"
 

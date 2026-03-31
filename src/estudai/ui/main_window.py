@@ -62,6 +62,7 @@ from estudai.services.study_progress import (
     load_folder_progress,
     summarize_folder_progress,
 )
+from estudai.services.study_time import StudyTimeTracker
 from estudai.ui.utils import (
     NativeCheckboxDelegate,
     blend_colors,
@@ -80,9 +81,10 @@ from .dialog import FlashcardEditDialog, NotebookLMCsvImportDialog
 from .navigation_icons import (
     build_menu_navigation_icon,
     build_settings_navigation_icon,
+    build_stats_navigation_icon,
     load_navigation_icon,
 )
-from .pages import ManagementPage, SettingsPage, TimerPage
+from .pages import ManagementPage, SettingsPage, StatsPage, TimerPage
 from .sidebar_overlay import SidebarOverlayFrame
 from .sidebar_folders import (
     SidebarFolderController,
@@ -219,6 +221,10 @@ class MainWindow(QMainWindow):
             default_duration_seconds=app_settings.timer_duration_seconds
         )
         self.management_page = ManagementPage()
+        self._study_time_tracker = StudyTimeTracker()
+        self.stats_page = StatsPage(
+            study_time_tracker=self._study_time_tracker,
+        )
         self.settings_page = SettingsPage(
             save_settings_callback=self._save_settings_from_page,
             global_hotkey_availability_error=self._hotkey_service.availability_error,
@@ -242,6 +248,7 @@ class MainWindow(QMainWindow):
             app_state=self._app_state,
             flashcard_phase_timer=flashcard_phase_timer,
             flashcard_sound_player=self._flashcard_sound_player,
+            study_time_tracker=self._study_time_tracker,
             iter_sidebar_folder_items=self._iter_sidebar_folder_items,
             set_navigation_visible=self.set_navigation_visible,
             switch_to_timer=self.switch_to_timer,
@@ -292,9 +299,11 @@ class MainWindow(QMainWindow):
             timer_page=self.timer_page,
             management_page=self.management_page,
             settings_page=self.settings_page,
+            stats_page=self.stats_page,
             sidebar=self.sidebar,
             sidebar_toggle_button=self.sidebar_toggle_button,
             settings_button=self.settings_button,
+            stats_button=self.stats_button,
             central_widget_getter=self.centralWidget,
             window_width_getter=self.width,
             timer_running_getter=self._timer_page_is_running,
@@ -318,6 +327,7 @@ class MainWindow(QMainWindow):
         self.stacked_widget.addWidget(self.timer_page)
         self.stacked_widget.addWidget(self.management_page)
         self.stacked_widget.addWidget(self.settings_page)
+        self.stacked_widget.addWidget(self.stats_page)
         self.timer_page.timer_running_changed.connect(self.handle_timer_running_changed)
         self.timer_page.timer_cycle_completed.connect(self.handle_timer_cycle_completed)
         self.timer_page.flashcard_pause_toggled.connect(
@@ -493,7 +503,15 @@ class MainWindow(QMainWindow):
         self.settings_button.setToolTip("Open settings")
         self.settings_button.setIconSize(QSize(20, 20))
         self.settings_button.clicked.connect(self.switch_to_settings)
+
+        self.stats_button = QPushButton("")
+        self.stats_button.setFixedSize(44, 44)
+        self.stats_button.setToolTip("View stats")
+        self.stats_button.setIconSize(QSize(20, 20))
+        self.stats_button.clicked.connect(self.switch_to_stats)
+
         self._apply_navigation_button_icons()
+        header_layout.addWidget(self.stats_button, alignment=Qt.AlignRight)
         header_layout.addWidget(self.settings_button, alignment=Qt.AlignRight)
         content_layout.addWidget(self.header_container)
 
@@ -547,6 +565,15 @@ class MainWindow(QMainWindow):
                 theme_names=("preferences-system", "settings-configure", "settings"),
                 fallback=build_settings_navigation_icon(
                     self.settings_button.iconSize(),
+                    icon_color,
+                ),
+            )
+        )
+        self.stats_button.setIcon(
+            load_navigation_icon(
+                theme_names=("office-chart-bar", "view-statistics"),
+                fallback=build_stats_navigation_icon(
+                    self.stats_button.iconSize(),
                     icon_color,
                 ),
             )
@@ -627,6 +654,13 @@ class MainWindow(QMainWindow):
         if not self._confirm_discard_management_changes():
             return
         self._app_shell_controller.switch_to_settings()
+
+    def switch_to_stats(self) -> None:
+        """Switch to stats page or back to timer when already there."""
+        if not self._confirm_discard_management_changes():
+            return
+        self.stats_page.refresh_stats()
+        self._app_shell_controller.switch_to_stats()
 
     def _confirm_discard_management_changes(self) -> bool:
         """Confirm leaving management when there are unsaved flashcard edits."""

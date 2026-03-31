@@ -29,9 +29,11 @@ class AppShellController:
         timer_page: QWidget,
         management_page: QWidget,
         settings_page: QWidget,
+        stats_page: QWidget,
         sidebar: QFrame,
         sidebar_toggle_button: QPushButton,
         settings_button: QPushButton,
+        stats_button: QPushButton,
         central_widget_getter: CentralWidgetGetter,
         window_width_getter: WindowWidthGetter,
         timer_running_getter: TimerRunningGetter,
@@ -47,9 +49,11 @@ class AppShellController:
             timer_page: Timer page widget.
             management_page: Flashcard management page widget.
             settings_page: Settings page widget.
+            stats_page: Stats overview page widget.
             sidebar: Sidebar overlay widget.
             sidebar_toggle_button: Button that toggles sidebar visibility.
             settings_button: Button that opens the settings page.
+            stats_button: Button that opens the stats page.
             central_widget_getter: Returns the central widget used to anchor the
                 sidebar overlay.
             window_width_getter: Returns the current window width.
@@ -64,9 +68,11 @@ class AppShellController:
         self._timer_page = timer_page
         self._management_page = management_page
         self._settings_page = settings_page
+        self._stats_page = stats_page
         self._sidebar = sidebar
         self._sidebar_toggle_button = sidebar_toggle_button
         self._settings_button = settings_button
+        self._stats_button = stats_button
         self._central_widget_getter = central_widget_getter
         self._window_width_getter = window_width_getter
         self._timer_running_getter = timer_running_getter
@@ -125,6 +131,14 @@ class AppShellController:
             return
         self._stacked_widget.setCurrentWidget(self._settings_page)
 
+    def switch_to_stats(self) -> None:
+        """Switch to stats or back to timer when already on stats."""
+        if self._stacked_widget.currentWidget() is self._stats_page:
+            self.switch_to_timer()
+            return
+        self._stop_settings_preview()
+        self._stacked_widget.setCurrentWidget(self._stats_page)
+
     def toggle_sidebar(self) -> None:
         """Show or hide the sidebar overlay."""
         if self._sidebar.isHidden():
@@ -137,6 +151,7 @@ class AppShellController:
         """Show or hide the shell navigation controls."""
         self._sidebar_toggle_button.setVisible(visible)
         self._settings_button.setVisible(visible)
+        self._stats_button.setVisible(visible)
         if not visible:
             self._sidebar.setVisible(False)
 

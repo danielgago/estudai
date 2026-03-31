@@ -154,6 +154,9 @@ class SettingsPage(QWidget):
         layout.addWidget(self.settings_tab_widget, 1)
 
         footer_layout = QHBoxLayout()
+        self._version_label = QLabel(self._get_version_text())
+        set_muted_label_color(self._version_label, overlay_ratio=0.55)
+        footer_layout.addWidget(self._version_label)
         footer_layout.addStretch()
         self.cancel_button = QPushButton("Cancel")
         self.save_button = QPushButton("Save")
@@ -169,7 +172,18 @@ class SettingsPage(QWidget):
             self.answer_notification_sound_label,
             self.in_app_shortcut_help_label,
             self.hotkey_help_label,
+            self._version_label,
         )
+
+    @staticmethod
+    def _get_version_text() -> str:
+        """Return the app version string from package metadata."""
+        try:
+            from importlib.metadata import version
+
+            return f"v{version('Estudai')}"
+        except Exception:  # noqa: BLE001
+            return ""
 
     def _build_flashcards_tab(self) -> QWidget:
         """Build the tab that contains flashcard session and retry settings."""
