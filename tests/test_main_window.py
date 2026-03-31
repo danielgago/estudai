@@ -482,10 +482,7 @@ def test_folder_copy_persists_after_source_deletion(
     second_window.handle_sidebar_folder_click(second_window.sidebar_folder_list.item(0))
     assert second_window.current_folder_name == "chemistry"
     assert len(second_window.loaded_flashcards) == 1
-    assert (
-        second_window.timer_page.folder_context_label.text()
-        == "chemistry (1 card)"
-    )
+    assert second_window.timer_page.folder_context_label.text() == "chemistry (1 card)"
 
 
 def test_multiple_checked_folders_aggregate_flashcards(

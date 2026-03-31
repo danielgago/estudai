@@ -40,7 +40,7 @@ def _load_study_time_payload() -> dict:
         return {}
     try:
         payload = json.loads(time_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+    except json.JSONDecodeError, OSError:
         return {}
     if not isinstance(payload, dict):
         return {}
@@ -175,8 +175,7 @@ def recent_daily_history(
     """
     sorted_dates = sorted(daily_times.keys(), reverse=True)[:days]
     return [
-        DailyStudyTime(date_iso=d, active_seconds=daily_times[d])
-        for d in sorted_dates
+        DailyStudyTime(date_iso=d, active_seconds=daily_times[d]) for d in sorted_dates
     ]
 
 
