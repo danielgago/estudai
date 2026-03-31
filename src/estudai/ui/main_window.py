@@ -62,6 +62,7 @@ from estudai.services.study_progress import (
     load_folder_progress,
     summarize_folder_progress,
 )
+from estudai.services.study_time import StudyTimeTracker
 from estudai.ui.utils import (
     NativeCheckboxDelegate,
     blend_colors,
@@ -80,9 +81,10 @@ from .dialog import FlashcardEditDialog, NotebookLMCsvImportDialog
 from .navigation_icons import (
     build_menu_navigation_icon,
     build_settings_navigation_icon,
+    build_stats_navigation_icon,
     load_navigation_icon,
 )
-from .pages import ManagementPage, SettingsPage, TimerPage
+from .pages import ManagementPage, SettingsPage, StatsPage, TimerPage
 from .sidebar_overlay import SidebarOverlayFrame
 from .sidebar_folders import (
     SidebarFolderController,
@@ -219,6 +221,10 @@ class MainWindow(QMainWindow):
             default_duration_seconds=app_settings.timer_duration_seconds
         )
         self.management_page = ManagementPage()
+        self._study_time_tracker = StudyTimeTracker()
+        self.stats_page = StatsPage(
+            study_time_tracker=self._study_time_tracker,
+        )
         self.settings_page = SettingsPage(
             save_settings_callback=self._save_settings_from_page,
             global_hotkey_availability_error=self._hotkey_service.availability_error,
@@ -242,6 +248,7 @@ class MainWindow(QMainWindow):
             app_state=self._app_state,
             flashcard_phase_timer=flashcard_phase_timer,
             flashcard_sound_player=self._flashcard_sound_player,
+            study_time_tracker=self._study_time_tracker,
             iter_sidebar_folder_items=self._iter_sidebar_folder_items,
             set_navigation_visible=self.set_navigation_visible,
             switch_to_timer=self.switch_to_timer,
@@ -292,9 +299,11 @@ class MainWindow(QMainWindow):
             timer_page=self.timer_page,
             management_page=self.management_page,
             settings_page=self.settings_page,
+            stats_page=self.stats_page,
             sidebar=self.sidebar,
             sidebar_toggle_button=self.sidebar_toggle_button,
             settings_button=self.settings_button,
+            stats_button=self.stats_button,
             central_widget_getter=self.centralWidget,
             window_width_getter=self.width,
             timer_running_getter=self._timer_page_is_running,
@@ -318,6 +327,7 @@ class MainWindow(QMainWindow):
         self.stacked_widget.addWidget(self.timer_page)
         self.stacked_widget.addWidget(self.management_page)
         self.stacked_widget.addWidget(self.settings_page)
+        self.stacked_widget.addWidget(self.stats_page)
         self.timer_page.timer_running_changed.connect(self.handle_timer_running_changed)
         self.timer_page.timer_cycle_completed.connect(self.handle_timer_cycle_completed)
         self.timer_page.flashcard_pause_toggled.connect(
@@ -493,7 +503,15 @@ class MainWindow(QMainWindow):
         self.settings_button.setToolTip("Open settings")
         self.settings_button.setIconSize(QSize(20, 20))
         self.settings_button.clicked.connect(self.switch_to_settings)
+
+        self.stats_button = QPushButton("")
+        self.stats_button.setFixedSize(44, 44)
+        self.stats_button.setToolTip("View stats")
+        self.stats_button.setIconSize(QSize(20, 20))
+        self.stats_button.clicked.connect(self.switch_to_stats)
+
         self._apply_navigation_button_icons()
+        header_layout.addWidget(self.stats_button, alignment=Qt.AlignRight)
         header_layout.addWidget(self.settings_button, alignment=Qt.AlignRight)
         content_layout.addWidget(self.header_container)
 
@@ -547,6 +565,15 @@ class MainWindow(QMainWindow):
                 theme_names=("preferences-system", "settings-configure", "settings"),
                 fallback=build_settings_navigation_icon(
                     self.settings_button.iconSize(),
+                    icon_color,
+                ),
+            )
+        )
+        self.stats_button.setIcon(
+            load_navigation_icon(
+                theme_names=("office-chart-bar", "view-statistics"),
+                fallback=build_stats_navigation_icon(
+                    self.stats_button.iconSize(),
                     icon_color,
                 ),
             )
@@ -627,6 +654,13 @@ class MainWindow(QMainWindow):
         if not self._confirm_discard_management_changes():
             return
         self._app_shell_controller.switch_to_settings()
+
+    def switch_to_stats(self) -> None:
+        """Switch to stats page or back to timer when already there."""
+        if not self._confirm_discard_management_changes():
+            return
+        self.stats_page.refresh_stats()
+        self._app_shell_controller.switch_to_stats()
 
     def _confirm_discard_management_changes(self) -> bool:
         """Confirm leaving management when there are unsaved flashcard edits."""
@@ -930,7 +964,8 @@ class MainWindow(QMainWindow):
         return super().eventFilter(watched, event)
 
     def closeEvent(self, event) -> None:  # noqa: N802
-        """Release global hotkeys and app-wide filters when closing the window."""
+        """Persist study time and release resources when closing the window."""
+        self._study_time_tracker.stop_and_persist()
         self.settings_page.stop_active_preview()
         self._timer_controller.flashcard_sound_controller.stop()
         self._hotkey_service.clear()
@@ -1047,6 +1082,7 @@ class MainWindow(QMainWindow):
     def _refresh_loaded_flashcards(self) -> None:
         """Refresh selected flashcards from checked folders."""
         self._app_state.refresh_selection(self._get_checked_folder_ids())
+        self._uncheck_empty_sidebar_sets()
         self._timer_controller.reset_flashcard_sequence_order()
         self.timer_page.set_flashcard_context(
             self.current_folder_name,
@@ -1054,6 +1090,23 @@ class MainWindow(QMainWindow):
         )
         if not self._timer_controller.study_session.active:
             self.timer_page.clear_session_progress()
+
+    def _uncheck_empty_sidebar_sets(self) -> None:
+        """Uncheck sidebar sets that contribute no flashcards to selection."""
+        were_signals_blocked = self.sidebar_folder_list.blockSignals(True)
+        try:
+            for item in self._iter_sidebar_folder_items():
+                folder_id = item.data(Qt.UserRole)
+                if (
+                    folder_id is not None
+                    and item.checkState() == Qt.Checked
+                    and self._app_state.is_flashcard_set(folder_id)
+                    and folder_id not in self._app_state.selected_folder_ids
+                ):
+                    item.setCheckState(Qt.Unchecked)
+                    self._apply_sidebar_item_visual_state(item)
+        finally:
+            self.sidebar_folder_list.blockSignals(were_signals_blocked)
 
     def handle_sidebar_item_changed(
         self,
@@ -1607,59 +1660,66 @@ class MainWindow(QMainWindow):
             ]
         )
         self.sidebar_folder_list.blockSignals(True)
-        self.sidebar_folder_list.clear()
-        folder_items_by_id: dict[str, SidebarFolderItem] = {}
-        progress_summary_cache: dict[str, FolderProgressSummary] = {}
+        try:
+            self.sidebar_folder_list.clear()
+            folder_items_by_id: dict[str, SidebarFolderItem] = {}
+            progress_summary_cache: dict[str, FolderProgressSummary] = {}
 
-        for loaded_folder in catalog_result.folders:
-            persisted_folder = loaded_folder.persisted_folder
-            parent_item = folder_items_by_id.get(persisted_folder.parent_id)
-            is_checked = (
-                True
-                if preferred_checked_ids is None
-                else persisted_folder.id in preferred_checked_ids
-                or (parent_item is not None and parent_item.checkState() == Qt.Checked)
-            )
-            summary = self._sidebar_progress_summary(
-                persisted_folder.id,
-                progress_summary_cache,
-            )
-            folder_item = self._create_sidebar_folder_item(
-                persisted_folder.id,
-                persisted_folder.name,
-                flashcard_count=summary.total_flashcards,
-                progress_percent=summary.percent_done,
-                checked=is_checked,
-                is_flashcard_set=persisted_folder.is_flashcard_set,
-            )
-            if parent_item is None:
-                self.sidebar_folder_list.addItem(folder_item)
-            else:
-                parent_item.addChild(folder_item)
-                parent_item.setExpanded(
-                    parent_item.data(Qt.UserRole) in expanded_folder_ids
-                    or preferred_checked_ids is None
+            for loaded_folder in catalog_result.folders:
+                persisted_folder = loaded_folder.persisted_folder
+                parent_item = folder_items_by_id.get(persisted_folder.parent_id)
+                is_checked = (
+                    True
+                    if preferred_checked_ids is None
+                    else persisted_folder.id in preferred_checked_ids
+                    or (
+                        parent_item is not None
+                        and parent_item.checkState() == Qt.Checked
+                    )
                 )
-            folder_items_by_id[persisted_folder.id] = folder_item
-            if persisted_folder.id in expanded_folder_ids or (
-                preferred_checked_ids is None
-                and folder_item.childCount() > 0
-                and persisted_folder.parent_id is None
-            ):
-                folder_item.setExpanded(True)
-            if persisted_folder.id == preferred_current_folder_id:
-                preferred_current_item = folder_item
+                summary = self._sidebar_progress_summary(
+                    persisted_folder.id,
+                    progress_summary_cache,
+                )
+                folder_item = self._create_sidebar_folder_item(
+                    persisted_folder.id,
+                    persisted_folder.name,
+                    flashcard_count=summary.total_flashcards,
+                    progress_percent=summary.percent_done,
+                    checked=is_checked,
+                    is_flashcard_set=persisted_folder.is_flashcard_set,
+                )
+                if parent_item is None:
+                    self.sidebar_folder_list.addItem(folder_item)
+                else:
+                    parent_item.addChild(folder_item)
+                    parent_item.setExpanded(
+                        parent_item.data(Qt.UserRole) in expanded_folder_ids
+                        or preferred_checked_ids is None
+                    )
+                folder_items_by_id[persisted_folder.id] = folder_item
+                if persisted_folder.id in expanded_folder_ids or (
+                    preferred_checked_ids is None
+                    and folder_item.childCount() > 0
+                    and persisted_folder.parent_id is None
+                ):
+                    folder_item.setExpanded(True)
+                if persisted_folder.id == preferred_current_folder_id:
+                    preferred_current_item = folder_item
 
-        if self.sidebar_folder_list.count() == 0:
-            self.sidebar_folder_list.addItem(
-                self._sidebar_folders.create_placeholder_item("No saved folders yet.")
-            )
-        else:
-            if preferred_current_item is None:
-                self.sidebar_folder_list.setCurrentRow(0)
+            if self.sidebar_folder_list.count() == 0:
+                self.sidebar_folder_list.addItem(
+                    self._sidebar_folders.create_placeholder_item(
+                        "No saved folders yet."
+                    )
+                )
             else:
-                self.sidebar_folder_list.setCurrentItem(preferred_current_item)
-        self.sidebar_folder_list.blockSignals(False)
+                if preferred_current_item is None:
+                    self.sidebar_folder_list.setCurrentRow(0)
+                else:
+                    self.sidebar_folder_list.setCurrentItem(preferred_current_item)
+        finally:
+            self.sidebar_folder_list.blockSignals(False)
         self._refresh_loaded_flashcards()
         if self.stacked_widget.currentWidget() is self.management_page:
             editing_folder_id = self._management_controller.editing_folder_id

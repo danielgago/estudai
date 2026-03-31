@@ -18,6 +18,7 @@ from estudai.services.settings import (
     WrongAnswerCompletionMode,
     WrongAnswerReinsertionMode,
 )
+from estudai.services.study_time import StudyTimeTracker
 from estudai.ui.application_state import FolderLibraryState, StudyApplicationState
 from estudai.ui.controllers.timer_page_controller import TimerPageController
 from estudai.ui.pages import TimerPage
@@ -114,6 +115,7 @@ def test_start_study_session_builds_runtime_session_state(app: QApplication) -> 
         app_state=app_state,
         flashcard_phase_timer=QTimer(),
         flashcard_sound_player=None,
+        study_time_tracker=StudyTimeTracker(),
         iter_sidebar_folder_items=lambda: [_FakeSidebarItem("bio", checked=True)],
         set_navigation_visible=lambda _visible: None,
         switch_to_timer=lambda: None,
@@ -174,6 +176,7 @@ def test_show_flashcard_popup_uses_host_timer_callback(app: QApplication) -> Non
         app_state=app_state,
         flashcard_phase_timer=QTimer(),
         flashcard_sound_player=None,
+        study_time_tracker=StudyTimeTracker(),
         iter_sidebar_folder_items=lambda: [_FakeSidebarItem("bio", checked=True)],
         set_navigation_visible=lambda visible: navigation_values.append(visible),
         switch_to_timer=lambda: switch_calls.append("timer"),

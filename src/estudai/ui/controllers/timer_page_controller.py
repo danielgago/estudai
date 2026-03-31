@@ -22,6 +22,7 @@ from estudai.services.study_progress import (
     reviewed_progress,
     save_progress_entries,
 )
+from estudai.services.study_time import StudyTimeTracker, increment_flashcards_seen
 from estudai.ui.application_state import StudyApplicationState
 from estudai.ui.audio_playback import TimedAudioPlaybackController
 from estudai.ui.flashcard_sequence import FlashcardSequenceController
@@ -33,7 +34,7 @@ SetNavigationVisible = Callable[[bool], None]
 PageSwitchCallback = Callable[[], None]
 EmitFlashcardCallback = Callable[[Flashcard], None]
 RefreshSidebarFolderProgressLabels = Callable[[set[str] | None], None]
-PhaseTimerStarter = Callable[[int, object], None]
+PhaseTimerStarter = Callable[[int, str], None]
 PhaseTimeoutHandler = Callable[[], None]
 TimerCycleCompletionHandler = Callable[[], None]
 AppSettingsLoader = Callable[[], AppSettings]
@@ -51,6 +52,7 @@ class TimerPageController:
         app_state: StudyApplicationState,
         flashcard_phase_timer: QTimer,
         flashcard_sound_player: object | None,
+        study_time_tracker: StudyTimeTracker,
         iter_sidebar_folder_items: IterSidebarFolderItems,
         set_navigation_visible: SetNavigationVisible,
         switch_to_timer: PageSwitchCallback,
@@ -73,6 +75,7 @@ class TimerPageController:
             flashcard_phase_timer: Single-shot timer used for question/answer
                 phase transitions.
             flashcard_sound_player: Media player used for phase sounds.
+            study_time_tracker: Shared active study time tracker.
             iter_sidebar_folder_items: Returns persisted sidebar folder items.
             set_navigation_visible: Shows or hides top-level navigation.
             switch_to_timer: Navigates to the timer page.
@@ -91,6 +94,7 @@ class TimerPageController:
         self._parent = parent
         self._timer_page = timer_page
         self._app_state = app_state
+        self._study_time_tracker = study_time_tracker
         self._iter_sidebar_folder_items = iter_sidebar_folder_items
         self._set_navigation_visible = set_navigation_visible
         self._switch_to_timer = switch_to_timer
@@ -176,6 +180,10 @@ class TimerPageController:
         """Pause or resume flashcard phase timing."""
         if self._is_flashcard_display_hidden():
             return
+        if paused:
+            self._study_time_tracker.pause()
+        else:
+            self._study_time_tracker.start()
         self._apply_flashcard_pause_toggle(paused)
 
     def handle_flashcard_queue_shuffle_requested(self) -> None:
@@ -290,7 +298,7 @@ class TimerPageController:
             QMessageBox.warning(
                 self._parent,
                 "Timer",
-                "No folders selected. Select at least one folder to start a study session.",
+                "No sets selected. Select at least one set to start a study session.",
             )
             return False
         if not self._app_state.loaded_flashcards:
@@ -324,6 +332,7 @@ class TimerPageController:
             return False
         self._active_study_session_keys = session_keys
         self.update_study_session_progress()
+        self._study_time_tracker.start()
         return True
 
     def selected_study_session_keys(self) -> list[tuple[str, str]]:
@@ -414,6 +423,7 @@ class TimerPageController:
 
     def reset_study_session_state(self) -> None:
         """Clear all runtime-only study session state."""
+        self._study_time_tracker.pause()
         self.cancel_flashcard_phase_timer()
         self._flashcard_sequence.sequence_paused = False
         self.reset_flashcard_sequence_order()
@@ -489,6 +499,7 @@ class TimerPageController:
             or self._timer_page.flashcard_question_label.isHidden()
         ):
             return
+        increment_flashcards_seen()
         self._timer_page.show_flashcard_answer(
             answer,
             self._resolved_flashcard_image_path(answer_image_path),

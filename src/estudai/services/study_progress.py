@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 import json
+import tempfile
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -152,7 +153,7 @@ def load_study_progress() -> dict[str, dict[str, FlashcardProgress]]:
 
     try:
         payload = json.loads(progress_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
+    except json.JSONDecodeError, OSError:
         return {}
     if not isinstance(payload, dict):
         return {}
@@ -291,10 +292,22 @@ def _save_study_progress(
 
 def _write_json_atomic(path: Path, payload: dict[str, object]) -> None:
     """Write JSON content atomically to avoid partial-save corruption."""
+    import os
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path = path.with_suffix(f"{path.suffix}.tmp")
-    temporary_path.write_text(
-        json.dumps(payload, ensure_ascii=True, indent=2),
-        encoding="utf-8",
+    fd, tmp_name = tempfile.mkstemp(
+        dir=path.parent,
+        suffix=".tmp",
+        prefix=path.stem,
     )
-    temporary_path.replace(path)
+    os.close(fd)
+    temporary_path = Path(tmp_name)
+    try:
+        temporary_path.write_text(
+            json.dumps(payload, ensure_ascii=True, indent=2),
+            encoding="utf-8",
+        )
+        temporary_path.replace(path)
+    except BaseException:
+        temporary_path.unlink(missing_ok=True)
+        raise

@@ -19,7 +19,7 @@ FolderNameResolver = Callable[[QListWidgetItem], str]
 CheckedFolderIdsGetter = Callable[[], set[str]]
 RefreshManagementData = Callable[[set[str]], None]
 PageSwitchCallback = Callable[[], None]
-EditDialogFactory = Callable[[str, str, str | None, str | None, Path], object]
+EditDialogFactory = Callable[[str, str, str | None, str | None, Path], QDialog | None]
 
 
 class ManagementPageController:

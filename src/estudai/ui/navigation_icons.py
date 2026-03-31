@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QPointF, QSize, Qt
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 
 __all__ = [
     "build_menu_navigation_icon",
     "build_settings_navigation_icon",
+    "build_stats_navigation_icon",
     "load_navigation_icon",
 ]
 
@@ -82,5 +83,39 @@ def build_settings_navigation_icon(icon_size: QSize, color: QColor) -> QIcon:
 
     painter.drawEllipse(center, outer_radius * 0.62, outer_radius * 0.62)
     painter.drawEllipse(center, inner_radius, inner_radius)
+    painter.end()
+    return QIcon(pixmap)
+
+
+def build_stats_navigation_icon(icon_size: QSize, color: QColor) -> QIcon:
+    """Build a deterministic bar-chart icon used when no theme icon exists."""
+    icon_extent = max(16, min(icon_size.width(), icon_size.height()))
+    pixmap = QPixmap(icon_extent, icon_extent)
+    pixmap.fill(Qt.transparent)
+
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(color)
+
+    margin = icon_extent * 0.20
+    usable_width = icon_extent - 2 * margin
+    bottom_y = icon_extent * 0.82
+    bar_count = 3
+    gap_ratio = 0.25
+    total_gaps = gap_ratio * (bar_count - 1)
+    bar_width = usable_width / (bar_count + total_gaps)
+    gap_width = bar_width * gap_ratio
+
+    bar_heights = [0.30, 0.55, 0.80]
+    for i, height_ratio in enumerate(bar_heights):
+        x = margin + i * (bar_width + gap_width)
+        bar_height = usable_width * height_ratio
+        y = bottom_y - bar_height
+        painter.drawRoundedRect(
+            QRectF(x, y, bar_width, bar_height),
+            bar_width * 0.15,
+            bar_width * 0.15,
+        )
     painter.end()
     return QIcon(pixmap)

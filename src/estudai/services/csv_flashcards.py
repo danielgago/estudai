@@ -6,6 +6,7 @@ import csv
 import shutil
 from collections import defaultdict
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from uuid import uuid4
 
@@ -17,7 +18,15 @@ SUPPORTED_FLASHCARD_IMAGE_EXTENSIONS = frozenset(
 FLASHCARD_IMAGE_FILE_DIALOG_FILTER = (
     "Image files (*.png *.jpg *.jpeg *.bmp *.gif *.webp)"
 )
-_IMAGE_PATH_UNSPECIFIED = object()
+
+
+class _Sentinel(Enum):
+    """Singleton sentinel for unspecified image paths."""
+
+    UNSPECIFIED = "UNSPECIFIED"
+
+
+_IMAGE_PATH_UNSPECIFIED = _Sentinel.UNSPECIFIED
 
 
 @dataclass(frozen=True)
@@ -87,8 +96,8 @@ class _FlashcardRecord:
     answer: str
     origin_relative_path: str | None
     origin_line: int | None
-    question_image_path: str | None | object
-    answer_image_path: str | None | object
+    question_image_path: str | None | _Sentinel
+    answer_image_path: str | None | _Sentinel
 
 
 def get_managed_csv_path(folder_path: Path) -> Path:
@@ -937,14 +946,18 @@ def _copy_flashcard_image_to_managed_storage(
         )
         msg = f"Unsupported image format. Supported formats: {supported_formats}."
         raise ValueError(msg)
-    if resolved_source_path.is_relative_to(folder_path):
+    if resolved_source_path.resolve().is_relative_to(folder_path.resolve()):
         relative_path = resolved_source_path.relative_to(folder_path).as_posix()
         if _is_managed_flashcard_image_path(relative_path):
             return relative_path
     managed_media_dir = get_managed_flashcard_media_dir(folder_path)
     managed_media_dir.mkdir(parents=True, exist_ok=True)
     managed_image_path = managed_media_dir / f"{uuid4().hex}{source_suffix}"
-    shutil.copy2(resolved_source_path, managed_image_path)
+    try:
+        shutil.copy2(resolved_source_path, managed_image_path)
+    except OSError as error:
+        msg = f"Could not copy image to managed storage: {error}"
+        raise ValueError(msg) from error
     return managed_image_path.relative_to(folder_path).as_posix()
 
 
@@ -981,7 +994,7 @@ def _cleanup_unused_managed_images(
         relative_path = managed_file.relative_to(folder_path).as_posix()
         if relative_path in referenced_paths:
             continue
-        managed_file.unlink()
+        managed_file.unlink(missing_ok=True)
     if not any(managed_media_dir.iterdir()):
         managed_media_dir.rmdir()
 

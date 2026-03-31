@@ -144,16 +144,20 @@ class NotebookLMCsvImportDialog(QDialog):
             return folder_labels_by_id[folder_id]
 
         self.target_folder_combo.blockSignals(True)
-        self.target_folder_combo.clear()
-        for folder in persisted_folders:
-            self.target_folder_combo.addItem(build_folder_label(folder.id), folder.id)
-        if self.target_folder_combo.count() == 0:
-            self.target_folder_combo.addItem("No folders available", None)
-        elif preferred_folder_id is not None:
-            preferred_index = self.target_folder_combo.findData(preferred_folder_id)
-            if preferred_index >= 0:
-                self.target_folder_combo.setCurrentIndex(preferred_index)
-        self.target_folder_combo.blockSignals(False)
+        try:
+            self.target_folder_combo.clear()
+            for folder in persisted_folders:
+                self.target_folder_combo.addItem(
+                    build_folder_label(folder.id), folder.id
+                )
+            if self.target_folder_combo.count() == 0:
+                self.target_folder_combo.addItem("No folders available", None)
+            elif preferred_folder_id is not None:
+                preferred_index = self.target_folder_combo.findData(preferred_folder_id)
+                if preferred_index >= 0:
+                    self.target_folder_combo.setCurrentIndex(preferred_index)
+        finally:
+            self.target_folder_combo.blockSignals(False)
         self._update_import_button_state()
 
     def _choose_csv_file(self) -> None:

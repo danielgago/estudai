@@ -149,9 +149,9 @@ def test_main_window_registers_all_pages(app: QApplication) -> None:
     """Verify that all expected pages are present in the stack."""
     window = MainWindow()
 
-    assert window.stacked_widget.count() == 3
+    assert window.stacked_widget.count() == 4
     assert window.stacked_widget.currentWidget() is window.timer_page
-    assert window.current_folder_name == "No folders selected"
+    assert window.current_folder_name == "No sets selected"
 
 
 def test_sidebar_toggle_changes_visibility(app: QApplication) -> None:
@@ -367,7 +367,7 @@ def test_sidebar_folder_selection_updates_current_folder(
     folder_item = window.sidebar_folder_list.item(0)
 
     folder_item.setCheckState(Qt.Unchecked)
-    assert window.current_folder_name == "No folders selected"
+    assert window.current_folder_name == "No sets selected"
     assert len(window.loaded_flashcards) == 0
 
     folder_item.setCheckState(Qt.Checked)
@@ -458,7 +458,7 @@ def test_add_folder_loads_csv_flashcards(app: QApplication, tmp_path: Path) -> N
     assert len(persisted) == 1
     assert (Path(persisted[0].stored_path) / "cards.csv").exists()
     assert window.stacked_widget.currentWidget() is window.timer_page
-    assert window.timer_page.folder_context_label.text() == "Folder: biology (2 cards)"
+    assert window.timer_page.folder_context_label.text() == "biology (2 cards)"
 
 
 def test_folder_copy_persists_after_source_deletion(
@@ -482,10 +482,7 @@ def test_folder_copy_persists_after_source_deletion(
     second_window.handle_sidebar_folder_click(second_window.sidebar_folder_list.item(0))
     assert second_window.current_folder_name == "chemistry"
     assert len(second_window.loaded_flashcards) == 1
-    assert (
-        second_window.timer_page.folder_context_label.text()
-        == "Folder: chemistry (1 card)"
-    )
+    assert second_window.timer_page.folder_context_label.text() == "chemistry (1 card)"
 
 
 def test_multiple_checked_folders_aggregate_flashcards(
@@ -504,7 +501,7 @@ def test_multiple_checked_folders_aggregate_flashcards(
 
     assert window.add_folder(biology_folder) is True
     assert window.add_folder(chemistry_folder) is True
-    assert window.current_folder_name == "2 folders selected"
+    assert window.current_folder_name == "2 sets selected"
     assert len(window.loaded_flashcards) == 2
 
     first_item = window.sidebar_folder_list.item(0)
@@ -1329,7 +1326,7 @@ def test_study_progress_isolated_by_folder_and_survives_folder_rename(
     second_window.handle_timer_cycle_completed()
 
     assert second_window.timer_page.flashcard_question_label.text() == "Q1?"
-    assert second_window.current_folder_name == "2 folders selected"
+    assert second_window.current_folder_name == "2 sets selected"
 
 
 def test_forget_sidebar_folder_progress_clears_persisted_counts_and_refreshes_session(
@@ -2658,7 +2655,7 @@ def test_management_save_unchecks_folder_when_no_flashcards_selected(
 
     updated_item = window.sidebar_folder_list.item(0)
     assert updated_item.checkState() == Qt.Unchecked
-    assert window.current_folder_name == "No folders selected"
+    assert window.current_folder_name == "No sets selected"
     assert len(window.loaded_flashcards) == 0
 
 

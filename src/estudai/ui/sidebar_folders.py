@@ -88,10 +88,34 @@ class SidebarFolderTreeWidget(QTreeWidget):
         header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self._spacing = 0
         self._dragged_folder_id: str | None = None
+        self.itemCollapsed.connect(self._collapse_childless_subfolders)
 
     def setSpacing(self, spacing: int) -> None:
         """Store list-style spacing requests for compatibility."""
         self._spacing = spacing
+
+    def _collapse_childless_subfolders(self, item: QTreeWidgetItem) -> None:
+        """Collapse expanded childless subfolders when their parent collapses.
+
+        Qt loses the visual expand arrow on childless items that use
+        ``ShowIndicator`` when they were expanded and their parent is
+        collapsed then re-expanded.  Collapsing them here prevents the
+        issue because they re-enter the collapsed state before the next
+        parent expansion.
+
+        Args:
+            item: The parent item that was just collapsed.
+        """
+        show = QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator
+        for child_index in range(item.childCount()):
+            child = item.child(child_index)
+            if (
+                child is not None
+                and child.childIndicatorPolicy() == show
+                and child.childCount() == 0
+                and child.isExpanded()
+            ):
+                child.setExpanded(False)
 
     def iter_items(self) -> Iterator[SidebarFolderItem]:
         """Yield tree items in pre-order traversal."""

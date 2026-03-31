@@ -185,18 +185,20 @@ class ManagementPage(QWidget):
         self.title_label.setText(folder_name)
         self.folder_context_label.setText(format_card_count(len(flashcards)))
         self.flashcards_table.blockSignals(True)
-        self.flashcards_table.setRowCount(0)
+        try:
+            self.flashcards_table.setRowCount(0)
 
-        for index, flashcard in enumerate(flashcards):
-            self._insert_row(
-                row_index=index,
-                question=flashcard.question,
-                answer=flashcard.answer,
-                question_image_path=flashcard.question_image_path,
-                answer_image_path=flashcard.answer_image_path,
-                checked=index in selected_indexes,
-            )
-        self.flashcards_table.blockSignals(False)
+            for index, flashcard in enumerate(flashcards):
+                self._insert_row(
+                    row_index=index,
+                    question=flashcard.question,
+                    answer=flashcard.answer,
+                    question_image_path=flashcard.question_image_path,
+                    answer_image_path=flashcard.answer_image_path,
+                    checked=index in selected_indexes,
+                )
+        finally:
+            self.flashcards_table.blockSignals(False)
         self._sync_select_all_header()
         self._update_row_action_buttons()
         self._loaded_table_row_states = self._collect_table_row_states(
@@ -409,10 +411,12 @@ class ManagementPage(QWidget):
             checked: Target state for all rows.
         """
         self.flashcards_table.blockSignals(True)
-        target_state = Qt.Checked if checked else Qt.Unchecked
-        for checkbox_item in self._iter_selection_items():
-            checkbox_item.setCheckState(target_state)
-        self.flashcards_table.blockSignals(False)
+        try:
+            target_state = Qt.Checked if checked else Qt.Unchecked
+            for checkbox_item in self._iter_selection_items():
+                checkbox_item.setCheckState(target_state)
+        finally:
+            self.flashcards_table.blockSignals(False)
         self._sync_select_all_header()
 
     def _iter_selection_items(self) -> Iterator[QTableWidgetItem]:
@@ -531,28 +535,30 @@ class ManagementPage(QWidget):
     def _set_table_row_states(self, rows: list[FlashcardTableRowState]) -> None:
         """Replace the table content while preserving row selection state."""
         self.flashcards_table.blockSignals(True)
-        self.flashcards_table.setRowCount(0)
-        for row_index, row in enumerate(rows):
-            self._insert_row(
-                row_index,
-                row.question,
-                row.answer,
-                row.question_image_path,
-                row.answer_image_path,
-                checked=row.checked,
-            )
-        selection_model = self.flashcards_table.selectionModel()
-        if selection_model is not None:
-            selection_model.clearSelection()
-            model = self.flashcards_table.model()
+        try:
+            self.flashcards_table.setRowCount(0)
             for row_index, row in enumerate(rows):
-                if not row.selected:
-                    continue
-                selection_model.select(
-                    model.index(row_index, 0),
-                    QItemSelectionModel.Select | QItemSelectionModel.Rows,
+                self._insert_row(
+                    row_index,
+                    row.question,
+                    row.answer,
+                    row.question_image_path,
+                    row.answer_image_path,
+                    checked=row.checked,
                 )
-        self.flashcards_table.blockSignals(False)
+            selection_model = self.flashcards_table.selectionModel()
+            if selection_model is not None:
+                selection_model.clearSelection()
+                model = self.flashcards_table.model()
+                for row_index, row in enumerate(rows):
+                    if not row.selected:
+                        continue
+                    selection_model.select(
+                        model.index(row_index, 0),
+                        QItemSelectionModel.Select | QItemSelectionModel.Rows,
+                    )
+        finally:
+            self.flashcards_table.blockSignals(False)
         self._sync_select_all_header()
         self._update_row_action_buttons()
 

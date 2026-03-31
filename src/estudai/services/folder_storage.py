@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 from dataclasses import asdict, dataclass, replace
+from enum import Enum
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import uuid4
@@ -30,7 +31,15 @@ APP_NAME = "estudai"
 ENV_DATA_DIR = "ESTUDAI_DATA_DIR"
 REGISTRY_FILENAME = "folders.json"
 LIBRARY_FOLDER_NAME = "folder-library"
-_UNCHANGED_PARENT = object()
+
+
+class _Sentinel(Enum):
+    """Singleton sentinel for unchanged parent id."""
+
+    UNCHANGED = "UNCHANGED"
+
+
+_UNCHANGED_PARENT = _Sentinel.UNCHANGED
 NODE_KIND_FOLDER = "folder"
 NODE_KIND_SET = "set"
 _LEGACY_NODE_KIND = "legacy"
@@ -678,7 +687,7 @@ def move_persisted_folder(
     folder_id: str,
     new_index: int,
     *,
-    parent_id: str | None | object = _UNCHANGED_PARENT,
+    parent_id: str | None | _Sentinel = _UNCHANGED_PARENT,
 ) -> list[PersistedFolder]:
     """Move one persisted folder entry to a sibling position.
 
@@ -780,9 +789,12 @@ def delete_persisted_folder(folder_id: str) -> bool:
         folder for folder in persisted_folders if folder.id in subtree_ids
     ]
 
+    app_data_root = get_app_data_dir().resolve()
     for folder in removed_folders:
         stored_path = Path(folder.stored_path)
         if stored_path.exists():
+            if not stored_path.resolve().is_relative_to(app_data_root):
+                continue
             shutil.rmtree(stored_path)
         delete_folder_progress(folder.id)
 
@@ -821,7 +833,7 @@ def _load_previous_flashcards(
             preserved_media_dir = (
                 Path(managed_media_backup_dir.name) / previous_media_dir.name
             )
-            shutil.copytree(previous_media_dir, preserved_media_dir)
+            shutil.copytree(previous_media_dir, preserved_media_dir, symlinks=False)
     return previous_flashcards, managed_media_backup_dir, preserved_media_dir
 
 
@@ -837,7 +849,7 @@ def _copy_imported_folder_contents(
     """
     if destination_folder.exists():
         shutil.rmtree(destination_folder)
-    shutil.copytree(source_folder, destination_folder)
+    shutil.copytree(source_folder, destination_folder, symlinks=False)
 
 
 def _copy_imported_csv_contents(
@@ -1016,6 +1028,7 @@ def _import_csv_file(
                 preserved_media_dir,
                 get_managed_flashcard_media_dir(stored_folder_path),
                 dirs_exist_ok=True,
+                symlinks=False,
             )
         ensure_managed_flashcards(
             stored_folder_path,
@@ -1081,6 +1094,7 @@ def _import_grouped_folder_flashcards(
                 preserved_media_dir,
                 get_managed_flashcard_media_dir(stored_folder_path),
                 dirs_exist_ok=True,
+                symlinks=False,
             )
         ensure_managed_flashcards(
             stored_folder_path,
@@ -1152,6 +1166,7 @@ def _import_folder_tree(
                 preserved_media_dir,
                 get_managed_flashcard_media_dir(stored_folder_path),
                 dirs_exist_ok=True,
+                symlinks=False,
             )
         if not root_is_container_folder:
             ensure_managed_flashcards(

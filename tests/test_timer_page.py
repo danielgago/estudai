@@ -56,7 +56,7 @@ def test_timer_start_stop_reset_and_context() -> None:
     assert not page.stop_button.isEnabled()
 
     page.set_flashcard_context("biology", 4)
-    assert page.folder_context_label.text() == "Folder: biology (4 cards)"
+    assert page.folder_context_label.text() == "biology (4 cards)"
     page.set_session_progress(
         completed_count=1,
         remaining_count=3,
@@ -79,7 +79,7 @@ def test_timer_page_formats_single_card_context_label() -> None:
 
     page.set_flashcard_context("chemistry", 1)
 
-    assert page.folder_context_label.text() == "Folder: chemistry (1 card)"
+    assert page.folder_context_label.text() == "chemistry (1 card)"
 
 
 def test_timer_update_stops_when_reaches_zero() -> None:
