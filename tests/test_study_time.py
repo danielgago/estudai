@@ -11,7 +11,9 @@ from estudai.services.study_time import (
     add_active_study_seconds,
     cumulative_active_seconds,
     format_duration,
+    increment_flashcards_seen,
     load_study_time,
+    load_total_flashcards_seen,
     recent_daily_history,
     save_study_time,
     today_active_seconds,
@@ -233,3 +235,53 @@ class TestStudyTimeTracker:
         clock[0] = 7.5
         assert tracker.session_elapsed_seconds == pytest.approx(7.5)
         assert tracker.is_active is True
+
+    def test_pause_preserves_accumulated_across_resumes(self) -> None:
+        """Multiple start/pause cycles accumulate within one tracker."""
+        clock = [0.0]
+        tracker = StudyTimeTracker(time_func=lambda: clock[0])
+        # First study session: 10s
+        tracker.start()
+        clock[0] = 10.0
+        tracker.pause()
+        # Gap (user not studying)
+        clock[0] = 50.0
+        # Second study session: 5s
+        tracker.start()
+        clock[0] = 55.0
+        tracker.pause()
+        assert tracker.session_elapsed_seconds == pytest.approx(15.0)
+
+
+class TestFlashcardsSeenCounter:
+    """Test the global lifetime flashcards-seen counter."""
+
+    def test_default_is_zero(self) -> None:
+        """Counter returns 0 when no data is persisted."""
+        assert load_total_flashcards_seen() == 0
+
+    def test_increment_and_load(self) -> None:
+        """Incrementing persists and is readable."""
+        increment_flashcards_seen()
+        assert load_total_flashcards_seen() == 1
+        increment_flashcards_seen(3)
+        assert load_total_flashcards_seen() == 4
+
+    def test_increment_preserves_daily_times(self) -> None:
+        """Incrementing the counter does not lose daily study time data."""
+        save_study_time({"2025-06-01": 100.0})
+        increment_flashcards_seen(2)
+        daily = load_study_time()
+        assert daily["2025-06-01"] == pytest.approx(100.0)
+        assert load_total_flashcards_seen() == 2
+
+    def test_save_study_time_preserves_counter(self) -> None:
+        """Saving daily study times preserves the flashcards-seen counter."""
+        increment_flashcards_seen(5)
+        save_study_time({"2025-07-01": 200.0})
+        assert load_total_flashcards_seen() == 5
+
+    def test_zero_increment_is_noop(self) -> None:
+        """Incrementing by 0 does not write to disk."""
+        increment_flashcards_seen(0)
+        assert load_total_flashcards_seen() == 0

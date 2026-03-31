@@ -16,12 +16,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from estudai.services.study_progress import load_study_progress
 from estudai.services.study_time import (
     StudyTimeTracker,
     cumulative_active_seconds,
     format_duration,
     load_study_time,
+    load_total_flashcards_seen,
     recent_daily_history,
     today_active_seconds,
 )
@@ -136,13 +136,9 @@ class StatsPage(QWidget):
         self.all_time_label.setText(format_duration(all_time_seconds))
 
     def _refresh_flashcard_stats(self) -> None:
-        """Reload flashcard stats from persisted progress."""
-        progress_by_folder = load_study_progress()
-        total_reviews = 0
-        for folder_progress in progress_by_folder.values():
-            for card_progress in folder_progress.values():
-                total_reviews += card_progress.correct_count + card_progress.wrong_count
-        self.total_reviews_label.setText(f"{total_reviews:,}")
+        """Reload flashcard stats from the global counter."""
+        total_seen = load_total_flashcards_seen()
+        self.total_reviews_label.setText(f"{total_seen:,}")
 
     def _refresh_daily_history(self) -> None:
         """Rebuild daily study history widgets."""

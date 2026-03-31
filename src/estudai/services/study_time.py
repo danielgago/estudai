@@ -33,23 +33,27 @@ def get_study_time_path() -> Path:
     return get_app_data_dir() / STUDY_TIME_FILENAME
 
 
-def load_study_time() -> dict[str, float]:
-    """Load persisted daily study time from disk.
-
-    Returns:
-        dict[str, float]: Active seconds indexed by ISO date string.
-    """
+def _load_study_time_payload() -> dict:
+    """Load the raw study-time JSON payload from disk."""
     time_path = get_study_time_path()
     if not time_path.exists():
         return {}
-
     try:
         payload = json.loads(time_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return {}
     if not isinstance(payload, dict):
         return {}
+    return payload
 
+
+def load_study_time() -> dict[str, float]:
+    """Load persisted daily study time from disk.
+
+    Returns:
+        dict[str, float]: Active seconds indexed by ISO date string.
+    """
+    payload = _load_study_time_payload()
     days_payload = payload.get("days")
     if not isinstance(days_payload, dict):
         return {}
@@ -64,22 +68,58 @@ def load_study_time() -> dict[str, float]:
     return result
 
 
-def save_study_time(daily_times: dict[str, float]) -> None:
-    """Persist daily study time atomically.
+def load_total_flashcards_seen() -> int:
+    """Load the lifetime flashcards-seen counter from disk.
 
-    Args:
-        daily_times: Active seconds indexed by ISO date string.
+    Returns:
+        int: Total number of flashcard answer reveals recorded.
     """
+    payload = _load_study_time_payload()
+    value = payload.get("total_flashcards_seen", 0)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return 0
+    return value
+
+
+def _save_study_time_payload(
+    daily_times: dict[str, float],
+    total_flashcards_seen: int,
+) -> None:
+    """Persist the full study-time payload atomically."""
     time_path = get_study_time_path()
-    payload = {
+    payload: dict[str, object] = {
         "version": STUDY_TIME_VERSION,
         "days": {
             date_key: round(seconds, 2)
             for date_key, seconds in sorted(daily_times.items())
             if seconds > 0
         },
+        "total_flashcards_seen": total_flashcards_seen,
     }
     _write_json_atomic(time_path, payload)
+
+
+def save_study_time(daily_times: dict[str, float]) -> None:
+    """Persist daily study time atomically.
+
+    Args:
+        daily_times: Active seconds indexed by ISO date string.
+    """
+    seen = load_total_flashcards_seen()
+    _save_study_time_payload(daily_times, seen)
+
+
+def increment_flashcards_seen(count: int = 1) -> None:
+    """Increment the lifetime flashcards-seen counter and persist.
+
+    Args:
+        count: Number of answer reveals to add.
+    """
+    if count <= 0:
+        return
+    daily_times = load_study_time()
+    seen = load_total_flashcards_seen() + count
+    _save_study_time_payload(daily_times, seen)
 
 
 def add_active_study_seconds(seconds: float) -> None:
@@ -191,7 +231,7 @@ class StudyTimeTracker:
 
     @property
     def session_elapsed_seconds(self) -> float:
-        """Return active seconds accumulated in the current session."""
+        """Return active seconds accumulated in this app session."""
         elapsed = self._accumulated_seconds
         if self._is_active and self._session_start is not None:
             elapsed += self._time_func() - self._session_start

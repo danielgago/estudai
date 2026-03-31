@@ -964,7 +964,8 @@ class MainWindow(QMainWindow):
         return super().eventFilter(watched, event)
 
     def closeEvent(self, event) -> None:  # noqa: N802
-        """Release global hotkeys and app-wide filters when closing the window."""
+        """Persist study time and release resources when closing the window."""
+        self._study_time_tracker.stop_and_persist()
         self.settings_page.stop_active_preview()
         self._timer_controller.flashcard_sound_controller.stop()
         self._hotkey_service.clear()

@@ -30,10 +30,6 @@ def _isolate_persistence(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
         "estudai.services.study_time.get_study_time_path",
         lambda: tmp_path / "study-time.json",
     )
-    monkeypatch.setattr(
-        "estudai.services.study_progress.get_study_progress_path",
-        lambda: tmp_path / "study-progress.json",
-    )
 
 
 def test_stats_page_creates_without_error(app: QApplication) -> None:

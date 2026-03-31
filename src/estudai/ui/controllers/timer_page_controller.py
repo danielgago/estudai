@@ -22,7 +22,7 @@ from estudai.services.study_progress import (
     reviewed_progress,
     save_progress_entries,
 )
-from estudai.services.study_time import StudyTimeTracker
+from estudai.services.study_time import StudyTimeTracker, increment_flashcards_seen
 from estudai.ui.application_state import StudyApplicationState
 from estudai.ui.audio_playback import TimedAudioPlaybackController
 from estudai.ui.flashcard_sequence import FlashcardSequenceController
@@ -423,7 +423,7 @@ class TimerPageController:
 
     def reset_study_session_state(self) -> None:
         """Clear all runtime-only study session state."""
-        self._study_time_tracker.stop_and_persist()
+        self._study_time_tracker.pause()
         self.cancel_flashcard_phase_timer()
         self._flashcard_sequence.sequence_paused = False
         self.reset_flashcard_sequence_order()
@@ -499,6 +499,7 @@ class TimerPageController:
             or self._timer_page.flashcard_question_label.isHidden()
         ):
             return
+        increment_flashcards_seen()
         self._timer_page.show_flashcard_answer(
             answer,
             self._resolved_flashcard_image_path(answer_image_path),
