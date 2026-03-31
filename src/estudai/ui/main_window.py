@@ -1047,6 +1047,7 @@ class MainWindow(QMainWindow):
     def _refresh_loaded_flashcards(self) -> None:
         """Refresh selected flashcards from checked folders."""
         self._app_state.refresh_selection(self._get_checked_folder_ids())
+        self._uncheck_empty_sidebar_sets()
         self._timer_controller.reset_flashcard_sequence_order()
         self.timer_page.set_flashcard_context(
             self.current_folder_name,
@@ -1054,6 +1055,23 @@ class MainWindow(QMainWindow):
         )
         if not self._timer_controller.study_session.active:
             self.timer_page.clear_session_progress()
+
+    def _uncheck_empty_sidebar_sets(self) -> None:
+        """Uncheck sidebar sets that contribute no flashcards to selection."""
+        were_signals_blocked = self.sidebar_folder_list.blockSignals(True)
+        try:
+            for item in self._iter_sidebar_folder_items():
+                folder_id = item.data(Qt.UserRole)
+                if (
+                    folder_id is not None
+                    and item.checkState() == Qt.Checked
+                    and self._app_state.is_flashcard_set(folder_id)
+                    and folder_id not in self._app_state.selected_folder_ids
+                ):
+                    item.setCheckState(Qt.Unchecked)
+                    self._apply_sidebar_item_visual_state(item)
+        finally:
+            self.sidebar_folder_list.blockSignals(were_signals_blocked)
 
     def handle_sidebar_item_changed(
         self,

@@ -18,7 +18,7 @@ __all__ = [
     "StudyApplicationState",
 ]
 
-_NO_FOLDERS_SELECTED = "No folders selected"
+_NO_FOLDERS_SELECTED = "No sets selected"
 
 
 @dataclass(frozen=True)

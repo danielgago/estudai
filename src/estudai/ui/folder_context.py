@@ -59,22 +59,25 @@ def build_folder_selection_context(
     loaded_flashcards: list[Flashcard] = []
 
     for folder in checked_folders:
-        checked_folder_ids.append(folder.folder_id)
-        checked_folder_names.append(folder.folder_name)
-        loaded_flashcards.extend(
+        folder_flashcards = [
             flashcard
             for flashcard_index, flashcard in enumerate(folder.flashcards)
             if flashcard_index in folder.selected_indexes
-        )
+        ]
+        if not folder_flashcards:
+            continue
+        checked_folder_ids.append(folder.folder_id)
+        checked_folder_names.append(folder.folder_name)
+        loaded_flashcards.extend(folder_flashcards)
 
     count = len(checked_folder_ids)
     if count == 0:
-        folder_id, folder_name = None, "No folders selected"
+        folder_id, folder_name = None, "No sets selected"
         loaded_flashcards = []
     elif count == 1:
         folder_id, folder_name = checked_folder_ids[0], checked_folder_names[0]
     else:
-        folder_id, folder_name = None, f"{count} folders selected"
+        folder_id, folder_name = None, f"{count} sets selected"
 
     return FolderSelectionContext(
         selected_folder_ids=set(checked_folder_ids),

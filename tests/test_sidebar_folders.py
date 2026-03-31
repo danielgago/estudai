@@ -99,6 +99,42 @@ def test_sidebar_folder_controller_distinguishes_folders_from_sets(
     )
 
 
+def test_sidebar_tree_collapses_childless_subfolders_on_parent_collapse(
+    app: QApplication,
+) -> None:
+    """Verify expanded childless subfolders are collapsed when their parent collapses.
+
+    Qt loses the visual expand arrow on childless items that use
+    ``ShowIndicator`` when they were expanded and their parent is
+    collapsed then re-expanded.  The tree widget collapses such
+    children on parent collapse to prevent the arrow from disappearing.
+    """
+    folder_list = SidebarFolderTreeWidget()
+    controller = SidebarFolderController(folder_list, Qt.UserRole + 1)
+
+    parent_item = controller.create_folder_item(
+        "parent", "Parent", 0, 0, True, is_flashcard_set=False
+    )
+    child_folder = controller.create_folder_item(
+        "child-folder", "Sub-folder", 0, 0, True, is_flashcard_set=False
+    )
+    child_set = controller.create_folder_item(
+        "child-set", "Set", 2, 0, True, is_flashcard_set=True
+    )
+    folder_list.addItem(parent_item)
+    parent_item.addChild(child_folder)
+    parent_item.addChild(child_set)
+
+    # Expand the parent and the childless subfolder.
+    parent_item.setExpanded(True)
+    child_folder.setExpanded(True)
+    assert child_folder.isExpanded()
+
+    # Collapsing the parent should also collapse the childless subfolder.
+    parent_item.setExpanded(False)
+    assert not child_folder.isExpanded()
+
+
 def test_sidebar_folder_controller_normalizes_context_menu_selection(
     app: QApplication,
 ) -> None:

@@ -290,7 +290,7 @@ class TimerPageController:
             QMessageBox.warning(
                 self._parent,
                 "Timer",
-                "No folders selected. Select at least one folder to start a study session.",
+                "No sets selected. Select at least one set to start a study session.",
             )
             return False
         if not self._app_state.loaded_flashcards:

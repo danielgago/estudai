@@ -52,7 +52,7 @@ def test_replace_folders_and_refresh_selection_builds_timer_context() -> None:
     assert state.selected_flashcard_indexes_by_folder["bio"] == {1}
     assert state.selected_flashcard_indexes_by_folder["chem"] == {0}
     assert state.current_folder_id is None
-    assert state.current_folder_name == "2 folders selected"
+    assert state.current_folder_name == "2 sets selected"
     assert state.selected_folder_ids == {"bio", "chem"}
     assert [flashcard.question for flashcard in state.loaded_flashcards] == [
         "Q2?",

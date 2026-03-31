@@ -47,7 +47,7 @@ def test_build_folder_selection_context_merges_checked_folder_flashcards() -> No
     )
 
     assert context.current_folder_id is None
-    assert context.current_folder_name == "2 folders selected"
+    assert context.current_folder_name == "2 sets selected"
     assert context.selected_folder_ids == {"bio", "chem"}
     assert [flashcard.question for flashcard in context.loaded_flashcards] == [
         "Q2?",
@@ -58,3 +58,45 @@ def test_build_folder_selection_context_merges_checked_folder_flashcards() -> No
 def test_merge_imported_flashcard_indexes_marks_new_rows_selected() -> None:
     """Verify imported flashcards become selected without losing prior choices."""
     assert merge_imported_flashcard_indexes(2, 3, {1}) == {1, 2, 3, 4}
+
+
+def test_build_folder_selection_context_excludes_folders_with_no_loaded_flashcards() -> (
+    None
+):
+    """Folders that contribute zero flashcards should not appear in context."""
+    context = build_folder_selection_context(
+        [
+            CheckedFolderData(
+                folder_id="empty",
+                folder_name="Empty Set",
+                flashcards=[],
+                selected_indexes=set(),
+            ),
+            CheckedFolderData(
+                folder_id="bio",
+                folder_name="Biology",
+                flashcards=[_flashcard("Q1?", "A1.", 1)],
+                selected_indexes={0},
+            ),
+        ]
+    )
+    assert context.selected_folder_ids == {"bio"}
+    assert context.current_folder_name == "Biology"
+    assert len(context.loaded_flashcards) == 1
+
+
+def test_build_folder_selection_context_all_empty_returns_no_selection() -> None:
+    """When all checked folders contribute zero flashcards, none are selected."""
+    context = build_folder_selection_context(
+        [
+            CheckedFolderData(
+                folder_id="empty",
+                folder_name="Empty",
+                flashcards=[_flashcard("Q1?", "A1.", 1)],
+                selected_indexes=set(),
+            ),
+        ]
+    )
+    assert context.selected_folder_ids == set()
+    assert context.current_folder_name == "No sets selected"
+    assert context.loaded_flashcards == []

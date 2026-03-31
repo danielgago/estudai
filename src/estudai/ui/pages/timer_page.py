@@ -94,7 +94,7 @@ class TimerPage(QWidget):
         self._current_answer_image_path: str | None = None
         self._current_flashcard_origin_path: str | None = None
         self._flashcard_origin_clickable = False
-        self._folder_name: str = "No folders selected"
+        self._folder_name: str = "No sets selected"
         self._card_count: int = 0
         self._session_progress_text: str = ""
         self._queue_shuffle_available = False
@@ -279,7 +279,7 @@ class TimerPage(QWidget):
         layout.addWidget(self.content_stack)
 
         self.folder_context_label = QLabel(
-            f"Folder: {self._folder_name} ({format_card_count(self._card_count)})"
+            f"{self._folder_name} ({format_card_count(self._card_count)})"
         )
         self.folder_context_label.setAlignment(Qt.AlignCenter)
         folder_context_font = QFont(self.folder_context_label.font())
@@ -1242,7 +1242,7 @@ class TimerPage(QWidget):
             self.folder_context_label.setText(self._session_progress_text)
         else:
             self.folder_context_label.setText(
-                f"Folder: {self._folder_name} ({format_card_count(self._card_count)})"
+                f"{self._folder_name} ({format_card_count(self._card_count)})"
             )
 
     def set_flashcard_controls_active(
